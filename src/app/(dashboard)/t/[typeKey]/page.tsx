@@ -50,9 +50,9 @@ export default function TypeRecordsPage() {
         <p className="text-gray-600">
           No type called <span className="font-mono">{typeKey}</span> yet.
         </p>
-        <Link href="/build">
-          <Button>Define a type</Button>
-        </Link>
+        <p className="text-sm text-gray-500">
+          Types are defined in the Foundry console, then appear here automatically.
+        </p>
       </div>
     );
   }
