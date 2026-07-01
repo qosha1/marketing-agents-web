@@ -1,0 +1,14 @@
+{
+  "name": "foundry-tenant-ui-web-template",
+  "description": "Canonical Foundry tenant app-UI template. The Foundry orchestrator forks this into the customer's designated git repo on foundry creation, substitutes the markers below, and hands it over — the customer owns + edits it. All heavy logic (auth, UI kit, tenant API client) comes from the @startsimpli/* npm packages, so it works the moment it's forked.",
+  "substitutions": {
+    "__FOUNDRY_SLUG__": "tenant slug — also the central-auth ?app= tag and NEXT_PUBLIC_APP_SLUG",
+    "__FOUNDRY_NAME__": "human-facing app name (chrome + <title>)",
+    "__FOUNDRY_TAGLINE__": "one-line app tagline for the home"
+  },
+  "substituteIn": ["src/foundry.config.ts", "package.json"],
+  "deployEnv": {
+    "NEXT_PUBLIC_APP_SLUG": "__FOUNDRY_SLUG__",
+    "DJANGO_API_URL": "https://__FOUNDRY_SLUG__.ai.startsimpli.com"
+  }
+}

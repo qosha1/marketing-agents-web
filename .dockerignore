@@ -1,0 +1,15 @@
+# Keep local-only ENV files OUT of the prod image. .env.local holds the local
+# single-origin-gateway values (NEXT_PUBLIC_AUTH_HOST=/auth,
+# DJANGO_API_URL=localhost) which `next build` would otherwise bake into the
+# production bundle — breaking the central-auth redirect (it pointed at /auth on
+# the tenant domain instead of auth.startsimpli.com).
+#
+# node_modules is EXCLUDED: the @startsimpli/* are published now, so the image is
+# built reproducibly from the lockfile (Dockerfile step `pnpm install
+# --frozen-lockfile`). Copying the local node_modules in is fragile — if it's
+# linked to the monorepo's shared pnpm store (e.g. after a workspace `pnpm add`),
+# the symlinks dangle in the image and `next build` fails to resolve its own bin.
+node_modules
+.env.local
+.env*.local
+.git
