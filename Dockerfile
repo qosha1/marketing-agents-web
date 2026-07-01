@@ -18,9 +18,11 @@
 # -----------------------------------------------------------------------------
 FROM node:20-slim AS build
 WORKDIR /app
-RUN corepack enable && corepack prepare pnpm@9 --activate
-COPY package.json pnpm-lock.yaml ./
-RUN pnpm install --frozen-lockfile
+RUN corepack enable && corepack prepare pnpm@10.33.1 --activate
+COPY package.json ./
+# --no-frozen-lockfile so a fresh fork (no committed pnpm-lock.yaml) still builds;
+# a lockfile, when present, is honored + updated in place.
+RUN pnpm install --no-frozen-lockfile
 COPY . .
 # Empty default => runtime hostname derivation (resolveAppSlug). Override only
 # for a standalone single-tenant build (--build-arg NEXT_PUBLIC_APP_SLUG=<slug>).
@@ -32,7 +34,7 @@ RUN pnpm build
 FROM node:20-slim AS run
 WORKDIR /app
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1
-RUN corepack enable && corepack prepare pnpm@9 --activate
+RUN corepack enable && corepack prepare pnpm@10.33.1 --activate
 COPY --from=build /app/.next ./.next
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/package.json ./package.json
