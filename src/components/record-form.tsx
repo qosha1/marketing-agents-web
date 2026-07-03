@@ -2,29 +2,25 @@
 
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import {
-  Button,
-  Input,
-  Label,
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  notify,
-} from '@startsimpli/ui';
+import { Button, Input, Label, notify } from '@startsimpli/ui';
 import { AttributeField } from './attribute-field';
 import { createEntity, type EntityTypeDef } from '@/lib/foundry-api';
 
 interface RecordFormProps {
   type: EntityTypeDef;
+  /** Called after a successful create — e.g. to close the dialog it lives in. */
+  onSuccess?: () => void;
+  /** Called when the user cancels (renders a Cancel button when provided). */
+  onCancel?: () => void;
 }
 
 /**
  * Metadata-driven create form: renders one AttributeField per declared
- * attribute, plus the always-present record Name. Coerces the JSON field and
- * posts to /entities/.
+ * attribute, plus the always-present record Name. Bare (no Card) so it drops
+ * cleanly into a dialog; the tall body scrolls so a many-field type never
+ * overflows the viewport.
  */
-export function RecordForm({ type }: RecordFormProps) {
+export function RecordForm({ type, onSuccess, onCancel }: RecordFormProps) {
   const queryClient = useQueryClient();
   const [name, setName] = useState('');
   const [values, setValues] = useState<Record<string, unknown>>({});
@@ -65,6 +61,7 @@ export function RecordForm({ type }: RecordFormProps) {
       notify.success('Record added.');
       setName('');
       setValues({});
+      onSuccess?.();
     } catch (err) {
       notify.error(err instanceof Error ? err.message : 'Could not add the record.');
     } finally {
@@ -73,40 +70,42 @@ export function RecordForm({ type }: RecordFormProps) {
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Add a {type.label}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-1.5">
-            <Label htmlFor="record-name">
-              Name<span className="ml-1 text-error-600">*</span>
-            </Label>
-            <Input
-              id="record-name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder={`New ${type.label.toLowerCase()}`}
-            />
-          </div>
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <h2 className="text-lg font-semibold text-gray-900">New {type.label.toLowerCase()}</h2>
 
-          {type.attributes.map((attr) => (
-            <AttributeField
-              key={attr.id}
-              attr={attr}
-              value={values[attr.name]}
-              onChange={(v) => setValue(attr.name, v)}
-            />
-          ))}
+      <div className="max-h-[60vh] space-y-4 overflow-y-auto pr-1">
+        <div className="space-y-1.5">
+          <Label htmlFor="record-name">
+            Name<span className="ml-1 text-error-600">*</span>
+          </Label>
+          <Input
+            id="record-name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder={`New ${type.label.toLowerCase()}`}
+          />
+        </div>
 
-          <div className="flex justify-end">
-            <Button type="submit" disabled={saving}>
-              {saving ? 'Adding…' : 'Add record'}
-            </Button>
-          </div>
-        </form>
-      </CardContent>
-    </Card>
+        {type.attributes.map((attr) => (
+          <AttributeField
+            key={attr.id}
+            attr={attr}
+            value={values[attr.name]}
+            onChange={(v) => setValue(attr.name, v)}
+          />
+        ))}
+      </div>
+
+      <div className="flex justify-end gap-2 border-t border-gray-100 pt-4">
+        {onCancel ? (
+          <Button type="button" variant="outline" onClick={onCancel} disabled={saving}>
+            Cancel
+          </Button>
+        ) : null}
+        <Button type="submit" disabled={saving}>
+          {saving ? 'Adding…' : `Add ${type.label.toLowerCase()}`}
+        </Button>
+      </div>
+    </form>
   );
 }

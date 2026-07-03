@@ -4,7 +4,8 @@ import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { UnifiedTable, Button } from '@startsimpli/ui';
+import { Plus } from 'lucide-react';
+import { UnifiedTable, Button, BaseDialog } from '@startsimpli/ui';
 import { listTypes, listEntities, type EntityRecord } from '@/lib/foundry-api';
 import { RecordForm } from '@/components/record-form';
 import { buildRecordColumns } from '@/components/record-columns';
@@ -16,6 +17,7 @@ export default function TypeRecordsPage() {
   const params = useParams<{ typeKey: string }>();
   const typeKey = params.typeKey;
   const [page, setPage] = useState(1);
+  const [addOpen, setAddOpen] = useState(false);
 
   // The schema/types endpoint returns every declared type with nested
   // attributes; pick out the one this route is for.
@@ -57,43 +59,51 @@ export default function TypeRecordsPage() {
     );
   }
 
+  // Full-width table; the create form lives behind the "Add" button (a dialog)
+  // instead of permanently occupying half the screen.
   return (
-    <div className="grid gap-8 lg:grid-cols-[360px_1fr]">
-      <div>
-        <RecordForm type={type} />
-      </div>
-
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-bold text-gray-900">{type.label}</h1>
-          <div className="flex items-center gap-3">
-            <span className="text-sm text-gray-500">{totalCount} total</span>
-            {hasStatusBoard ? (
-              <Link href={`/board/${encodeURIComponent(typeKey)}`}>
-                <Button variant="outline" size="sm">
-                  Board view
-                </Button>
-              </Link>
-            ) : null}
-          </div>
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-4">
+        <h1 className="text-2xl font-bold text-gray-900">{type.label}</h1>
+        <div className="flex items-center gap-3">
+          <span className="text-sm text-gray-500">{totalCount} total</span>
+          {hasStatusBoard ? (
+            <Link href={`/board/${encodeURIComponent(typeKey)}`}>
+              <Button variant="outline" size="sm">
+                Board view
+              </Button>
+            </Link>
+          ) : null}
+          <Button size="sm" onClick={() => setAddOpen(true)}>
+            <Plus className="mr-1.5 h-4 w-4" />
+            Add {type.label.toLowerCase()}
+          </Button>
         </div>
-
-        <UnifiedTable<EntityRecord>
-          tableId={`records-${typeKey}`}
-          data={records}
-          columns={columns}
-          getRowId={(row) => String(row.id)}
-          loading={recordsQuery.isLoading}
-          pagination={{
-            enabled: true,
-            serverSide: true,
-            pageSize: PAGE_SIZE,
-            totalCount,
-            currentPage: page,
-            onPageChange: setPage,
-          }}
-        />
       </div>
+
+      <UnifiedTable<EntityRecord>
+        tableId={`records-${typeKey}`}
+        data={records}
+        columns={columns}
+        getRowId={(row) => String(row.id)}
+        loading={recordsQuery.isLoading}
+        pagination={{
+          enabled: true,
+          serverSide: true,
+          pageSize: PAGE_SIZE,
+          totalCount,
+          currentPage: page,
+          onPageChange: setPage,
+        }}
+      />
+
+      <BaseDialog open={addOpen} onOpenChange={setAddOpen} size="lg">
+        <RecordForm
+          type={type}
+          onSuccess={() => setAddOpen(false)}
+          onCancel={() => setAddOpen(false)}
+        />
+      </BaseDialog>
     </div>
   );
 }

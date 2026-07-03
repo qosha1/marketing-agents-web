@@ -69,7 +69,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     <div className="flex min-h-screen bg-gray-50">
       <AppSidebar />
       <main className="flex-1 overflow-x-hidden">
-        <div className="mx-auto w-full max-w-6xl px-6 py-8">{children}</div>
+        {/* Left-aligned (not mx-auto) so content sits right after the sidebar
+            instead of floating centered with a big gap on wide screens. */}
+        <div className="w-full max-w-7xl px-8 py-8">{children}</div>
       </main>
     </div>
   );
