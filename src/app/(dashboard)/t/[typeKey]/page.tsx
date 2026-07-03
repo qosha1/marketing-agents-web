@@ -39,6 +39,21 @@ export default function TypeRecordsPage() {
 
   const hasStatusBoard = useMemo(() => !!pickStatusAttr(type), [type]);
 
+  // Column picker (built into UnifiedTable): a type with many attributes would
+  // otherwise overflow the page, so show a compact default (Name + the first few
+  // fields) and let the user reveal/hide the rest from the "Columns" menu. Choice
+  // persists per type. Name always stays.
+  const columnVisibility = useMemo(() => {
+    const DEFAULT_FIELDS = 4;
+    const attrIds = (type?.attributes ?? []).map((a) => a.name);
+    return {
+      enabled: true,
+      alwaysVisible: ['name'],
+      defaultVisible: ['name', ...attrIds.slice(0, DEFAULT_FIELDS)],
+      persistKey: `records-${typeKey}`,
+    };
+  }, [type?.attributes, typeKey]);
+
   const records = recordsQuery.data?.results ?? [];
   const totalCount = recordsQuery.data?.count ?? 0;
 
@@ -87,6 +102,7 @@ export default function TypeRecordsPage() {
         columns={columns}
         getRowId={(row) => String(row.id)}
         loading={recordsQuery.isLoading}
+        columnVisibility={columnVisibility}
         pagination={{
           enabled: true,
           serverSide: true,
