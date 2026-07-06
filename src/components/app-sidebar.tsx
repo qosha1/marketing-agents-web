@@ -10,7 +10,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { Home, LayoutGrid, Table, LogOut } from 'lucide-react';
+import { ListChecks, LayoutGrid, Table, LogOut } from 'lucide-react';
 import { useAuth } from '@startsimpli/auth';
 
 import { signinUrl } from '@/lib/api';
@@ -37,7 +37,7 @@ export function AppSidebar() {
       </div>
 
       <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
-        <NavLink href="/" label="Home" icon={Home} active={homeActive} />
+        <NavLink href="/" label="Review" icon={ListChecks} active={homeActive} />
 
         {types.length > 0 && (
           <p className="px-3 pb-1 pt-4 text-xs font-semibold uppercase tracking-wide text-gray-400">
@@ -92,7 +92,7 @@ function NavLink({
 }: {
   href: string;
   label: string;
-  icon: typeof Home;
+  icon: typeof ListChecks;
   active: boolean;
 }) {
   return (
