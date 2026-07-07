@@ -14,3 +14,5 @@ export const FOUNDRY = {
   /** Short tagline for the app home. */
   tagline: 'AI marketing content engine',
 } as const;
+
+// startsim-768w.16.1: apply-PR mechanism verified end-to-end (Foundry app builder opens a reviewable PR on the fork).
