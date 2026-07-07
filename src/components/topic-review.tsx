@@ -23,7 +23,7 @@ import {
   SelectValue,
   notify,
 } from '@startsimpli/ui';
-import { ChevronDown, ChevronRight, ThumbsUp, ThumbsDown, PencilLine, ExternalLink } from 'lucide-react';
+import { ChevronDown, ChevronRight, ThumbsUp, ThumbsDown, PencilLine, ExternalLink, AlertTriangle, ShieldCheck } from 'lucide-react';
 
 import { listAllEntities, listTypes, updateEntity, type EntityRecord } from '@/lib/foundry-api';
 import { readData, toCamelKey } from '@/lib/board';
@@ -45,6 +45,22 @@ function rankOf(r: EntityRecord): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+// The markets we publish for (locks the box — no more "Dubai" vs "Dubai, UAE").
+// Edit this list as the coverage changes; the current value is always kept as an
+// option even if it's off-list.
+const MARKETS = [
+  'GCC-wide', 'MENA', 'Saudi Arabia', 'UAE', 'Abu Dhabi (UAE)', 'Dubai (UAE)',
+  'Qatar', 'Bahrain', 'Kuwait', 'Oman', 'China',
+];
+
+function hostOf(url: string): string {
+  try {
+    return new URL(/^https?:\/\//.test(url) ? url : `https://${url}`).hostname.replace(/^www\./, '');
+  } catch {
+    return '';
+  }
+}
+
 export function TopicReviewWorkspace() {
   const qc = useQueryClient();
   const typesQ = useQuery({ queryKey: ['schema-types'], queryFn: () => listTypes() });
@@ -55,6 +71,25 @@ export function TopicReviewWorkspace() {
     enabled: !!topicType,
   });
   const records = recordsQ.data ?? [];
+
+  // Approved-source whitelist -> domain→tier, so a topic's sources can be badged
+  // by trust tier (tier 1 = trusted outlet; unlisted = a flag to check). This is
+  // the "publish facts, not op-eds" signal from the call.
+  const sourcesQ = useQuery({
+    queryKey: ['entities', 'source', 'all'],
+    queryFn: () => listAllEntities('source'),
+    enabled: !!topicType,
+  });
+  const tierByDomain = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const s of sourcesQ.data ?? []) {
+      const d = String(readData(s.data, 'domain') ?? '').replace(/^www\./, '').toLowerCase();
+      const t = Number(readData(s.data, 'tier'));
+      if (d) m.set(d, Number.isFinite(t) ? t : 0);
+    }
+    return m;
+  }, [sourcesQ.data]);
+
   const [selected, setSelected] = useState<EntityRecord | null>(null);
   const [showRejected, setShowRejected] = useState(false);
   const [showWritten, setShowWritten] = useState(false);
@@ -112,7 +147,7 @@ export function TopicReviewWorkspace() {
       ) : (
         <ol className="space-y-3">
           {active.map((r, i) => (
-            <TopicRow key={String(r.id)} rank={i + 1} record={r} onOpen={() => setSelected(r)} onPatch={patch} />
+            <TopicRow key={String(r.id)} rank={i + 1} record={r} onOpen={() => setSelected(r)} onPatch={patch} tierByDomain={tierByDomain} />
           ))}
         </ol>
       )}
@@ -126,7 +161,7 @@ export function TopicReviewWorkspace() {
         >
           <ol className="space-y-3">
             {written.map((r) => (
-              <TopicRow key={String(r.id)} record={r} onOpen={() => setSelected(r)} onPatch={patch} muted />
+              <TopicRow key={String(r.id)} record={r} onOpen={() => setSelected(r)} onPatch={patch} tierByDomain={tierByDomain} muted />
             ))}
           </ol>
         </Section>
@@ -141,7 +176,7 @@ export function TopicReviewWorkspace() {
         >
           <ol className="space-y-3">
             {rejected.map((r) => (
-              <TopicRow key={String(r.id)} record={r} onOpen={() => setSelected(r)} onPatch={patch} muted />
+              <TopicRow key={String(r.id)} record={r} onOpen={() => setSelected(r)} onPatch={patch} tierByDomain={tierByDomain} muted />
             ))}
           </ol>
         </Section>
@@ -190,12 +225,14 @@ function TopicRow({
   rank,
   onOpen,
   onPatch,
+  tierByDomain,
   muted,
 }: {
   record: EntityRecord;
   rank?: number;
   onOpen: () => void;
   onPatch: (r: EntityRecord, changes: Record<string, unknown>) => Promise<void>;
+  tierByDomain: Map<string, number>;
   muted?: boolean;
 }) {
   const title = field(record, 'title') || record.name || `#${record.id}`;
@@ -240,13 +277,29 @@ function TopicRow({
           {angle && <p className="mt-1 line-clamp-2 text-sm text-gray-600">{angle}</p>}
 
           <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
-            {market && <span className="rounded-full bg-gray-100 px-2 py-0.5 text-gray-600">{market}</span>}
+            {/* Market — a locked dropdown (kills the "Dubai" vs "Dubai, UAE" drift). */}
+            <Select value={market || undefined} onValueChange={(val) => onPatch(record, { market: val })}>
+              <SelectTrigger className="h-7 w-auto min-w-[8rem] gap-1 text-xs">
+                <SelectValue placeholder="Set market" />
+              </SelectTrigger>
+              <SelectContent>
+                {[...new Set([...(market ? [market] : []), ...MARKETS])].map((m) => (
+                  <SelectItem key={m} value={m}>
+                    {m}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             {contentType && (
               <span className="rounded-full bg-gray-100 px-2 py-0.5 text-gray-600">
                 {contentType.replace(/_/g, ' ')}
               </span>
             )}
           </div>
+
+          {/* Sources — the fact-check surface. Each source is clickable + badged by
+              trust tier from the approved-source whitelist. No sources = a flag. */}
+          <TopicSources record={record} tierByDomain={tierByDomain} />
 
           {/* Triage controls */}
           <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -313,5 +366,57 @@ function TopicRow({
         </div>
       </div>
     </li>
+  );
+}
+
+function TopicSources({
+  record,
+  tierByDomain,
+}: {
+  record: EntityRecord;
+  tierByDomain: Map<string, number>;
+}) {
+  const sources = [1, 2, 3].map((i) => field(record, `source_${i}`)).filter(Boolean);
+  if (sources.length === 0) {
+    return (
+      <p className="mt-2 flex items-center gap-1 text-xs font-medium text-amber-600">
+        <AlertTriangle className="h-3.5 w-3.5" /> No sources — needs verification
+      </p>
+    );
+  }
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-1.5">
+      <span className="text-xs text-gray-400">Sources:</span>
+      {sources.map((s, i) => {
+        const host = hostOf(s);
+        const tier = host ? tierByDomain.get(host.toLowerCase()) : undefined;
+        const href = /^https?:\/\//.test(s) ? s : host ? `https://${s}` : undefined;
+        const chip = (
+          <span className="inline-flex items-center gap-1 rounded-full border border-border bg-white px-2 py-0.5 text-xs text-gray-700">
+            {tier === 1 && <ShieldCheck className="h-3 w-3 text-emerald-600" />}
+            <span className="max-w-[12rem] truncate">{host || s}</span>
+            {tier != null ? (
+              <span
+                className={`rounded px-1 text-[10px] font-semibold ${
+                  tier === 1 ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'
+                }`}
+              >
+                T{tier}
+              </span>
+            ) : (
+              <span className="rounded bg-amber-100 px-1 text-[10px] font-semibold text-amber-700">unlisted</span>
+            )}
+            {href && <ExternalLink className="h-3 w-3 text-gray-400" />}
+          </span>
+        );
+        return href ? (
+          <a key={i} href={href} target="_blank" rel="noreferrer" className="hover:opacity-80">
+            {chip}
+          </a>
+        ) : (
+          <span key={i}>{chip}</span>
+        );
+      })}
+    </div>
   );
 }
