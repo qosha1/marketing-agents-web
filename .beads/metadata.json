@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "marketing_agents",
+  "project_id": "b8ed2cb0-0130-416b-af12-af1cea3e7d49"
+}
