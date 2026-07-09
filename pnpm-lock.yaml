@@ -21,7 +21,7 @@ importers:
         specifier: ^0.4.14
         version: 0.4.14
       '@startsimpli/ui':
-        specifier: ^0.4.43
+        specifier: 0.4.43
         version: 0.4.43(@startsimpli/api@0.5.37(@tanstack/react-query@5.101.2(react@19.2.5))(next@16.1.6(@babel/core@7.29.7)(react-dom@19.2.5(react@19.2.5))(react@19.2.5))(react@19.2.5))(@startsimpli/auth@0.4.29(next@16.1.6(@babel/core@7.29.7)(react-dom@19.2.5(react@19.2.5))(react@19.2.5))(react@19.2.5))(@tanstack/react-query@5.101.2(react@19.2.5))(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(next@16.1.6(@babel/core@7.29.7)(react-dom@19.2.5(react@19.2.5))(react@19.2.5))(react-dom@19.2.5(react@19.2.5))(react@19.2.5)(tailwindcss@4.3.2)
       '@tanstack/react-query':
         specifier: ^5.62.0
