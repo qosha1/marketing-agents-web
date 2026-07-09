@@ -1,19 +1,20 @@
 'use client';
 
 /**
- * Generic, schema-driven status board (bd ogmc-9ms.1.7). Lays out any entity
- * type that has an enum attribute (preferring "status") as kanban lanes and lets
- * you move a record between lanes inline — no OGMC specifics. For OGMC this is
- * the Topics board (suggested → ready / rejected / written), replacing the Google
- * Sheet review loop; for any other tenant it's a board over their own status
- * field. Inline status change PATCHes the full data blob (the backend PATCH
- * replaces data, so we always send {...record.data, [status]: value}).
+ * Generic, schema-driven status board (bd ogmc-9ms.1.7; drag-and-drop startsim-768w.17.5).
+ * Lays out any entity type that has an enum attribute (preferring "status") as kanban
+ * lanes. Move a record by DRAGGING it between lanes — the drag + keyboard-drag mechanics
+ * live entirely in @startsimpli/ui (KanbanBoard); this component only supplies the data
+ * and persists the move (the per-card status select stays as a fallback). Either path
+ * PATCHes the full data blob (the backend PATCH replaces data, so we always send
+ * {...record.data, [status]: value}), optimistically moving the card and rolling back on error.
  */
 import { useMemo } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   KanbanBoard,
   type KanbanColumnConfig,
+  type KanbanMove,
   notify,
   Select,
   SelectContent,
@@ -58,14 +59,30 @@ export function EntityBoard({ type, records, onCardClick }: Props) {
     .filter((a) => a.name !== statusName && a.dataType !== 'json' && a.dataType !== 'longtext')
     .slice(0, 3);
   const kanbanCols: KanbanColumnConfig[] = columns.map((c) => ({ id: c.id, label: c.label }));
+  const boardKey = ['entities', type.key, 'all'];
 
-  async function move(record: EntityRecord, newStatus: string) {
+  async function applyStatus(record: EntityRecord, newStatus: string) {
+    if (String(readData(record.data, statusName) ?? '') === newStatus) return;
+    const prev = qc.getQueryData<EntityRecord[]>(boardKey);
+    // optimistic: move the card into its new lane immediately, roll back on failure
+    qc.setQueryData<EntityRecord[]>(boardKey, (old) =>
+      old?.map((r) =>
+        r.id === record.id ? { ...r, data: { ...r.data, [statusCamel]: newStatus } } : r,
+      ),
+    );
     try {
       await updateEntity(record.id, { data: { ...record.data, [statusCamel]: newStatus } });
       await qc.invalidateQueries({ queryKey: ['entities', type.key] });
     } catch (err) {
+      if (prev) qc.setQueryData(boardKey, prev);
       notify.error(err instanceof Error ? err.message : 'Could not update status.');
     }
+  }
+
+  function handleMove(move: KanbanMove) {
+    if (move.toColumnId === UNSET_COLUMN.id) return; // dragging into "Unset" is a no-op
+    const record = records.find((r) => String(r.id) === move.cardId);
+    if (record) void applyStatus(record, move.toColumnId);
   }
 
   return (
@@ -74,6 +91,8 @@ export function EntityBoard({ type, records, onCardClick }: Props) {
       items={items}
       columnWidth={300}
       emptyColumnMessage="—"
+      getCardId={(record) => String(record.id)}
+      onCardMove={handleMove}
       renderColumnHeader={(col, colItems) => (
         <div className="flex items-center justify-between border-b px-3 py-2">
           <span className="text-sm font-medium capitalize">
@@ -85,7 +104,7 @@ export function EntityBoard({ type, records, onCardClick }: Props) {
         </div>
       )}
       renderCard={(record) => (
-        <div className="m-2 rounded-md border bg-white p-3 shadow-sm">
+        <div className="m-2 cursor-grab rounded-md border bg-white p-3 shadow-sm active:cursor-grabbing">
           <button
             type="button"
             className="block w-full text-left text-sm font-medium leading-snug hover:underline"
@@ -105,10 +124,15 @@ export function EntityBoard({ type, records, onCardClick }: Props) {
               );
             })}
           </dl>
-          <div className="mt-2" onClick={(e) => e.stopPropagation()}>
+          {/* stop pointerdown so interacting with the select never starts a drag */}
+          <div
+            className="mt-2"
+            onClick={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
             <Select
               value={String(readData(record.data, statusName) ?? '')}
-              onValueChange={(val) => move(record, val)}
+              onValueChange={(val) => applyStatus(record, val)}
             >
               <SelectTrigger className="h-7 text-xs">
                 <SelectValue placeholder="Set status…" />
