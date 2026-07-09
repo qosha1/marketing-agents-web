@@ -10,10 +10,9 @@
  */
 import { useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { Button, Input, Label, notify } from '@startsimpli/ui';
+import { Button, Input, Label, notify, RecordDetail, type RecordField } from '@startsimpli/ui';
 
 import { AttributeField } from './attribute-field';
-import { RecordDetail, type RecordField } from './record-detail';
 import { readData, toCamelKey } from '@/lib/board';
 import { updateEntity, type EntityRecord, type EntityTypeDef } from '@/lib/foundry-api';
 
