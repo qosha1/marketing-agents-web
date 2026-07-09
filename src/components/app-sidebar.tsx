@@ -10,7 +10,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { ListChecks, LayoutGrid, Table, LogOut } from 'lucide-react';
+import { ListChecks, LayoutGrid, LayoutDashboard, Table, LogOut } from 'lucide-react';
 import { useAuth } from '@startsimpli/auth';
 
 import { signinUrl } from '@/lib/api';
@@ -24,7 +24,8 @@ export function AppSidebar() {
   const typesQuery = useQuery({ queryKey: ['schema-types'], queryFn: () => listTypes() });
   const types = typesQuery.data?.results ?? [];
 
-  const homeActive = pathname === '/';
+  const dashboardActive = pathname === '/';
+  const reviewActive = pathname === '/review' || pathname.startsWith('/review/');
   const brand = FOUNDRY.name && !FOUNDRY.name.startsWith('__') ? FOUNDRY.name : FOUNDRY.slug;
 
   return (
@@ -37,7 +38,8 @@ export function AppSidebar() {
       </div>
 
       <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
-        <NavLink href="/" label="Review" icon={ListChecks} active={homeActive} />
+        <NavLink href="/" label="Dashboard" icon={LayoutDashboard} active={dashboardActive} />
+        <NavLink href="/review" label="Review" icon={ListChecks} active={reviewActive} />
 
         {types.length > 0 && (
           <p className="px-3 pb-1 pt-4 text-xs font-semibold uppercase tracking-wide text-gray-400">

@@ -1,13 +1,12 @@
 'use client';
 
 /**
- * Marketing Agents home = the OGMC topic review workspace (the "live-ranked list"
- * from the team call). Reviewing + ranking topics is the daily job, so it's the
- * landing surface. Other sections (News Item, Draft, Client, Approved Source)
- * remain in the sidebar.
+ * Home = the Marketing Agents dashboard: an at-a-glance overview of source
+ * health and article collection metrics (docs/foundry/build-spec.md). The topic
+ * review workspace still lives one click away at /review.
  */
-import { TopicReviewWorkspace } from '@/components/topic-review';
+import { MarketingDashboard } from '@/components/marketing-dashboard';
 
 export default function HomePage() {
-  return <TopicReviewWorkspace />;
+  return <MarketingDashboard />;
 }
