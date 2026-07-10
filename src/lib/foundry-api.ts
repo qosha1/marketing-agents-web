@@ -13,6 +13,8 @@
  * can round-trip imperfectly. Keep attribute `name`s simple (snake_case), or
  * lift to a transformKeys:false client if richer keys are needed later.
  */
+import type { CollectionClient } from '@startsimpli/ui/collection';
+
 import { api } from './api';
 
 // DRF PageNumberPagination envelope (matches UnifiedTable's page-number model).
@@ -205,6 +207,13 @@ export async function listAllEntities(type: string, maxPages = 20): Promise<Enti
   }
   return all;
 }
+
+/**
+ * The tenant-API surface the shared @startsimpli/ui/collection review workspaces
+ * consume — this app's authed same-origin client, injected so the workspaces stay
+ * app-agnostic (the ~10-LOC wrappers in page.tsx / drafts/page.tsx pass it in).
+ */
+export const collectionClient: CollectionClient = { listTypes, listAllEntities, updateEntity };
 
 // ---- identity + org directory (proxied from central by the backend, R9) ----
 

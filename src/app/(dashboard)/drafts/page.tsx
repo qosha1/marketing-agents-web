@@ -1,12 +1,14 @@
 'use client';
 
 /**
- * Draft review = the "compare candidates, pick one, review it, approve" workspace
- * (bd startsim-768w.18.5 / .18.6). Sits next to the topic Review home; the writer
- * fills it once a topic goes "ready".
+ * Draft review = compare candidates, pick one, review it, mark it ready to post.
+ * The workspace is shared (@startsimpli/ui/collection); this wrapper just injects
+ * the tenant client.
  */
-import { DraftReviewWorkspace } from '@/components/draft-review';
+import { DraftReviewWorkspace } from '@startsimpli/ui/collection';
+
+import { collectionClient } from '@/lib/foundry-api';
 
 export default function DraftsPage() {
-  return <DraftReviewWorkspace />;
+  return <DraftReviewWorkspace client={collectionClient} />;
 }
