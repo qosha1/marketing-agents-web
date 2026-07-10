@@ -85,6 +85,17 @@ describe('groupDrafts', () => {
     expect(groups[1].chosen).not.toBeNull();
   });
 
+  it('prefers an explicit topic_ref over the source heuristic', () => {
+    // Two candidates share a topic_ref but have DIFFERENT sources — topic_ref wins.
+    const a = rec('a', 'A', { candidate_index: 1, topic_ref: 't-42', topic_title: 'Parent topic', sources: 'x (2026-01-01) https://a.com/one' });
+    const b = rec('b', 'B', { candidate_index: 2, topic_ref: 't-42', topic_title: 'Parent topic', sources: 'y (2026-01-01) https://b.com/two' });
+    expect(groupKeyOf(a)).toBe('ref:t-42');
+    expect(groupKeyOf(a)).toBe(groupKeyOf(b));
+    const g = groupDrafts([a, b]);
+    expect(g).toHaveLength(1);
+    expect(g[0].label).toBe('Parent topic'); // topic_title becomes the group label
+  });
+
   it('groups by name suffix when there is no source', () => {
     const noSrc = [1, 2].map((i) => rec(`c${i}`, `Candidate ${i} — UAE–China trade brief`, { candidate_index: i }));
     const g = groupDrafts(noSrc);

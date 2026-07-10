@@ -74,10 +74,14 @@ export function normUrl(u: string): string {
 }
 
 /**
- * The clustering key for a draft: normalized primary source URL if present, else
- * the shared "Candidate N — <story>" suffix, else story_title/name, else id.
+ * The clustering key for a draft. Prefer an explicit topic_ref (stamped by the
+ * n8n writer once it threads the parent topic through) — that's exact. Older
+ * drafts have none, so fall back to the normalized primary source URL, then the
+ * shared "Candidate N — <story>" suffix, then id.
  */
 export function groupKeyOf(r: EntityRecord): string {
+  const topicRef = str(readData(r.data, 'topic_ref'));
+  if (topicRef) return `ref:${topicRef}`;
   const sources = parseSources(readData(r.data, 'sources'));
   if (sources.length > 0) return `src:${normUrl(sources[0].url)}`;
   const name = str(r.name) || str(readData(r.data, 'story_title'));
@@ -128,9 +132,12 @@ export function groupDrafts(records: EntityRecord[]): DraftGroup[] {
     const chosen = cands.find(isChosen) ?? null;
     const head = chosen ?? cands[0];
     const written = cands.some((c) => str(readData(c.data, 'status')) === 'written');
+    // Prefer the parent topic title (stamped by the writer) for the group label;
+    // fall back to the head candidate's own headline.
+    const topicTitle = str(readData(head.data, 'topic_title'));
     groups.push({
       key,
-      label: candidateTitle(head),
+      label: topicTitle || candidateTitle(head),
       contentType: str(readData(head.data, 'content_type')),
       candidates: cands,
       chosen,
