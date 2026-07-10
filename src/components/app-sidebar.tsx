@@ -10,7 +10,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { ListChecks, LayoutGrid, Table, LogOut } from 'lucide-react';
+import { ListChecks, LayoutGrid, Table, LogOut, FileText } from 'lucide-react';
 import { useAuth } from '@startsimpli/auth';
 
 import { signinUrl } from '@/lib/api';
@@ -38,6 +38,7 @@ export function AppSidebar() {
 
       <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
         <NavLink href="/" label="Review" icon={ListChecks} active={homeActive} />
+        <NavLink href="/drafts" label="Drafts" icon={FileText} active={pathname === '/drafts'} />
 
         {types.length > 0 && (
           <p className="px-3 pb-1 pt-4 text-xs font-semibold uppercase tracking-wide text-gray-400">
@@ -45,6 +46,10 @@ export function AppSidebar() {
           </p>
         )}
         {types.map((t) => {
+          // The "draft" type gets the bespoke candidate-compare review at /drafts
+          // (the top-level Drafts item), so skip its generic board here to avoid a
+          // duplicate, dead-end entry.
+          if (t.key === 'draft') return null;
           const href = typeRoute(t);
           const active = pathname === href || pathname.startsWith(`${href}/`);
           return (
