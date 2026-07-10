@@ -112,13 +112,14 @@ export interface DraftGroup {
   contentType: string;
   candidates: EntityRecord[];
   chosen: EntityRecord | null;
-  written: boolean;
+  /** A candidate has been approved (status='ready') — the final is ready to post. */
+  ready: boolean;
 }
 
 /**
  * Cluster draft records into candidate sets (one per story), each sorted by
  * candidate_index. Groups are ordered so unresolved stories (nothing picked)
- * float to the top — that's the work to do — and fully-written ones sink.
+ * float to the top — that's the work to do — and ready-to-post ones sink.
  */
 export function groupDrafts(records: EntityRecord[]): DraftGroup[] {
   const byKey = new Map<string, EntityRecord[]>();
@@ -131,7 +132,7 @@ export function groupDrafts(records: EntityRecord[]): DraftGroup[] {
     cands.sort((a, b) => candidateIndex(a) - candidateIndex(b));
     const chosen = cands.find(isChosen) ?? null;
     const head = chosen ?? cands[0];
-    const written = cands.some((c) => str(readData(c.data, 'status')) === 'written');
+    const ready = cands.some((c) => str(readData(c.data, 'status')) === 'ready');
     // Prefer the parent topic title (stamped by the writer) for the group label;
     // fall back to the head candidate's own headline.
     const topicTitle = str(readData(head.data, 'topic_title'));
@@ -141,11 +142,11 @@ export function groupDrafts(records: EntityRecord[]): DraftGroup[] {
       contentType: str(readData(head.data, 'content_type')),
       candidates: cands,
       chosen,
-      written,
+      ready,
     });
   }
-  // Unresolved first (nothing chosen), then chosen-but-not-written, then written.
-  const rank = (g: DraftGroup) => (g.written ? 2 : g.chosen ? 1 : 0);
+  // Unresolved first (nothing picked), then picked-not-approved, then ready-to-post.
+  const rank = (g: DraftGroup) => (g.ready ? 2 : g.chosen ? 1 : 0);
   return groups.sort((a, b) => rank(a) - rank(b) || a.label.localeCompare(b.label));
 }
 

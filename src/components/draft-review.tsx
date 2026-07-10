@@ -7,8 +7,8 @@
  * The n8n writer emits N candidate drafts per ready topic. This is where the team
  * COMPARES a story's candidates side by side, PICKS the one to publish, reads the
  * full draft (blog + LinkedIn + SEO), and checks it against the isolated Content
- * Judge + the auto-checks (word count / hype / approved sources) before approving
- * it to "written".
+ * Judge + the auto-checks (word count / hype / approved sources) before marking
+ * the chosen final "ready to post" (posting stays a manual step).
  *
  * Drafts carry no stored parent-topic id, so candidates are clustered by their
  * shared primary source (see lib/drafts). All writes go through the tenant API;
@@ -103,8 +103,8 @@ export function DraftReviewWorkspace() {
             status:
               String(c.id) === String(cand.id)
                 ? 'selected'
-                : field(c, 'status') === 'written'
-                  ? 'written'
+                : field(c, 'status') === 'ready'
+                  ? 'ready'
                   : '',
           }),
         ),
@@ -117,13 +117,15 @@ export function DraftReviewWorkspace() {
     }
   }
 
-  async function approve(record: EntityRecord) {
+  async function markReady(record: EntityRecord) {
     setBusyKey(String(record.id));
     try {
-      await writeEntity(record, { status: 'written', chosen: true });
+      // Terminal state: the human-approved final is ready to post. Posting itself
+      // stays a manual step (templates), so we mark, not deliver.
+      await writeEntity(record, { status: 'ready', chosen: true });
       await qc.invalidateQueries({ queryKey: ['entities', 'draft'] });
     } catch (err) {
-      notify.error(err instanceof Error ? err.message : 'Could not approve.');
+      notify.error(err instanceof Error ? err.message : 'Could not mark ready.');
     } finally {
       setBusyKey(null);
     }
@@ -137,7 +139,7 @@ export function DraftReviewWorkspace() {
   }
 
   const pickedCount = groups.filter((g) => g.chosen).length;
-  const writtenCount = groups.filter((g) => g.written).length;
+  const readyCount = groups.filter((g) => g.ready).length;
 
   return (
     <div className="space-y-6">
@@ -150,7 +152,7 @@ export function DraftReviewWorkspace() {
           </p>
         </div>
         <span className="text-sm text-gray-500">
-          {groups.length} stories · {pickedCount} picked · {writtenCount} written
+          {groups.length} stories · {pickedCount} picked · {readyCount} ready to post
         </span>
       </div>
 
@@ -168,7 +170,7 @@ export function DraftReviewWorkspace() {
               openId={openId}
               onToggleOpen={(id) => setOpenId((cur) => (cur === id ? null : id))}
               onPick={pick}
-              onApprove={approve}
+              onMarkReady={markReady}
               busy={busyKey === g.key}
               busyId={busyKey}
             />
@@ -185,7 +187,7 @@ function StoryGroup({
   openId,
   onToggleOpen,
   onPick,
-  onApprove,
+  onMarkReady,
   busy,
   busyId,
 }: {
@@ -194,7 +196,7 @@ function StoryGroup({
   openId: string | null;
   onToggleOpen: (id: string) => void;
   onPick: (g: DraftGroup, c: EntityRecord) => Promise<void>;
-  onApprove: (c: EntityRecord) => Promise<void>;
+  onMarkReady: (c: EntityRecord) => Promise<void>;
   busy: boolean;
   busyId: string | null;
 }) {
@@ -211,7 +213,7 @@ function StoryGroup({
         <span className="text-xs text-gray-400">
           {group.candidates.length} candidate{group.candidates.length === 1 ? '' : 's'}
         </span>
-        {group.written && <Badge className="bg-emerald-600 text-xs text-white">written</Badge>}
+        {group.ready && <Badge className="bg-emerald-600 text-xs text-white">ready to post</Badge>}
       </div>
 
       <SourceChips sources={headSources} tierByDomain={tierByDomain} />
@@ -237,8 +239,8 @@ function StoryGroup({
             key={`rev-${c.id}`}
             record={c}
             contentType={group.contentType}
-            onApprove={() => onApprove(c)}
-            approving={busyId === String(c.id)}
+            onMarkReady={() => onMarkReady(c)}
+            marking={busyId === String(c.id)}
           />
         ))}
     </li>
@@ -276,8 +278,8 @@ function CandidateCard({
         <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
           Candidate {candidateIndex(record) || '—'}
         </span>
-        {status === 'written' ? (
-          <Badge className="bg-emerald-600 text-[10px] text-white">written</Badge>
+        {status === 'ready' ? (
+          <Badge className="bg-emerald-600 text-[10px] text-white">ready</Badge>
         ) : chosen ? (
           <Badge className="bg-emerald-100 text-[10px] text-emerald-700">picked</Badge>
         ) : null}
@@ -319,20 +321,20 @@ function CandidateCard({
 function ContentReview({
   record,
   contentType,
-  onApprove,
-  approving,
+  onMarkReady,
+  marking,
 }: {
   record: EntityRecord;
   contentType: string;
-  onApprove: () => void;
-  approving: boolean;
+  onMarkReady: () => void;
+  marking: boolean;
 }) {
   const blog = field(record, 'blog');
   const linkedin = field(record, 'linkedin');
   const seo = obj(readData(record.data, 'seo'));
   const judge = obj(readData(record.data, 'judge_verdict'));
   const checks = obj(readData(record.data, 'auto_checks'));
-  const written = field(record, 'status') === 'written';
+  const ready = field(record, 'status') === 'ready';
 
   const tags = ((): string[] => {
     const t = seo.tags;
@@ -467,15 +469,15 @@ function ContentReview({
             </div>
           </section>
 
-          <Button onClick={onApprove} disabled={approving || written} className="w-full">
-            {written ? (
+          <Button onClick={onMarkReady} disabled={marking || ready} className="w-full">
+            {ready ? (
               <>
-                <CheckCircle2 className="mr-1.5 h-4 w-4" /> Written
+                <CheckCircle2 className="mr-1.5 h-4 w-4" /> Ready to post
               </>
-            ) : approving ? (
-              'Approving…'
+            ) : marking ? (
+              'Saving…'
             ) : (
-              'Approve → written'
+              'Mark ready to post'
             )}
           </Button>
         </div>
