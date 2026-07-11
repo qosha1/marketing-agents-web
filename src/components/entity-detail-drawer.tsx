@@ -144,7 +144,7 @@ function DrawerInner({
 
         {mode === 'read' ? (
           <div className="flex-1 overflow-y-auto px-5 py-4">
-            <RecordDetail fields={fields} emptyMessage="No details captured for this item yet." />
+            <RecordDetail fields={fields} showEmpty emptyMessage="No details captured for this item yet." />
             {record.externalId ? (
               <p className="pt-4 text-xs text-neutral-400">external_id: {record.externalId}</p>
             ) : null}
