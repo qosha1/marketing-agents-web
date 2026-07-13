@@ -72,45 +72,64 @@ function staleness(lastUpdated: string | Date | null | undefined): number {
   return Number.isNaN(t) ? 0 : t;
 }
 
+/** Case-insensitive, trimmed join key ('' when absent). */
+function joinKey(v: unknown): string {
+  return asString(v).trim().toLowerCase();
+}
+
 /**
  * (2) Source freshness: the row set is the org's declared `source` records (the
- * canonical source list), NOT the sources that happen to appear in news_items — so
- * a source that has gone quiet still shows up (correctly as stale/never) instead of
- * silently vanishing. A `source` record carries no last-fetched timestamp, so we
- * derive freshness from the news it produced: for each source, `lastUpdated` = the
- * MAX `last_seen` across news_items whose `source_name` matches the source's display
- * name (`record.name`). A source with no matching news has an undefined lastUpdated,
- * which the block renders as "never" = stale (honest — everything is ongoing, a
- * silent source is a bug, not coverage). Stalest first, so problems bubble to the
- * top; never-seen sources sort to the very top. Duplicate/blank source names are
- * collapsed so the list has one stable row per source.
+ * canonical list) — a source that has gone quiet still shows up, it never silently
+ * vanishes. A `source` carries no last-fetched timestamp, so we derive freshness
+ * from the news it produced.
+ *
+ * JOIN KEY = `domain`, NOT the display name. A source record's name is human ("Zawya",
+ * "Gulf News") while news_item.source_name is the DOMAIN ("zawya.com", "gulfnews.com"),
+ * so a name-join matches almost nothing and paints every live feed "never". Both
+ * entities carry a `domain`, which lines up cleanly (verified live) — with a
+ * source_name fallback for the odd item that stored a human name.
+ *
+ * A source that HAS produced gets its MAX `last_seen` and the block derives
+ * fresh/stale from it. A source that has NEVER produced is marked `neutral` (idle),
+ * NOT critical — "never wired" is not the same failure as "was fresh, now broken",
+ * so the card doesn't scream red for feeds that simply aren't ingested yet. Fresh
+ * sources sort to the top (most recent first); idle ones fall to the bottom.
  */
 export function sourceFreshness(
   sources: EntityRecord[],
   newsItems: EntityRecord[],
 ): SourceFreshnessItem[] {
-  // Latest last_seen per source name, from the (bounded, recent) news window.
+  const latestByDomain = new Map<string, string>();
   const latestByName = new Map<string, string>();
+  const bump = (map: Map<string, string>, key: string, seen: string) => {
+    if (!key) return;
+    const prev = map.get(key);
+    if (!prev || new Date(seen).getTime() > new Date(prev).getTime()) map.set(key, seen);
+  };
   for (const item of newsItems) {
-    const name = asString(readData(item.data, 'source_name')).trim();
-    if (!name) continue;
     const seen = asString(readData(item.data, 'last_seen')).trim();
     if (!seen) continue;
-    const prev = latestByName.get(name);
-    if (!prev || new Date(seen).getTime() > new Date(prev).getTime()) {
-      latestByName.set(name, seen);
-    }
+    bump(latestByDomain, joinKey(readData(item.data, 'domain')), seen);
+    bump(latestByName, joinKey(readData(item.data, 'source_name')), seen);
   }
 
-  const seenNames = new Set<string>();
+  const seenKeys = new Set<string>();
   const rows: SourceFreshnessItem[] = [];
   for (const s of sources) {
     const name = (s.name ?? '').trim();
-    if (!name || seenNames.has(name)) continue;
-    seenNames.add(name);
-    rows.push({ name, lastUpdated: latestByName.get(name) ?? null });
+    const domain = joinKey(readData(s.data, 'domain'));
+    const key = domain || joinKey(name);
+    if (!key || seenKeys.has(key)) continue;
+    seenKeys.add(key);
+    const latest = (domain && latestByDomain.get(domain)) || latestByName.get(joinKey(name)) || null;
+    rows.push(
+      latest
+        ? { name: name || domain, lastUpdated: latest }
+        : { name: name || domain, lastUpdated: null, status: 'neutral' },
+    );
   }
-  return rows.sort((a, b) => staleness(a.lastUpdated) - staleness(b.lastUpdated));
+  // Fresh (producing) sources first — freshest on top; idle/never at the bottom.
+  return rows.sort((a, b) => staleness(b.lastUpdated) - staleness(a.lastUpdated));
 }
 
 /**

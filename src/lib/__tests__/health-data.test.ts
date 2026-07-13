@@ -22,8 +22,11 @@ function topic(id: number, data: Record<string, unknown>, createdAt = '2026-07-0
 function news(id: number, data: Record<string, unknown>): EntityRecord {
   return { id, entityType: 'news_item', externalId: null, name: `News ${id}`, data, createdAt: '2026-07-01' };
 }
-function source(id: number, name: string): EntityRecord {
-  return { id, entityType: 'source', externalId: null, name, data: {}, createdAt: '2026-07-01' };
+function source(id: number, name: string, domain?: string): EntityRecord {
+  return {
+    id, entityType: 'source', externalId: null, name,
+    data: domain ? { domain } : {}, createdAt: '2026-07-01',
+  };
 }
 
 describe('topicPipeline', () => {
@@ -59,54 +62,62 @@ describe('topicPipeline', () => {
 });
 
 describe('sourceFreshness', () => {
-  it('lists every declared source with its max last_seen, stalest (incl. never-seen) first', () => {
-    const sources = [source(1, 'AGBI'), source(2, 'Saudi Gazette'), source(3, 'Zawya')];
+  it('joins on DOMAIN (not name), fresh sources first, never-produced marked idle/neutral last', () => {
+    const sources = [
+      source(1, 'Zawya', 'zawya.com'),
+      source(2, 'Gulf News', 'gulfnews.com'),
+      source(3, 'ADGM', 'adgm.com'), // active but produces no news → idle
+    ];
     const items = [
-      news(1, { source_name: 'AGBI', last_seen: '2026-07-10' }),
-      news(2, { source_name: 'AGBI', last_seen: '2026-07-12' }),
-      news(3, { source_name: 'Saudi Gazette', last_seen: '2026-07-01' }),
-      // Zawya has produced no news → never seen → stalest, sorts to the very top.
+      news(1, { domain: 'zawya.com', last_seen: '2026-07-10' }),
+      news(2, { domain: 'zawya.com', last_seen: '2026-07-12' }),
+      news(3, { domain: 'gulfnews.com', last_seen: '2026-07-13' }),
     ];
     expect(sourceFreshness(sources, items)).toEqual([
-      { name: 'Zawya', lastUpdated: null },
-      { name: 'Saudi Gazette', lastUpdated: '2026-07-01' },
-      { name: 'AGBI', lastUpdated: '2026-07-12' },
+      { name: 'Gulf News', lastUpdated: '2026-07-13' },
+      { name: 'Zawya', lastUpdated: '2026-07-12' },
+      { name: 'ADGM', lastUpdated: null, status: 'neutral' },
     ]);
   });
 
-  it('reads the camelCased news blob (client camelCases source_name/last_seen)', () => {
+  it('reads the camelCased news blob (client camelCases last_seen)', () => {
     const rows = sourceFreshness(
-      [source(1, 'Zawya')],
-      [news(1, { sourceName: 'Zawya', lastSeen: '2026-07-11' })],
+      [source(1, 'Zawya', 'zawya.com')],
+      [news(1, { domain: 'zawya.com', lastSeen: '2026-07-11' })],
     );
     expect(rows).toEqual([{ name: 'Zawya', lastUpdated: '2026-07-11' }]);
   });
 
-  it('shows a source as never when no news_item matches its name or carries a timestamp', () => {
+  it('falls back to source_name when a news item stored a human name, not a domain', () => {
     const rows = sourceFreshness(
-      [source(1, 'AGBI')],
-      [
-        news(1, { source_name: 'AGBI' }), // matches but no last_seen
-        news(2, { source_name: 'Other', last_seen: '2026-07-10' }), // different source
-      ],
+      [source(1, 'The National', 'thenationalnews.com')],
+      [news(1, { source_name: 'The National', last_seen: '2026-07-13' })],
     );
-    expect(rows).toEqual([{ name: 'AGBI', lastUpdated: null }]);
+    expect(rows).toEqual([{ name: 'The National', lastUpdated: '2026-07-13' }]);
   });
 
-  it('is driven by the source list — undeclared news sources are not invented as rows', () => {
+  it('marks a source that has never produced as idle (neutral), not stale', () => {
     const rows = sourceFreshness(
-      [source(1, 'AGBI')],
-      [news(1, { source_name: 'Undeclared', last_seen: '2026-07-10' })],
+      [source(1, 'ADGM', 'adgm.com')],
+      [news(1, { domain: 'reuters.com', last_seen: '2026-07-10' })],
     );
-    expect(rows).toEqual([{ name: 'AGBI', lastUpdated: null }]);
+    expect(rows).toEqual([{ name: 'ADGM', lastUpdated: null, status: 'neutral' }]);
   });
 
-  it('dedupes repeated source names and skips unnamed source records', () => {
+  it('is driven by the source list — undeclared news domains are not invented as rows', () => {
     const rows = sourceFreshness(
-      [source(1, 'AGBI'), source(2, 'AGBI'), source(3, '  ')],
-      [news(1, { source_name: 'AGBI', last_seen: '2026-07-10' })],
+      [source(1, 'ADGM', 'adgm.com')],
+      [news(1, { domain: 'undeclared.com', last_seen: '2026-07-10' })],
     );
-    expect(rows).toEqual([{ name: 'AGBI', lastUpdated: '2026-07-10' }]);
+    expect(rows).toEqual([{ name: 'ADGM', lastUpdated: null, status: 'neutral' }]);
+  });
+
+  it('dedupes sources by domain and skips keyless source records', () => {
+    const rows = sourceFreshness(
+      [source(1, 'ADGM', 'adgm.com'), source(2, 'ADGM dup', 'adgm.com'), source(3, '  ')],
+      [news(1, { domain: 'adgm.com', last_seen: '2026-07-10' })],
+    );
+    expect(rows).toEqual([{ name: 'ADGM', lastUpdated: '2026-07-10' }]);
   });
 });
 
