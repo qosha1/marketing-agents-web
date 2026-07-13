@@ -9,8 +9,11 @@
  * records back to the tenant (each stamped with `topic_ref`). We return 202 on a
  * 2xx from the webhook, 502 otherwise.
  *
- * Note: this Route Handler wins over the same-origin Django proxy because the
- * next.config rewrite for /api/* is a `fallback` (only fires with no handler).
+ * PATH NOTE: this handler lives at /actions/* NOT /api/* on purpose. In a deployed
+ * tenant, nginx routes every /api/* request to the Django backend (which has no
+ * such route → 404) before Next ever sees it; only non-/api paths reach the Next
+ * frontend. So this server action must sit outside /api. (Locally, where Next
+ * serves everything, /api would have worked — hence the earlier 404 in prod.)
  */
 import { NextResponse } from 'next/server';
 

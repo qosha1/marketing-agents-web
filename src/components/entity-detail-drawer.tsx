@@ -208,7 +208,8 @@ const GENERATE_WINDOW_MS = 90_000;
 /**
  * A topic's candidate drafts + the write→review→edit→confirm loop (bd 768w.16.9.4/.5).
  *
- * Fires the n8n writer ("Generate drafts" → /api/generate-drafts), lists the
+ * Fires the n8n writer ("Generate drafts" → /actions/generate-drafts — NOT /api,
+ * which the tenant nginx routes to Django), lists the
  * candidates linked to this topic (via `written_for` OR `topic_ref`), and opens
  * any one in the shared DocumentEditor to edit + mark ready. Only rendered for the
  * content-spine (topic) type; every other type's drawer is untouched.
@@ -244,7 +245,7 @@ function TopicDrafts({ topic, onTopicChanged }: { topic: EntityRecord; onTopicCh
     baselineRef.current = drafts.length;
     setGenerating(true);
     try {
-      const res = await fetch('/api/generate-drafts', {
+      const res = await fetch('/actions/generate-drafts', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ story: buildStoryFromTopic(topic) }),
