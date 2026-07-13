@@ -7,18 +7,20 @@
  * field. Reusable across tenants — the route is /board/<typeKey>.
  */
 import { useMemo, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 
 import { EntityBoard } from '@/components/entity-board';
 import { EntityDetailDrawer } from '@/components/entity-detail-drawer';
-import { pickStatusAttr } from '@/lib/board';
+import { pickStatusAttr, readData } from '@/lib/board';
+import { CONTENT_TYPE_ATTR, contentCategoryLabel } from '@/lib/content';
 import { listAllEntities, listTypes, type EntityRecord } from '@/lib/foundry-api';
 
 export default function BoardPage() {
   const params = useParams<{ typeKey: string }>();
   const typeKey = String(params.typeKey);
+  const searchParams = useSearchParams();
 
   const typesQuery = useQuery({ queryKey: ['schema-types'], queryFn: () => listTypes() });
   const type = typesQuery.data?.results.find((t) => t.key === typeKey);
@@ -28,6 +30,23 @@ export default function BoardPage() {
     queryFn: () => listAllEntities(typeKey),
   });
 
+  // Content tab: when a `content_type` param is present AND this type carries the
+  // content_type attribute, narrow the board to that one category (each tab is the
+  // topic pipeline filtered to weekly_brief / lead_magnet / general). With no param
+  // — or on a type without the attr — the board behaves exactly as before.
+  const hasContentTypeAttr = useMemo(
+    () => (type?.attributes ?? []).some((a) => a.name === CONTENT_TYPE_ATTR),
+    [type?.attributes],
+  );
+  const contentTypeParam = searchParams.get(CONTENT_TYPE_ATTR);
+  const activeContentType = contentTypeParam && hasContentTypeAttr ? contentTypeParam : null;
+
+  const records = useMemo(() => {
+    const all = recordsQuery.data ?? [];
+    if (!activeContentType) return all;
+    return all.filter((r) => readData(r.data, CONTENT_TYPE_ATTR) === activeContentType);
+  }, [recordsQuery.data, activeContentType]);
+
   const [selected, setSelected] = useState<EntityRecord | null>(null);
   const statusAttr = useMemo(() => pickStatusAttr(type), [type]);
   const loading = typesQuery.isLoading || recordsQuery.isLoading;
@@ -36,8 +55,12 @@ export default function BoardPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-lg font-semibold">{type?.label ?? typeKey} — Board</h1>
-          <p className="text-sm text-neutral-500">{recordsQuery.data?.length ?? 0} records</p>
+          <h1 className="text-lg font-semibold">
+            {activeContentType
+              ? contentCategoryLabel(activeContentType)
+              : `${type?.label ?? typeKey} — Board`}
+          </h1>
+          <p className="text-sm text-neutral-500">{records.length} records</p>
         </div>
         <Link
           href={`/t/${typeKey}`}
@@ -60,7 +83,7 @@ export default function BoardPage() {
           .
         </div>
       ) : (
-        <EntityBoard type={type} records={recordsQuery.data ?? []} onCardClick={setSelected} />
+        <EntityBoard type={type} records={records} onCardClick={setSelected} />
       )}
 
       {type ? (

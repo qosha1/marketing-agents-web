@@ -1,29 +1,12 @@
-'use client';
-
 /**
- * Marketing Agents home = the topic review workspace (the "live-ranked list").
- * The workspace itself is shared (@startsimpli/ui/collection); this wrapper just
- * injects the tenant client, the OGMC market vocab, and the app's record drawer.
+ * Marketing Agents home = the system-health dashboard (bd 768w.16.8.5).
+ *
+ * The home bubbles up the whole system (content pipeline, source freshness, delivery
+ * adherence, needs-attention queue) rather than dropping straight into one workflow.
+ * Topic review now lives in the Content tabs (the topic status board), not the home.
  */
-import { TopicReviewWorkspace } from '@startsimpli/ui/collection';
-
-import { EntityDetailDrawer } from '@/components/entity-detail-drawer';
-import { collectionClient } from '@/lib/foundry-api';
-
-// The markets we publish for (locks the box — no "Dubai" vs "Dubai, UAE" drift).
-const MARKETS = [
-  'GCC-wide', 'MENA', 'Saudi Arabia', 'UAE', 'Abu Dhabi (UAE)', 'Dubai (UAE)',
-  'Qatar', 'Bahrain', 'Kuwait', 'Oman', 'China',
-];
+import { DashboardHome } from '@/components/dashboard';
 
 export default function HomePage() {
-  return (
-    <TopicReviewWorkspace
-      client={collectionClient}
-      markets={MARKETS}
-      renderDetail={(record, type, onClose, onSaved) => (
-        <EntityDetailDrawer type={type} record={record} onClose={onClose} onSaved={onSaved} />
-      )}
-    />
-  );
+  return <DashboardHome />;
 }

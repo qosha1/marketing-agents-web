@@ -9,11 +9,13 @@
  * the client's camelCase blob so a PATCH (which REPLACES data) never drops fields.
  */
 import { useMemo, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, Input, Label, notify, RecordDetail, type RecordField } from '@startsimpli/ui';
 
 import { AttributeField } from './attribute-field';
 import { readData, toCamelKey } from '@/lib/board';
+import { CONTENT_TYPE_KEY } from '@/lib/content';
+import { draftStatus, draftTitle, fetchTopicDrafts } from '@/lib/topic-drafts';
 import { updateEntity, type EntityRecord, type EntityTypeDef } from '@/lib/foundry-api';
 
 interface Props {
@@ -145,6 +147,7 @@ function DrawerInner({
         {mode === 'read' ? (
           <div className="flex-1 overflow-y-auto px-5 py-4">
             <RecordDetail fields={fields} showEmpty emptyMessage="No details captured for this item yet." />
+            {type.key === CONTENT_TYPE_KEY ? <TopicDrafts topicId={record.id} /> : null}
             {record.externalId ? (
               <p className="pt-4 text-xs text-neutral-400">external_id: {record.externalId}</p>
             ) : null}
@@ -183,5 +186,50 @@ function DrawerInner({
         )}
       </aside>
     </div>
+  );
+}
+
+/**
+ * A topic's candidate drafts — the drafts written for it (via the `written_for`
+ * edge), shown as a compact title + status list under the topic detail. Only
+ * rendered for the content-spine (topic) type; leaves every other type's drawer
+ * untouched.
+ */
+function TopicDrafts({ topicId }: { topicId: number }) {
+  const draftsQuery = useQuery({
+    queryKey: ['topic-drafts', topicId],
+    queryFn: () => fetchTopicDrafts(topicId),
+  });
+  const drafts = draftsQuery.data ?? [];
+
+  return (
+    <section className="mt-6 border-t pt-4">
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
+        Drafts{drafts.length ? ` (${drafts.length})` : ''}
+      </h3>
+      {draftsQuery.isLoading ? (
+        <p className="mt-2 text-sm text-neutral-500">Loading drafts…</p>
+      ) : draftsQuery.isError ? (
+        <p className="mt-2 text-sm text-neutral-400">Couldn’t load drafts for this topic.</p>
+      ) : drafts.length === 0 ? (
+        <p className="mt-2 text-sm text-neutral-400">No drafts written for this topic yet.</p>
+      ) : (
+        <ul className="mt-2 space-y-1.5">
+          {drafts.map((d) => (
+            <li
+              key={d.id}
+              className="flex items-center justify-between gap-3 rounded border px-3 py-2 text-sm"
+            >
+              <span className="min-w-0 truncate">{draftTitle(d)}</span>
+              {draftStatus(d) ? (
+                <span className="shrink-0 rounded-full bg-neutral-100 px-2 py-0.5 text-xs capitalize text-neutral-600">
+                  {draftStatus(d)}
+                </span>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }

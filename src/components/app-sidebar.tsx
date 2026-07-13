@@ -2,29 +2,60 @@
 
 /**
  * App shell nav for a Foundry-templated tenant app. The sidebar is data-driven:
- * one section per entity type the tenant declared (status types open as a board,
- * others as a table). No schema/admin tools here — those live in the Foundry
- * console. Brand comes from foundry.config (substituted at fork time). Edit this
- * however you like — it's your app.
+ * the nav item tree comes from `buildNav` (see src/foundry.nav.ts) over the entity
+ * types the tenant declared, rendered through the shared @startsimpli/ui
+ * <GroupedNav/>. No schema/admin tools here — those live in the Foundry console.
+ * Brand comes from foundry.config (substituted at fork time). Edit this however
+ * you like — it's your app.
  */
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { ListChecks, LayoutGrid, Table, LogOut, FileText } from 'lucide-react';
+import { LogOut } from 'lucide-react';
 import { useAuth } from '@startsimpli/auth';
+import { GroupedNav } from '@startsimpli/ui';
 
 import { signinUrl } from '@/lib/api';
 import { listTypes } from '@/lib/foundry-api';
-import { isBoardType, typeRoute } from '@/lib/board';
+import { buildNav } from '@/foundry.nav';
 import { FOUNDRY } from '@/foundry.config';
+
+/**
+ * Active-state matcher for a nav tree whose Content tabs share a pathname but
+ * differ by query (`/board/topic?content_type=…`). GroupedNav's default matches
+ * pathname only, which would light up all three at once. So:
+ *   - hrefs WITH a query (the content categories): same pathname AND every query
+ *     param in the href present in the current URL — extra params (e.g. page)
+ *     don't unmatch, but only the one matching category lights up.
+ *   - plain hrefs: pathname exact, or the current path is a child of it.
+ */
+function navIsActive(href: string, activeHref?: string): boolean {
+  if (!activeHref) return false;
+  const [curPath, curQuery = ''] = activeHref.split('?');
+  const [hrefPath, hrefQuery] = href.split('?');
+
+  if (hrefQuery !== undefined) {
+    if (curPath !== hrefPath) return false;
+    const cur = new URLSearchParams(curQuery);
+    const want = new URLSearchParams(hrefQuery);
+    for (const [k, v] of want) {
+      if (cur.get(k) !== v) return false;
+    }
+    return true;
+  }
+
+  if (hrefPath === '/') return curPath === '/';
+  return curPath === hrefPath || curPath.startsWith(`${hrefPath}/`);
+}
 
 export function AppSidebar() {
   const pathname = usePathname();
+  const search = useSearchParams().toString();
   const { user, logout } = useAuth();
   const typesQuery = useQuery({ queryKey: ['schema-types'], queryFn: () => listTypes() });
   const types = typesQuery.data?.results ?? [];
 
-  const homeActive = pathname === '/';
+  const activeHref = pathname + (search ? `?${search}` : '');
   const brand = FOUNDRY.name && !FOUNDRY.name.startsWith('__') ? FOUNDRY.name : FOUNDRY.slug;
 
   return (
@@ -36,33 +67,22 @@ export function AppSidebar() {
         <span className="truncate font-semibold text-gray-900">{brand}</span>
       </div>
 
-      <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
-        <NavLink href="/" label="Review" icon={ListChecks} active={homeActive} />
-        <NavLink href="/drafts" label="Drafts" icon={FileText} active={pathname === '/drafts'} />
-
-        {types.length > 0 && (
-          <p className="px-3 pb-1 pt-4 text-xs font-semibold uppercase tracking-wide text-gray-400">
-            Sections
-          </p>
-        )}
-        {types.map((t) => {
-          // The "draft" type gets the bespoke candidate-compare review at /drafts
-          // (the top-level Drafts item), so skip its generic board here to avoid a
-          // duplicate, dead-end entry.
-          if (t.key === 'draft') return null;
-          const href = typeRoute(t);
-          const active = pathname === href || pathname.startsWith(`${href}/`);
-          return (
-            <NavLink
-              key={t.id}
-              href={href}
-              label={t.label}
-              icon={isBoardType(t) ? LayoutGrid : Table}
-              active={active}
-            />
-          );
-        })}
-      </nav>
+      <div className="flex-1 overflow-y-auto px-3 py-4">
+        <GroupedNav
+          items={buildNav(types)}
+          activeHref={activeHref}
+          isActive={navIsActive}
+          renderLink={({ link, active, className, content }) => (
+            <Link
+              href={link.href}
+              className={className}
+              aria-current={active ? 'page' : undefined}
+            >
+              {content}
+            </Link>
+          )}
+        />
+      </div>
 
       <div className="border-t border-gray-200 p-3">
         <div className="mb-2 px-2">
@@ -86,30 +106,5 @@ export function AppSidebar() {
         </button>
       </div>
     </aside>
-  );
-}
-
-function NavLink({
-  href,
-  label,
-  icon: Icon,
-  active,
-}: {
-  href: string;
-  label: string;
-  icon: typeof ListChecks;
-  active: boolean;
-}) {
-  return (
-    <Link
-      href={href}
-      aria-current={active ? 'page' : undefined}
-      className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition ${
-        active ? 'bg-primary-50 text-primary-700' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
-      }`}
-    >
-      <Icon className="h-4 w-4" />
-      <span className="truncate">{label}</span>
-    </Link>
   );
 }

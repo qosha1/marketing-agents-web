@@ -208,6 +208,27 @@ export async function listAllEntities(type: string, maxPages = 20): Promise<Enti
   return all;
 }
 
+// ---- relationship instances (typed edges between entity records, S5) ----
+
+/**
+ * An edge between two entity records. `source`/`target` are Entity ids; the
+ * shared client camelCases the wire `rel_type` -> `relType`. E.g. a draft's
+ * `written_for` edge to the topic it was written for is
+ * `{ relType: 'written_for', source: <draftId>, target: <topicId> }`.
+ */
+export interface RelationshipRecord {
+  id: number;
+  relType: string;
+  source: number;
+  target: number;
+}
+
+export function listRelationships(page = 1) {
+  return api.client.get<Paginated<RelationshipRecord>>('api/v1/relationships', {
+    params: { page },
+  });
+}
+
 /**
  * The tenant-API surface the shared @startsimpli/ui/collection review workspaces
  * consume — this app's authed same-origin client, injected so the workspaces stay

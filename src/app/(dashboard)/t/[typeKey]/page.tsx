@@ -2,20 +2,22 @@
 
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { Plus } from 'lucide-react';
 import { UnifiedTable, Button, BaseDialog } from '@startsimpli/ui';
-import { listTypes, listEntities, type EntityRecord } from '@/lib/foundry-api';
+import { listTypes, listEntities, listAllEntities, type EntityRecord } from '@/lib/foundry-api';
 import { RecordForm } from '@/components/record-form';
 import { buildRecordColumns } from '@/components/record-columns';
-import { pickStatusAttr } from '@/lib/board';
+import { pickStatusAttr, readData } from '@/lib/board';
+import { CONTENT_TYPE_ATTR, contentCategoryLabel } from '@/lib/content';
 
 const PAGE_SIZE = 20; // matches DRF PageNumberPagination's default page size
 
 export default function TypeRecordsPage() {
   const params = useParams<{ typeKey: string }>();
   const typeKey = params.typeKey;
+  const searchParams = useSearchParams();
   const [page, setPage] = useState(1);
   const [addOpen, setAddOpen] = useState(false);
 
@@ -27,9 +29,30 @@ export default function TypeRecordsPage() {
   });
   const type = typesQuery.data?.results.find((t) => t.key === typeKey);
 
-  const recordsQuery = useQuery({
+  // Content tab (parity with the board): when a `content_type` param is present
+  // AND this type carries the content_type attribute, show only that category.
+  // The backend can't filter entities by a data-blob field, so a filtered view
+  // fetches the (bounded) full set and narrows client-side; with no param it's
+  // the unchanged server-paginated table.
+  const hasContentTypeAttr = useMemo(
+    () => (type?.attributes ?? []).some((a) => a.name === CONTENT_TYPE_ATTR),
+    [type?.attributes],
+  );
+  const contentTypeParam = searchParams.get(CONTENT_TYPE_ATTR);
+  const contentFilter = contentTypeParam && hasContentTypeAttr ? contentTypeParam : null;
+
+  const pagedQuery = useQuery({
     queryKey: ['entities', typeKey, page],
     queryFn: () => listEntities(typeKey, page),
+    enabled: !contentFilter,
+  });
+
+  const filteredQuery = useQuery({
+    queryKey: ['entities', typeKey, 'all', contentFilter],
+    queryFn: () => listAllEntities(typeKey),
+    enabled: !!contentFilter,
+    select: (rows: EntityRecord[]) =>
+      rows.filter((r) => readData(r.data, CONTENT_TYPE_ATTR) === contentFilter),
   });
 
   const columns = useMemo(
@@ -54,8 +77,11 @@ export default function TypeRecordsPage() {
     };
   }, [type?.attributes, typeKey]);
 
-  const records = recordsQuery.data?.results ?? [];
-  const totalCount = recordsQuery.data?.count ?? 0;
+  const records = contentFilter
+    ? (filteredQuery.data ?? [])
+    : (pagedQuery.data?.results ?? []);
+  const totalCount = contentFilter ? records.length : (pagedQuery.data?.count ?? 0);
+  const recordsLoading = contentFilter ? filteredQuery.isLoading : pagedQuery.isLoading;
 
   if (typesQuery.isLoading) {
     return <p className="text-sm text-gray-500">Loading…</p>;
@@ -79,7 +105,9 @@ export default function TypeRecordsPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-4">
-        <h1 className="text-2xl font-bold text-gray-900">{type.label}</h1>
+        <h1 className="text-2xl font-bold text-gray-900">
+          {contentFilter ? contentCategoryLabel(contentFilter) : type.label}
+        </h1>
         <div className="flex items-center gap-3">
           <span className="text-sm text-gray-500">{totalCount} total</span>
           {hasStatusBoard ? (
@@ -101,11 +129,14 @@ export default function TypeRecordsPage() {
         data={records}
         columns={columns}
         getRowId={(row) => String(row.id)}
-        loading={recordsQuery.isLoading}
+        loading={recordsLoading}
         columnVisibility={columnVisibility}
         pagination={{
+          // A filtered content-tab view holds the whole (bounded) category set,
+          // so the table paginates it client-side; the default view stays
+          // server-paginated.
           enabled: true,
-          serverSide: true,
+          serverSide: !contentFilter,
           pageSize: PAGE_SIZE,
           totalCount,
           currentPage: page,
