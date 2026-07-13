@@ -91,7 +91,13 @@ export default function BoardPage() {
           type={type}
           record={selected}
           onClose={() => setSelected(null)}
-          onSaved={() => recordsQuery.refetch()}
+          onSaved={async () => {
+            // Refetch the board AND re-point `selected` at the fresh record so the
+            // open drawer reflects mutations made from inside it (e.g. Mark ready
+            // moves the topic to 'written') instead of showing the stale prop.
+            const res = await recordsQuery.refetch();
+            setSelected((cur) => (cur ? (res.data?.find((r) => r.id === cur.id) ?? cur) : cur));
+          }}
         />
       ) : null}
     </div>
