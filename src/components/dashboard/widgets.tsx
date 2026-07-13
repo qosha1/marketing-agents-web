@@ -23,17 +23,36 @@ import {
 import {
   attentionFromTopics,
   deliveryFromTopics,
-  sourceFreshnessFromNews,
+  sourceFreshness,
   topicPipeline,
 } from '@/lib/health-data';
 import { listAllEntities, listTypes } from '@/lib/foundry-api';
 
 const TOPIC_KEY = ['entities', 'topic', 'all'] as const;
-const NEWS_KEY = ['entities', 'news_item', 'all'] as const;
+const SOURCE_KEY = ['entities', 'source', 'all'] as const;
+// Freshness only needs recent news. The tenant EntityViewSet orders by -created_at
+// (page 1 = newest-created; PAGE_SIZE 50), so a bounded page window covers the
+// freshness horizon without pulling the whole ~585-row news_item table on every
+// dashboard load — the slow, whole-table fetch was the widget's original lag.
+const NEWS_WINDOW_PAGES = 4; // 4 × 50 = the 200 most-recently-created news_items
+const NEWS_RECENT_KEY = ['entities', 'news_item', 'recent', NEWS_WINDOW_PAGES] as const;
 
-/** Muted placeholder while a widget's query is in flight. */
+/**
+ * Muted placeholder while a widget's query is in flight. The badge says "Loading"
+ * (not the neutral tone's default "No data" label) so a slow card never reads as a
+ * false empty verdict while it's still fetching.
+ */
 function LoadingCard({ title }: { title: string }) {
-  return <HealthCard title={title} status="neutral" isLoading isEmpty emptyMessage="Loading…" />;
+  return (
+    <HealthCard
+      title={title}
+      status="neutral"
+      statusLabel="Loading"
+      isLoading
+      isEmpty
+      emptyMessage="Loading…"
+    />
+  );
 }
 
 /** Shown when a widget's fetch fails — a real signal, not a blank card. */
@@ -71,20 +90,31 @@ export function PipelineHealthWidget({ title = 'Content pipeline' }: { title?: s
   );
 }
 
-// (2) Source freshness — derived from the latest news each source produced.
+// (2) Source freshness — every declared `source` record, ranked by the latest news
+// it produced (a quiet source stays visible, correctly stale). The source list is
+// the ~23 source records; the news side is a bounded recent window, not the whole
+// table. While either query is in flight the card shows LoadingCard — it never
+// computes a "No data" verdict from data it hasn't finished fetching.
 export function SourceFreshnessWidget({ title = 'Source freshness' }: { title?: string }) {
-  const newsQuery = useQuery({ queryKey: NEWS_KEY, queryFn: () => listAllEntities('news_item') });
+  const sourcesQuery = useQuery({
+    queryKey: SOURCE_KEY,
+    queryFn: () => listAllEntities('source'),
+  });
+  const newsQuery = useQuery({
+    queryKey: NEWS_RECENT_KEY,
+    queryFn: () => listAllEntities('news_item', NEWS_WINDOW_PAGES),
+  });
 
-  if (newsQuery.isLoading) return <LoadingCard title={title} />;
-  if (newsQuery.isError) return <ErrorCard title={title} />;
+  if (sourcesQuery.isLoading || newsQuery.isLoading) return <LoadingCard title={title} />;
+  if (sourcesQuery.isError || newsQuery.isError) return <ErrorCard title={title} />;
 
-  const sources = sourceFreshnessFromNews(newsQuery.data ?? []);
+  const sources = sourceFreshness(sourcesQuery.data ?? [], newsQuery.data ?? []);
 
   return (
     <SourceFreshness
       title={title}
       sources={sources}
-      emptyMessage="No source activity yet."
+      emptyMessage="No sources configured."
     />
   );
 }

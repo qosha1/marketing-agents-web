@@ -65,27 +65,52 @@ export function topicPipeline(
   return { stages, attention };
 }
 
+/** Sort key for freshness: a missing/invalid timestamp is the stalest (sorts first). */
+function staleness(lastUpdated: string | Date | null | undefined): number {
+  if (!lastUpdated) return 0;
+  const t = new Date(lastUpdated).getTime();
+  return Number.isNaN(t) ? 0 : t;
+}
+
 /**
- * (2) Source freshness: `source` records carry no last-fetched timestamp, so derive
- * freshness from the news they produced — group news_items by source_name and take
- * the MAX last_seen per source. Stalest sources first, so problems bubble to the top
- * (the block itself derives ok/stale from the age of lastUpdated).
+ * (2) Source freshness: the row set is the org's declared `source` records (the
+ * canonical source list), NOT the sources that happen to appear in news_items — so
+ * a source that has gone quiet still shows up (correctly as stale/never) instead of
+ * silently vanishing. A `source` record carries no last-fetched timestamp, so we
+ * derive freshness from the news it produced: for each source, `lastUpdated` = the
+ * MAX `last_seen` across news_items whose `source_name` matches the source's display
+ * name (`record.name`). A source with no matching news has an undefined lastUpdated,
+ * which the block renders as "never" = stale (honest — everything is ongoing, a
+ * silent source is a bug, not coverage). Stalest first, so problems bubble to the
+ * top; never-seen sources sort to the very top. Duplicate/blank source names are
+ * collapsed so the list has one stable row per source.
  */
-export function sourceFreshnessFromNews(newsItems: EntityRecord[]): SourceFreshnessItem[] {
-  const latest = new Map<string, string>();
+export function sourceFreshness(
+  sources: EntityRecord[],
+  newsItems: EntityRecord[],
+): SourceFreshnessItem[] {
+  // Latest last_seen per source name, from the (bounded, recent) news window.
+  const latestByName = new Map<string, string>();
   for (const item of newsItems) {
     const name = asString(readData(item.data, 'source_name')).trim();
     if (!name) continue;
     const seen = asString(readData(item.data, 'last_seen')).trim();
     if (!seen) continue;
-    const prev = latest.get(name);
+    const prev = latestByName.get(name);
     if (!prev || new Date(seen).getTime() > new Date(prev).getTime()) {
-      latest.set(name, seen);
+      latestByName.set(name, seen);
     }
   }
-  return [...latest.entries()]
-    .map(([name, lastUpdated]) => ({ name, lastUpdated }))
-    .sort((a, b) => new Date(a.lastUpdated).getTime() - new Date(b.lastUpdated).getTime());
+
+  const seenNames = new Set<string>();
+  const rows: SourceFreshnessItem[] = [];
+  for (const s of sources) {
+    const name = (s.name ?? '').trim();
+    if (!name || seenNames.has(name)) continue;
+    seenNames.add(name);
+    rows.push({ name, lastUpdated: latestByName.get(name) ?? null });
+  }
+  return rows.sort((a, b) => staleness(a.lastUpdated) - staleness(b.lastUpdated));
 }
 
 /**

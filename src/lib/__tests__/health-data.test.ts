@@ -3,7 +3,7 @@ import { describe, it, expect } from 'vitest';
 import {
   attentionFromTopics,
   deliveryFromTopics,
-  sourceFreshnessFromNews,
+  sourceFreshness,
   topicPipeline,
 } from '../health-data';
 import type { AttributeDef, EntityRecord, EntityTypeDef } from '@/lib/foundry-api';
@@ -21,6 +21,9 @@ function topic(id: number, data: Record<string, unknown>, createdAt = '2026-07-0
 }
 function news(id: number, data: Record<string, unknown>): EntityRecord {
   return { id, entityType: 'news_item', externalId: null, name: `News ${id}`, data, createdAt: '2026-07-01' };
+}
+function source(id: number, name: string): EntityRecord {
+  return { id, entityType: 'source', externalId: null, name, data: {}, createdAt: '2026-07-01' };
 }
 
 describe('topicPipeline', () => {
@@ -55,31 +58,55 @@ describe('topicPipeline', () => {
   });
 });
 
-describe('sourceFreshnessFromNews', () => {
-  it('groups by source_name and takes the max last_seen, stalest first', () => {
+describe('sourceFreshness', () => {
+  it('lists every declared source with its max last_seen, stalest (incl. never-seen) first', () => {
+    const sources = [source(1, 'AGBI'), source(2, 'Saudi Gazette'), source(3, 'Zawya')];
     const items = [
       news(1, { source_name: 'AGBI', last_seen: '2026-07-10' }),
       news(2, { source_name: 'AGBI', last_seen: '2026-07-12' }),
       news(3, { source_name: 'Saudi Gazette', last_seen: '2026-07-01' }),
+      // Zawya has produced no news → never seen → stalest, sorts to the very top.
     ];
-    const sources = sourceFreshnessFromNews(items);
-    expect(sources).toEqual([
+    expect(sourceFreshness(sources, items)).toEqual([
+      { name: 'Zawya', lastUpdated: null },
       { name: 'Saudi Gazette', lastUpdated: '2026-07-01' },
       { name: 'AGBI', lastUpdated: '2026-07-12' },
     ]);
   });
 
-  it('reads the camelCased blob (client camelCases source_name/last_seen)', () => {
-    const sources = sourceFreshnessFromNews([news(1, { sourceName: 'Zawya', lastSeen: '2026-07-11' })]);
-    expect(sources).toEqual([{ name: 'Zawya', lastUpdated: '2026-07-11' }]);
+  it('reads the camelCased news blob (client camelCases source_name/last_seen)', () => {
+    const rows = sourceFreshness(
+      [source(1, 'Zawya')],
+      [news(1, { sourceName: 'Zawya', lastSeen: '2026-07-11' })],
+    );
+    expect(rows).toEqual([{ name: 'Zawya', lastUpdated: '2026-07-11' }]);
   });
 
-  it('skips items with no source or no timestamp', () => {
-    const items = [
-      news(1, { source_name: '', last_seen: '2026-07-10' }),
-      news(2, { source_name: 'AGBI' }),
-    ];
-    expect(sourceFreshnessFromNews(items)).toEqual([]);
+  it('shows a source as never when no news_item matches its name or carries a timestamp', () => {
+    const rows = sourceFreshness(
+      [source(1, 'AGBI')],
+      [
+        news(1, { source_name: 'AGBI' }), // matches but no last_seen
+        news(2, { source_name: 'Other', last_seen: '2026-07-10' }), // different source
+      ],
+    );
+    expect(rows).toEqual([{ name: 'AGBI', lastUpdated: null }]);
+  });
+
+  it('is driven by the source list — undeclared news sources are not invented as rows', () => {
+    const rows = sourceFreshness(
+      [source(1, 'AGBI')],
+      [news(1, { source_name: 'Undeclared', last_seen: '2026-07-10' })],
+    );
+    expect(rows).toEqual([{ name: 'AGBI', lastUpdated: null }]);
+  });
+
+  it('dedupes repeated source names and skips unnamed source records', () => {
+    const rows = sourceFreshness(
+      [source(1, 'AGBI'), source(2, 'AGBI'), source(3, '  ')],
+      [news(1, { source_name: 'AGBI', last_seen: '2026-07-10' })],
+    );
+    expect(rows).toEqual([{ name: 'AGBI', lastUpdated: '2026-07-10' }]);
   });
 });
 
