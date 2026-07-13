@@ -9,13 +9,9 @@
  * the client's camelCase blob so a PATCH (which REPLACES data) never drops fields.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, Input, Label, notify, RecordDetail, type RecordField } from '@startsimpli/ui';
-import {
-  DocumentEditor,
-  recordPatchFromSections,
-  type DocSection,
-} from '@startsimpli/ui/document-editor';
 
 import { AttributeField } from './attribute-field';
 import { readData, toCamelKey } from '@/lib/board';
@@ -159,7 +155,7 @@ function DrawerInner({
         {mode === 'read' ? (
           <div className="flex-1 overflow-y-auto px-5 py-4">
             <RecordDetail fields={fields} showEmpty emptyMessage="No details captured for this item yet." />
-            {type.key === CONTENT_TYPE_KEY ? <TopicDrafts topic={record} onTopicChanged={onSaved} /> : null}
+            {type.key === CONTENT_TYPE_KEY ? <TopicDrafts topic={record} /> : null}
             {record.externalId ? (
               <p className="pt-4 text-xs text-neutral-400">external_id: {record.externalId}</p>
             ) : null}
@@ -210,15 +206,15 @@ const GENERATE_WINDOW_MS = 90_000;
  *
  * Fires the n8n writer ("Generate drafts" → /actions/generate-drafts — NOT /api,
  * which the tenant nginx routes to Django), lists the
- * candidates linked to this topic (via `written_for` OR `topic_ref`), and opens
- * any one in the shared DocumentEditor to edit + mark ready. Only rendered for the
- * content-spine (topic) type; every other type's drawer is untouched.
+ * candidates linked to this topic (via `written_for` OR `topic_ref`), and links
+ * each one to the full-page draft editor (/draft/<id>) to edit + mark ready. Only
+ * rendered for the content-spine (topic) type; every other type's drawer is
+ * untouched.
  */
-function TopicDrafts({ topic, onTopicChanged }: { topic: EntityRecord; onTopicChanged: () => void }) {
+function TopicDrafts({ topic }: { topic: EntityRecord }) {
   const qc = useQueryClient();
   const topicId = topic.id;
   const [generating, setGenerating] = useState(false);
-  const [openDraftId, setOpenDraftId] = useState<number | null>(null);
 
   const draftsQuery = useQuery({
     queryKey: ['topic-drafts', topicId],
@@ -258,8 +254,6 @@ function TopicDrafts({ topic, onTopicChanged }: { topic: EntityRecord; onTopicCh
     }
   }
 
-  const openDraft = drafts.find((d) => d.id === openDraftId) ?? null;
-
   return (
     <section className="mt-6 border-t pt-4">
       <div className="flex items-center justify-between gap-2">
@@ -294,8 +288,8 @@ function TopicDrafts({ topic, onTopicChanged }: { topic: EntityRecord; onTopicCh
             const verdict = draftJudgeVerdict(d);
             return (
               <li key={d.id}>
-                <button
-                  onClick={() => setOpenDraftId(d.id)}
+                <Link
+                  href={`/draft/${d.id}`}
                   className="flex w-full items-center justify-between gap-3 rounded border px-3 py-2 text-left text-sm hover:bg-neutral-50"
                 >
                   <span className="flex min-w-0 items-center gap-2">
@@ -324,124 +318,13 @@ function TopicDrafts({ topic, onTopicChanged }: { topic: EntityRecord; onTopicCh
                       </span>
                     ) : null}
                   </span>
-                </button>
+                </Link>
               </li>
             );
           })}
         </ul>
       )}
-
-      {openDraft ? (
-        <DraftEditor
-          key={openDraft.id}
-          draft={openDraft}
-          topic={topic}
-          onClose={() => setOpenDraftId(null)}
-          onChanged={() => {
-            void qc.invalidateQueries({ queryKey: ['topic-drafts', topicId] });
-            onTopicChanged();
-          }}
-        />
-      ) : null}
     </section>
   );
 }
 
-/** camelCase-aware read of a draft data value as a string. */
-function draftStr(data: EntityRecord['data'], name: string): string {
-  const v = readData(data, name);
-  return v == null ? '' : String(v);
-}
-
-/** Explicit document sections for a draft: blog/linkedin/seo/sources. */
-function draftSections(draft: EntityRecord): DocSection[] {
-  const seo = readData(draft.data, 'seo');
-  const seoObj =
-    seo && typeof seo === 'object' && !Array.isArray(seo) ? (seo as Record<string, unknown>) : {};
-  const sourcesRaw = readData(draft.data, 'sources');
-  const sources = Array.isArray(sourcesRaw)
-    ? sourcesRaw.map((s) => (typeof s === 'string' ? s : String((s as Record<string, unknown>)?.url ?? s)))
-    : typeof sourcesRaw === 'string'
-      ? sourcesRaw.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)
-      : [];
-  return [
-    { key: 'blog', label: 'Blog post', kind: 'markdown', value: draftStr(draft.data, 'blog') },
-    { key: 'linkedin', label: 'LinkedIn post', kind: 'text', value: draftStr(draft.data, 'linkedin') },
-    { key: 'seo', label: 'SEO', kind: 'structured', value: seoObj },
-    { key: 'sources', label: 'Sources', kind: 'list', value: sources },
-  ];
-}
-
-/**
- * Opens one draft in the shared DocumentEditor. The editor is controlled — we own
- * the section values and persist on its debounced autosave. The backend PATCH
- * REPLACES the whole `data` blob, so every write merges the patch into the FULL
- * existing draft.data (never a partial), or untouched attributes would drop. Mark
- * ready flips the draft (chosen + ready) and the topic (written) together.
- */
-function DraftEditor({
-  draft,
-  topic,
-  onClose,
-  onChanged,
-}: {
-  draft: EntityRecord;
-  topic: EntityRecord;
-  onClose: () => void;
-  onChanged: () => void;
-}) {
-  const [sections, setSections] = useState<DocSection[]>(() => draftSections(draft));
-  const [marking, setMarking] = useState(false);
-  const ready = draftStatus(draft) === 'ready';
-
-  const onChange = (key: string, value: unknown) =>
-    setSections((prev) => prev.map((s) => (s.key === key ? { ...s, value } : s)));
-
-  // Debounced autosave: PATCH the merged blob. No list invalidation here — the
-  // DocumentEditor shows its own "Saved" pill, and refetching mid-edit would churn
-  // the list. markReady is what refreshes the list + board.
-  async function save(next: DocSection[]) {
-    const patch = recordPatchFromSections(next);
-    await updateEntity(draft.id, { data: { ...draft.data, ...patch } });
-  }
-
-  async function markReady() {
-    setMarking(true);
-    try {
-      const patch = recordPatchFromSections(sections);
-      // Save any pending edits and flip the draft to chosen+ready in one PATCH.
-      await updateEntity(draft.id, {
-        data: { ...draft.data, ...patch, chosen: true, status: 'ready' },
-      });
-      await updateEntity(topic.id, { data: { ...topic.data, status: 'written' } });
-      notify.success('Marked ready.');
-      onChanged();
-      onClose();
-    } catch (err) {
-      notify.error(err instanceof Error ? err.message : 'Could not mark ready.');
-    } finally {
-      setMarking(false);
-    }
-  }
-
-  return (
-    <div className="mt-4 rounded-lg border bg-neutral-50/60 p-4">
-      <div className="mb-3 flex items-center justify-between gap-2">
-        <span className="truncate text-sm font-medium">{draftTitle(draft)}</span>
-        <button onClick={onClose} className="rounded border px-2 py-1 text-xs hover:bg-neutral-100">
-          Close draft
-        </button>
-      </div>
-      <DocumentEditor
-        sections={sections}
-        onChange={onChange}
-        onSave={save}
-        header={
-          <Button onClick={markReady} disabled={marking || ready} className="text-xs">
-            {ready ? 'Ready' : marking ? 'Marking…' : 'Mark ready'}
-          </Button>
-        }
-      />
-    </div>
-  );
-}

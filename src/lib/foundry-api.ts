@@ -169,6 +169,12 @@ export function listEntities(type: string, page = 1) {
   });
 }
 
+/** Fetch a single entity record by id. Path carries no trailing slash (the Next
+ * rewrite adds it), matching the listEntities/updateEntity convention. */
+export function getEntity(id: number | string) {
+  return api.client.get<EntityRecord>(`api/v1/entities/${id}`);
+}
+
 export function createEntity(input: {
   entityType: string;
   name: string;
