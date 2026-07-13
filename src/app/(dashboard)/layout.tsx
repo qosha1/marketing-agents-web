@@ -68,10 +68,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   return (
     <div className="flex min-h-screen bg-gray-50">
       <AppSidebar />
-      <main className="flex-1 overflow-x-hidden">
-        {/* Left-aligned (not mx-auto) so content sits right after the sidebar
-            instead of floating centered with a big gap on wide screens. */}
-        <div className="w-full max-w-7xl px-8 py-8">{children}</div>
+      {/* min-w-0 is load-bearing: main is a flex child, so without it its
+          min-width is content-based and a wide board (kanban) grows main past the
+          viewport — then overflow-x-hidden CLIPS it instead of letting the board's
+          own overflow-x-auto scroll. With min-w-0, main is bounded by the flex
+          track and wide content scrolls inside it. No max-w cap so the board uses
+          the full width up to the screen edge (left-aligned, not mx-auto). */}
+      <main className="flex-1 min-w-0 overflow-x-hidden">
+        <div className="w-full px-8 py-8">{children}</div>
       </main>
     </div>
   );
