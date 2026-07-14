@@ -73,19 +73,39 @@ function readAttrValue(
   return data[camel] ?? data[name];
 }
 
+/** Cap a stringified blob so one cell never explodes the row height. */
+const MAX_CELL = 90;
+function clamp(s: string): string {
+  const flat = s.replace(/\s+/g, ' ').trim();
+  return flat.length > MAX_CELL ? `${flat.slice(0, MAX_CELL).trimEnd()}…` : flat;
+}
+
 function formatCell(value: unknown, attr: AttributeDef): string {
   if (value == null || value === '') return '—';
   if (attr.dataType === 'boolean') return value ? 'Yes' : 'No';
-  if (attr.dataType === 'json') {
-    try {
-      return JSON.stringify(value);
-    } catch {
-      return String(value);
-    }
-  }
   if (attr.dataType === 'date') {
     const d = new Date(String(value));
     return Number.isNaN(d.getTime()) ? String(value) : d.toLocaleDateString();
   }
+  // An object value (a json attr like `judge_verdict`, or any nested object) must
+  // render as a COMPACT summary — never the whole blob, which crushes the table.
+  // Prefer a telling scalar (a Content-Judge object surfaces as its `verdict`);
+  // otherwise a clamped JSON string.
+  if (value && typeof value === 'object') {
+    const obj = value as Record<string, unknown>;
+    for (const k of ['verdict', 'label', 'name', 'value', 'status', 'title']) {
+      if (typeof obj[k] === 'string' && obj[k]) return clamp(obj[k] as string);
+    }
+    try {
+      return clamp(JSON.stringify(value));
+    } catch {
+      return clamp(String(value));
+    }
+  }
+  if (attr.dataType === 'json') {
+    // A json attr that stored a plain string — clamp it too.
+    return clamp(String(value));
+  }
+  // Plain text/number: leave full (the table wraps it readably).
   return String(value);
 }

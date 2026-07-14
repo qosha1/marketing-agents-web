@@ -6,6 +6,7 @@ const attrs: AttributeDef[] = [
   { id: '1', name: 'country_code', dataType: 'text', required: false, config: {} },
   { id: '2', name: 'sc_score', dataType: 'integer', required: false, config: {} },
   { id: '3', name: 'uuid', dataType: 'text', required: false, config: {} },
+  { id: '4', name: 'judge_verdict', dataType: 'json', required: false, config: {} },
 ];
 
 function cellFor(cols: ReturnType<typeof buildRecordColumns>, id: string, row: EntityRecord) {
@@ -33,5 +34,28 @@ describe('buildRecordColumns', () => {
     expect(cellFor(cols, 'country_code', raw)).toBe('MX');
     const empty = { data: {} } as unknown as EntityRecord;
     expect(cellFor(cols, 'country_code', empty)).toBe('—');
+  });
+
+  it('renders an object cell compactly (surfaces `verdict`, never the whole blob)', () => {
+    const cols = buildRecordColumns(attrs);
+    const row = {
+      data: {
+        judgeVerdict: {
+          verdict: 'accept',
+          summary: 'x'.repeat(500),
+          issues: [{ problem: 'y'.repeat(500) }],
+        },
+      },
+    } as unknown as EntityRecord;
+    // The Content-Judge object surfaces as its verdict, not a 1000-char JSON dump.
+    expect(cellFor(cols, 'judge_verdict', row)).toBe('accept');
+  });
+
+  it('clamps a verdict-less object blob so it cannot explode the row', () => {
+    const cols = buildRecordColumns(attrs);
+    const row = { data: { judgeVerdict: { notes: 'z'.repeat(500) } } } as unknown as EntityRecord;
+    const cell = cellFor(cols, 'judge_verdict', row) as string;
+    expect(cell.length).toBeLessThanOrEqual(91); // 90 + the ellipsis
+    expect(cell.endsWith('…')).toBe(true);
   });
 });
