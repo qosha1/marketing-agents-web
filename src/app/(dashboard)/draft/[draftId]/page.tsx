@@ -11,15 +11,28 @@
  * The editor is CONTROLLED: this page owns the section values (via onChange) and
  * all persistence. The backend PATCH REPLACES the whole `data` blob (no deep
  * merge), so every write merges the section patch into the FULL existing
- * draft.data — never a partial — or untouched attributes would drop. "Mark ready"
- * flips the draft (chosen + ready) and its parent topic (written) together, then
- * navigates back to the content board.
+ * draft.data — never a partial — or untouched attributes would drop.
+ *
+ * Validate-before-accept (bd 768w.16.10.3): a live ValidationChecklist recomputes
+ * the deterministic guardrail checks over the reviewer's EDITED sections (plus the
+ * stored AI-judge verdict), and "Accept" is gated on those checks not failing —
+ * unless the reviewer records a reasoned override. Accept flips the draft
+ * (chosen + approved) and its parent topic (written) together; once approved, a
+ * "Mark sent" hands off (status → sent, posting stays manual).
  */
-import { useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useMemo, useState } from 'react';
+import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, notify } from '@startsimpli/ui';
+import {
+  Button,
+  notify,
+  ValidationChecklist,
+  runContentChecks,
+  overallStatus,
+  type JudgeVerdict,
+  type ValidationOverride,
+} from '@startsimpli/ui';
 import {
   DocumentEditor,
   recordPatchFromSections,
@@ -29,7 +42,23 @@ import {
 import { readData } from '@/lib/board';
 import { CONTENT_TYPE_KEY, contentCategoryLabel, contentTabHref } from '@/lib/content';
 import { draftJudgeVerdict, draftStatus, draftTitle } from '@/lib/topic-drafts';
+import { contentFieldsFromSections, OGMC_APPROVED_HOSTS } from '@/lib/content-checks';
 import { getEntity, updateEntity, type EntityRecord } from '@/lib/foundry-api';
+
+/** Status-pill tone per draft status (drafting → sent). */
+const STATUS_PILL_TONE: Record<string, string> = {
+  drafting: 'bg-neutral-100 text-neutral-600',
+  ready: 'bg-amber-100 text-amber-700',
+  needs_revision: 'bg-red-100 text-red-700',
+  approved: 'bg-emerald-100 text-emerald-700',
+  sent: 'bg-blue-100 text-blue-700',
+};
+
+/** The stored AI-judge verdict object, or undefined when absent/malformed. */
+function draftJudgeVerdictObj(draft: EntityRecord): JudgeVerdict | undefined {
+  const j = readData(draft.data, 'judge_verdict');
+  return j && typeof j === 'object' && !Array.isArray(j) ? (j as JudgeVerdict) : undefined;
+}
 
 /** camelCase-aware read of a draft data value as a string. */
 function draftStr(data: EntityRecord['data'], name: string): string {
@@ -86,7 +115,6 @@ export default function DraftPage() {
 
 function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: string }) {
   const qc = useQueryClient();
-  const router = useRouter();
 
   const contentType = draftStr(draft.data, 'content_type');
   const backHref = contentTabHref(contentType);
@@ -100,41 +128,90 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
   const topic = topicQuery.data ?? null;
 
   const [sections, setSections] = useState<DocSection[]>(() => draftSections(draft));
-  const [marking, setMarking] = useState(false);
-  const ready = draftStatus(draft) === 'ready';
+  const [override, setOverride] = useState<ValidationOverride>({ overridden: false });
+  const [accepting, setAccepting] = useState(false);
+  const [sending, setSending] = useState(false);
+
+  const status = draftStatus(draft);
+  const isApproved = status === 'approved';
+  const isSent = status === 'sent';
   const verdict = draftJudgeVerdict(draft);
+  const judgeVerdict = draftJudgeVerdictObj(draft);
+
+  // Recompute the deterministic guardrail checks over the CURRENT edited section
+  // values (not stale draft.data) on every edit, so the checklist tracks live.
+  const checks = useMemo(
+    () => runContentChecks(contentFieldsFromSections(sections, draft.name), {
+      approvedHosts: OGMC_APPROVED_HOSTS,
+    }),
+    [sections, draft.name],
+  );
+
+  // Accept is gated: allowed unless a check FAILS, or the reviewer recorded a
+  // reasoned override.
+  const overriddenWithReason =
+    override.overridden && (override.reason ?? '').trim().length > 0;
+  const canAccept = overallStatus(checks) !== 'fail' || overriddenWithReason;
+  const failingLabels = checks.filter((c) => c.status === 'fail').map((c) => c.label);
 
   const onChange = (key: string, value: unknown) =>
     setSections((prev) => prev.map((s) => (s.key === key ? { ...s, value } : s)));
 
   // Debounced autosave: PATCH the merged blob. No list invalidation here — the
   // DocumentEditor shows its own "Saved" pill, and refetching mid-edit would
-  // churn the editor. markReady is what refreshes the board.
+  // churn the editor. accept/markSent are what refresh the board.
   async function save(next: DocSection[]) {
     const patch = recordPatchFromSections(next);
     await updateEntity(draft.id, { data: { ...draft.data, ...patch } });
   }
 
-  async function markReady() {
+  async function accept() {
+    if (!canAccept) return; // defensive — the button is disabled in this state
     if (!topic) {
       notify.error('Still loading the parent topic — try again in a moment.');
       return;
     }
-    setMarking(true);
+    setAccepting(true);
     try {
       const patch = recordPatchFromSections(sections);
-      // Save any pending edits and flip the draft to chosen+ready in one PATCH,
-      // then move the topic to 'written'.
+      // Save pending edits and flip the draft to chosen+approved in one PATCH,
+      // then move the topic to 'written'. Stamp the override reason when set.
       await updateEntity(draft.id, {
-        data: { ...draft.data, ...patch, chosen: true, status: 'ready' },
+        data: {
+          ...draft.data,
+          ...patch,
+          chosen: true,
+          status: 'approved',
+          ...(override.overridden ? { override_reason: override.reason } : {}),
+        },
       });
       await updateEntity(topic.id, { data: { ...topic.data, status: 'written' } });
+      // Refetch this draft (so the status pill + Mark-sent appear) and the board.
+      await qc.invalidateQueries({ queryKey: ['entity', draftId] });
       await qc.invalidateQueries({ queryKey: ['entities', CONTENT_TYPE_KEY, 'all'] });
-      notify.success('Marked ready.');
-      router.push(backHref);
+      notify.success('Accepted.');
     } catch (err) {
-      notify.error(err instanceof Error ? err.message : 'Could not mark ready.');
-      setMarking(false);
+      notify.error(err instanceof Error ? err.message : 'Could not accept.');
+    } finally {
+      setAccepting(false);
+    }
+  }
+
+  async function markSent() {
+    setSending(true);
+    try {
+      const patch = recordPatchFromSections(sections);
+      const sentAt = new Date().toISOString().slice(0, 10); // today, ISO date
+      await updateEntity(draft.id, {
+        data: { ...draft.data, ...patch, status: 'sent', sent_at: sentAt },
+      });
+      await qc.invalidateQueries({ queryKey: ['entity', draftId] });
+      await qc.invalidateQueries({ queryKey: ['entities', CONTENT_TYPE_KEY, 'all'] });
+      notify.success('Marked sent.');
+    } catch (err) {
+      notify.error(err instanceof Error ? err.message : 'Could not mark sent.');
+    } finally {
+      setSending(false);
     }
   }
 
@@ -167,9 +244,13 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
               judge: {verdict}
             </span>
           ) : null}
-          {draftStatus(draft) ? (
-            <span className="rounded-full bg-neutral-100 px-2.5 py-0.5 text-xs capitalize text-neutral-600">
-              {draftStatus(draft)}
+          {status ? (
+            <span
+              className={`rounded-full px-2.5 py-0.5 text-xs capitalize ${
+                STATUS_PILL_TONE[status] ?? 'bg-neutral-100 text-neutral-600'
+              }`}
+            >
+              {status.replace(/_/g, ' ')}
             </span>
           ) : null}
         </div>
@@ -177,16 +258,36 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
 
       <DocumentEditor sections={sections} onChange={onChange} onSave={save} />
 
-      {/* Prominent Mark-ready action: a sticky footer that stays reachable while
+      {/* Live validation: deterministic checks recomputed over the edited sections
+          plus the stored AI-judge verdict. Gates Accept below. */}
+      <ValidationChecklist
+        checks={checks}
+        judgeVerdict={judgeVerdict}
+        override={override}
+        onOverride={setOverride}
+      />
+
+      {/* Gated Accept + handoff: a sticky footer that stays reachable while
           scrolling a long article. Negative margins let its border span the full
           content width against the layout's gray background. */}
-      <div className="sticky bottom-0 -mx-8 flex items-center justify-end gap-3 border-t border-neutral-200 bg-gray-50/95 px-8 py-3 backdrop-blur">
+      <div className="sticky bottom-0 -mx-8 flex flex-wrap items-center justify-end gap-3 border-t border-neutral-200 bg-gray-50/95 px-8 py-3 backdrop-blur">
+        {!canAccept && failingLabels.length > 0 ? (
+          <span className="mr-auto text-xs text-red-600">
+            Fix to accept: {failingLabels.join(', ')}
+          </span>
+        ) : null}
         <Link href={backHref} className="text-sm text-neutral-500 hover:text-neutral-900">
           Cancel
         </Link>
-        <Button onClick={markReady} disabled={marking || ready}>
-          {ready ? 'Ready' : marking ? 'Marking…' : 'Mark ready'}
-        </Button>
+        {isApproved || isSent ? (
+          <Button variant="secondary" onClick={markSent} disabled={sending || isSent}>
+            {isSent ? 'Sent' : sending ? 'Marking…' : 'Mark sent'}
+          </Button>
+        ) : (
+          <Button onClick={accept} disabled={accepting || !canAccept}>
+            {accepting ? 'Accepting…' : 'Accept'}
+          </Button>
+        )}
       </div>
     </div>
   );
