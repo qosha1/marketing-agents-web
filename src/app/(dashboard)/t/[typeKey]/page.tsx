@@ -151,6 +151,8 @@ export default function TypeRecordsPage() {
       enabled: true,
       position: 'top',
       collapsible: false,
+      // Show the Kind/State facet chips open on load instead of tucked behind the "Filters" toggle.
+      defaultExpanded: true,
       config: { sections },
       value: filterState,
       onChange: (fs) => applyFilters(fs),
