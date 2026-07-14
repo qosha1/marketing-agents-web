@@ -78,6 +78,8 @@ import {
 import { DraftReviewLayout } from '@/components/draft-review/DraftReviewLayout';
 import { QualityRail } from '@/components/draft-review/QualityRail';
 import { BlogSection } from '@/components/draft-review/BlogSection';
+import { ContentChannels } from '@/components/draft-review/ContentChannels';
+import { SourcesTool } from '@/components/draft-review/SourcesTool';
 import { contentFieldsFromSections, OGMC_APPROVED_HOSTS } from '@/lib/content-checks';
 import {
   getEntity,
@@ -87,6 +89,20 @@ import {
 } from '@/lib/foundry-api';
 import { compileFeedback, readNotes, readReview, revisedFrom, revisionChain } from '@/lib/review';
 import { unifiedBlogDiff } from '@/lib/blog-diff';
+import {
+  coverageSummary,
+  parseSourceEntry,
+  parseSources,
+  serializeSources,
+  type ParsedSource,
+  type SourcesContainer,
+} from '@/lib/sources';
+
+/** A source's reviewer-only metadata (kept OUT of the `sources` string). */
+interface SourceMetaEntry {
+  id: string;
+  verified: boolean;
+}
 
 /** Status-pill tone per draft status (drafting → sent). */
 const STATUS_PILL_TONE: Record<string, string> = {
@@ -114,23 +130,37 @@ function sectionValue(sections: DocSection[], key: string): unknown {
   return sections.find((s) => s.key === key)?.value;
 }
 
-/** Explicit document sections for a draft: blog/linkedin/seo/sources. */
+/**
+ * Editable document sections for a draft: blog/linkedin/seo. Sources are NOT a
+ * DocumentEditor section anymore — they're the dedicated Sources channel tool
+ * (parsed rows + format-preserving round-trip), so they're managed separately.
+ */
 function draftSections(draft: EntityRecord): DocSection[] {
   const seo = readData(draft.data, 'seo');
   const seoObj =
     seo && typeof seo === 'object' && !Array.isArray(seo) ? (seo as Record<string, unknown>) : {};
-  const sourcesRaw = readData(draft.data, 'sources');
-  const sources = Array.isArray(sourcesRaw)
-    ? sourcesRaw.map((s) => (typeof s === 'string' ? s : String((s as Record<string, unknown>)?.url ?? s)))
-    : typeof sourcesRaw === 'string'
-      ? sourcesRaw.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)
-      : [];
   return [
     { key: 'blog', label: 'Blog post', kind: 'markdown', value: draftStr(draft.data, 'blog') },
     { key: 'linkedin', label: 'LinkedIn post', kind: 'text', value: draftStr(draft.data, 'linkedin') },
     { key: 'seo', label: 'SEO', kind: 'structured', value: seoObj },
-    { key: 'sources', label: 'Sources', kind: 'list', value: sources },
   ];
+}
+
+/** The reviewer's stored per-source metadata array ([] when absent). */
+function readSourceMeta(data: EntityRecord['data'] | undefined): SourceMetaEntry[] {
+  const m = readData(data, 'source_meta');
+  return Array.isArray(m)
+    ? (m as unknown[])
+        .filter((e): e is Record<string, unknown> => !!e && typeof e === 'object')
+        .map((e) => ({ id: String(e.id ?? ''), verified: !!e.verified }))
+        .filter((e) => e.id)
+    : [];
+}
+
+/** Small word count for the channel-tab badges. */
+function words(s: string): number {
+  const t = s.trim();
+  return t ? t.split(/\s+/).length : 0;
 }
 
 export default function DraftPage() {
@@ -184,20 +214,39 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
   const [accepting, setAccepting] = useState(false);
   const [sending, setSending] = useState(false);
   const [revising, setRevising] = useState(false);
+  const [rejecting, setRejecting] = useState(false);
   const [showDiff, setShowDiff] = useState(false);
 
+  // Sources are managed as parsed rows so the tool can show tier/recency, but the
+  // stored `sources` value is round-tripped in its ORIGINAL container (string vs
+  // array) so the n8n writer / other readers stay intact. The reviewer-only
+  // `verified` flag rides a SEPARATE `source_meta` blob key.
+  const sourcesContainer: SourcesContainer = useMemo(
+    () => (Array.isArray(readData(draft.data, 'sources')) ? 'array' : 'string'),
+    [draft.data],
+  );
+  const [sourceItems, setSourceItems] = useState<ParsedSource[]>(
+    () => parseSources(readData(draft.data, 'sources')).items,
+  );
+  const [sourceMeta, setSourceMeta] = useState<SourceMetaEntry[]>(() => readSourceMeta(draft.data));
+  const today = useMemo(() => new Date(), []);
+
   // Refs mirror the latest local state so any async persist merges the freshest of
-  // every field (sections + review + notes) into the full data blob, regardless of
-  // which one triggered the write.
+  // every field (sections + review + notes + sources) into the full data blob,
+  // regardless of which one triggered the write.
   const sectionsRef = useRef(sections);
   const reviewRef = useRef(review);
   const notesRef = useRef(notes);
+  const sourceItemsRef = useRef(sourceItems);
+  const sourceMetaRef = useRef(sourceMeta);
   // Sync the mirrors after each commit. Handlers that persist immediately also set
   // their own ref inline (below) so they never wait on this effect.
   useEffect(() => {
     sectionsRef.current = sections;
     reviewRef.current = review;
     notesRef.current = notes;
+    sourceItemsRef.current = sourceItems;
+    sourceMetaRef.current = sourceMeta;
   });
 
   const reviewSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -242,12 +291,20 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
 
   // Recompute the deterministic guardrail checks over the CURRENT edited section
   // values (not stale draft.data) on every edit, so the checklist tracks live.
-  const checks = useMemo(
-    () => runContentChecks(contentFieldsFromSections(sections, draft.name), {
+  // Sources live outside `sections` now (they're the Sources tool), so re-inject a
+  // synthetic sources section built from the tool's rows for the approved-sources
+  // check.
+  const checks = useMemo(() => {
+    const sourcesSection: DocSection = {
+      key: 'sources',
+      label: 'Sources',
+      kind: 'list',
+      value: sourceItems.map((s) => s.url).filter(Boolean),
+    };
+    return runContentChecks(contentFieldsFromSections([...sections, sourcesSection], draft.name), {
       approvedHosts: OGMC_APPROVED_HOSTS,
-    }),
-    [sections, draft.name],
-  );
+    });
+  }, [sections, sourceItems, draft.name]);
 
   // Accept gate (locked decision #2 — the human overrides the judge). Two
   // conditions, and the AI judge is NOT one of them (it's advisory / display-only):
@@ -285,6 +342,11 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
   const mergedData = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
     ...draft.data,
     ...recordPatchFromSections(sectionsRef.current),
+    // Sources are re-serialized to their ORIGINAL container so the pipeline reader
+    // stays intact; unchanged rows round-trip verbatim. `sourceMeta` (camel — matches
+    // the read shape so it overrides cleanly) carries the reviewer-only verified flags.
+    sources: serializeSources(sourceItemsRef.current, sourcesContainer),
+    sourceMeta: sourceMetaRef.current,
     review: reviewRef.current,
     notes: notesRef.current,
     ...overrides,
@@ -344,6 +406,47 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
     );
   }
 
+  // --- Sources tool mutations (persist immediately via the full-blob merge) ---
+  function persistSources(nextItems: ParsedSource[], nextMeta: SourceMetaEntry[]) {
+    setSourceItems(nextItems);
+    setSourceMeta(nextMeta);
+    sourceItemsRef.current = nextItems;
+    sourceMetaRef.current = nextMeta;
+    persist().catch((err) =>
+      notify.error(err instanceof Error ? err.message : 'Could not save sources.'),
+    );
+  }
+
+  function addSource(url: string) {
+    const clean = url.trim();
+    if (!clean) return;
+    // A bare URL parses with raw=<url> (publisher=host, no date), so it serializes
+    // verbatim — appended cleanly to the stored `sources` in its original shape.
+    const parsed = parseSourceEntry(clean);
+    if (sourceItemsRef.current.some((s) => s.id === parsed.id)) return; // dedupe
+    persistSources([...sourceItemsRef.current, parsed], sourceMetaRef.current);
+  }
+
+  function removeSource(id: string) {
+    persistSources(
+      sourceItemsRef.current.filter((s) => s.id !== id),
+      sourceMetaRef.current.filter((m) => m.id !== id),
+    );
+  }
+
+  function toggleVerify(id: string) {
+    const existing = sourceMetaRef.current.find((m) => m.id === id);
+    const nextMeta = existing
+      ? sourceMetaRef.current.map((m) => (m.id === id ? { ...m, verified: !m.verified } : m))
+      : [...sourceMetaRef.current, { id, verified: true }];
+    persistSources(sourceItemsRef.current, nextMeta);
+  }
+
+  const verifiedMap = useMemo(
+    () => Object.fromEntries(sourceMeta.map((m) => [m.id, m.verified])),
+    [sourceMeta],
+  );
+
   async function accept() {
     if (!canAccept) return; // defensive — the button is disabled in this state
     if (!topic) {
@@ -385,6 +488,24 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
     }
   }
 
+  // Reject this candidate. There's no draft 'rejected' status in the enum, so do the
+  // minimal correct thing: record the reject verdict (already set on `review` via
+  // Your call) and mark the candidate not-chosen (`chosen: false`) — its sibling
+  // drafts stay available. No new lifecycle invented.
+  async function reject() {
+    setRejecting(true);
+    try {
+      await persist({ chosen: false });
+      await qc.invalidateQueries({ queryKey: ['entity', draftId] });
+      await qc.invalidateQueries({ queryKey: ['entities', CONTENT_TYPE_KEY, 'all'] });
+      notify.success('Candidate rejected.');
+    } catch (err) {
+      notify.error(err instanceof Error ? err.message : 'Could not reject.');
+    } finally {
+      setRejecting(false);
+    }
+  }
+
   // Compile the reviewer's critique and hand it to the n8n revise webhook, which
   // GPT-rewrites the draft into a NEW candidate (stamped revised_from = this id).
   // Flip this draft to needs_revision, then poll the draft set for the new version.
@@ -400,10 +521,12 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
     try {
       const blog = String(sectionValue(sectionsRef.current, 'blog') ?? '');
       const linkedin = String(sectionValue(sectionsRef.current, 'linkedin') ?? '');
-      const sourcesRaw = sectionValue(sectionsRef.current, 'sources');
-      const sources = Array.isArray(sourcesRaw)
-        ? sourcesRaw.map((s) => String(s)).join('\n')
-        : String(sourcesRaw ?? '');
+      // Sources now live in the Sources tool — hand the rewriter the same newline
+      // text it always got (each row's original entry line).
+      const sources = sourceItemsRef.current
+        .map((s) => (s.raw?.trim() ? s.raw.trim() : s.url))
+        .filter(Boolean)
+        .join('\n');
 
       const res = await fetch('/actions/request-revision', {
         method: 'POST',
@@ -459,12 +582,20 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
     [],
   );
 
-  const noteSections = ['general', ...sections.map((s) => s.key)];
+  const noteSections = ['general', 'blog', 'linkedin', 'seo', 'sources'];
 
-  // The blog is edited in its own BlogSection (so it can open in Read — locked
-  // decision #3); the remaining sections stay in the shared DocumentEditor.
-  const nonBlogSections = useMemo(() => sections.filter((s) => s.key !== 'blog'), [sections]);
+  // Content is channel-tabbed (P2): Brief = the blog in its own BlogSection (opens
+  // in Read — locked decision #3); LinkedIn + SEO render as single-section shared
+  // DocumentEditors; Sources is the dedicated tool. Each channel edits the SAME
+  // `sections`/sources state and persistence — no change to the stored data shape.
   const blogValue = String(sectionValue(sections, 'blog') ?? '');
+  const linkedinValue = String(sectionValue(sections, 'linkedin') ?? '');
+  const linkedinSection = useMemo(
+    () => sections.filter((s) => s.key === 'linkedin'),
+    [sections],
+  );
+  const seoSection = useMemo(() => sections.filter((s) => s.key === 'seo'), [sections]);
+  const sourcesCoverage = coverageSummary(sourceItems, today);
 
   // Header pills: AI-judge verdict, status, and candidate ordinal (# of N siblings
   // sharing this draft's topic).
@@ -502,7 +633,7 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
                 : 'bg-amber-100 text-amber-700'
             }`}
           >
-            AI judge: {verdict}
+            AI judge suggests: {verdict}
           </span>
         ) : null}
         {status ? (
@@ -540,16 +671,54 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
         </div>
       ) : null}
 
-      {/* Blog opens in the rendered (Read) view by default; Edit is opt-in and
-          Split only appears in edit mode (locked decision #3). */}
-      <BlogSection
-        value={blogValue}
-        onChange={(v) => onChange('blog', v)}
-        onSave={(v) => save([{ key: 'blog', label: 'Blog post', kind: 'markdown', value: v }])}
+      {/* One focused channel at a time — Brief default. */}
+      <ContentChannels
+        defaultChannel="brief"
+        channels={[
+          {
+            id: 'brief',
+            label: 'Brief',
+            badge: blogValue ? `${words(blogValue)}w` : undefined,
+            // Blog opens in the rendered (Read) view by default (locked decision #3).
+            content: (
+              <BlogSection
+                value={blogValue}
+                onChange={(v) => onChange('blog', v)}
+                onSave={(v) => save([{ key: 'blog', label: 'Blog post', kind: 'markdown', value: v }])}
+              />
+            ),
+          },
+          {
+            id: 'linkedin',
+            label: 'LinkedIn',
+            badge: linkedinValue ? `${words(linkedinValue)}w` : undefined,
+            content: <DocumentEditor sections={linkedinSection} onChange={onChange} onSave={save} />,
+          },
+          {
+            id: 'seo',
+            label: 'SEO',
+            content: <DocumentEditor sections={seoSection} onChange={onChange} onSave={save} />,
+          },
+          {
+            id: 'sources',
+            label: 'Sources',
+            badge: `${sourceItems.length}`,
+            warn: sourcesCoverage.concern,
+            content: (
+              <SourcesTool
+                items={sourceItems}
+                verified={verifiedMap}
+                approvedHosts={OGMC_APPROVED_HOSTS}
+                today={today}
+                judgeVerdict={judgeVerdict}
+                onAdd={addSource}
+                onRemove={removeSource}
+                onToggleVerify={toggleVerify}
+              />
+            ),
+          },
+        ]}
       />
-
-      {/* The remaining sections (LinkedIn, SEO, Sources) in the shared editor. */}
-      <DocumentEditor sections={nonBlogSections} onChange={onChange} onSave={save} />
     </div>
   );
 
@@ -562,6 +731,9 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
       onOverride={setOverride}
       review={review}
       onReviewChange={onReviewChange}
+      feedbackReady={feedbackReady}
+      canAccept={canAccept}
+      acceptGateHint={acceptGateHint}
       notes={notes}
       onAddNote={addNote}
       onResolveNote={resolveNote}
@@ -580,11 +752,57 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
     />
   );
 
+  // The decision bar reflects "Your call" (locked decision #2): ONE primary action
+  // driven by the reviewer's verdict. approve → Accept (gated), revise → Request
+  // revision (needs feedback), reject → Reject, none → disabled "Make your call".
+  const call = review.verdict;
+  const gateText = isApproved || isSent
+    ? null
+    : !call
+      ? 'Make your call'
+      : call === 'approve'
+        ? acceptGateHint ?? 'Ready to accept'
+        : call === 'revise'
+          ? feedbackReady
+            ? 'Feedback ready'
+            : 'Describe the changes to enable Request revision'
+          : 'This candidate will be dropped';
+  const gateWarn =
+    call === 'approve' ? !validationOk : call === 'revise' ? !feedbackReady : false;
+
+  const primaryAction = () => {
+    if (call === 'approve') return accept();
+    if (call === 'revise') return requestRevision();
+    if (call === 'reject') return reject();
+  };
+  const primaryLabel =
+    call === 'approve'
+      ? accepting
+        ? 'Accepting…'
+        : 'Accept'
+      : call === 'revise'
+        ? revising
+          ? 'Revising… (~1 min)'
+          : 'Request revision'
+        : call === 'reject'
+          ? rejecting
+            ? 'Rejecting…'
+            : 'Reject'
+          : 'Make your call';
+  const primaryDisabled =
+    !call ||
+    accepting ||
+    revising ||
+    rejecting ||
+    (call === 'approve' && !canAccept) ||
+    (call === 'revise' && !feedbackReady);
+  const primaryVariant = call === 'reject' ? 'destructive' : call === 'revise' ? 'secondary' : 'default';
+
   const decisionBar = (
     <>
-      {acceptGateHint ? (
-        <span className={`mr-auto text-xs ${validationOk ? 'text-amber-700' : 'text-red-600'}`}>
-          {acceptGateHint}
+      {gateText ? (
+        <span className={`mr-auto text-xs ${gateWarn ? 'text-amber-700' : 'text-neutral-500'}`}>
+          {gateText}
         </span>
       ) : (
         <span className="mr-auto" />
@@ -592,23 +810,18 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
       <Link href={backHref} className="text-sm text-neutral-500 hover:text-neutral-900">
         Cancel
       </Link>
-      {!isApproved && !isSent ? (
-        <Button
-          variant="secondary"
-          onClick={requestRevision}
-          disabled={revising || accepting || !feedbackReady}
-          title={feedbackReady ? undefined : 'Record scorecard or section feedback first'}
-        >
-          {revising ? 'Revising… (~1 min)' : 'Request revision'}
-        </Button>
-      ) : null}
       {isApproved || isSent ? (
         <Button variant="secondary" onClick={markSent} disabled={sending || isSent}>
           {isSent ? 'Sent' : sending ? 'Marking…' : 'Mark sent'}
         </Button>
       ) : (
-        <Button onClick={accept} disabled={accepting || !canAccept}>
-          {accepting ? 'Accepting…' : 'Accept'}
+        <Button
+          variant={primaryVariant}
+          onClick={primaryAction}
+          disabled={primaryDisabled}
+          title={call ? undefined : 'Pick Approve, Request changes, or Reject in the rail'}
+        >
+          {primaryLabel}
         </Button>
       )}
     </>
