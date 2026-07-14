@@ -106,6 +106,8 @@ function formatCell(value: unknown, attr: AttributeDef): string {
     // A json attr that stored a plain string — clamp it too.
     return clamp(String(value));
   }
-  // Plain text/number: leave full (the table wraps it readably).
-  return String(value);
+  // Everything else (text/longtext/number) is clamped to a one-line PREVIEW. A
+  // table cell is never the place for a 500-word body — that's what the detail
+  // page is for. Full content is one click away via the row.
+  return clamp(String(value));
 }

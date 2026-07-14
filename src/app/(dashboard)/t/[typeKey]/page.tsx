@@ -107,20 +107,26 @@ export default function TypeRecordsPage() {
   const hasStatusBoard = !!statusAttr;
 
   // Default-visible columns: Name + the content-defining fields (Kind, State,
-  // Judge, …) first, then the next few attrs, then Created. The rest hide behind
-  // the Columns menu so a blob-heavy type (draft) doesn't overflow the page.
+  // Judge, …) first, then the next few short attrs, then Created. Long body/blob
+  // fields (blog, linkedin, seo, sources, …) are NEVER default-visible — a table
+  // is for scanning, not reading a 500-word article; those live on the detail
+  // page and stay one toggle away in the Columns menu. persistKey is bumped so a
+  // previously-saved column choice that surfaced body fields is reset.
   const columnVisibility = useMemo(() => {
-    const attrIds = (type?.attributes ?? []).map((a) => a.name);
-    const preferred = ['content_type', 'status', 'judge_verdict', 'candidate_index', 'story_title'].filter(
+    const LONG_FIELDS = new Set([
+      'blog', 'linkedin', 'seo', 'sources', 'body', 'content', 'auto_checks', '_origin', '_sample',
+    ]);
+    const attrIds = (type?.attributes ?? []).map((a) => a.name).filter((n) => !LONG_FIELDS.has(n));
+    const preferred = ['content_type', 'status', 'judge_verdict', 'candidate_index', 'story_title', 'sent_at', 'market'].filter(
       (p) => attrIds.includes(p),
     );
     const rest = attrIds.filter((a) => !preferred.includes(a));
-    const visibleAttrs = [...preferred, ...rest].slice(0, 4);
+    const visibleAttrs = [...preferred, ...rest].slice(0, 5);
     return {
       enabled: true,
       alwaysVisible: ['name'],
       defaultVisible: ['name', ...visibleAttrs, 'createdAt'],
-      persistKey: `records-${typeKey}`,
+      persistKey: `records-${typeKey}-v2`,
     };
   }, [type?.attributes, typeKey]);
 

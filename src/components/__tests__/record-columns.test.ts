@@ -58,4 +58,15 @@ describe('buildRecordColumns', () => {
     expect(cell.length).toBeLessThanOrEqual(91); // 90 + the ellipsis
     expect(cell.endsWith('…')).toBe(true);
   });
+
+  it('clamps a long PLAIN-text cell to a one-line preview (no 500-word body in a table cell)', () => {
+    const cols = buildRecordColumns([
+      { id: '9', name: 'blog', dataType: 'longtext', required: false, config: {} },
+    ]);
+    const row = { data: { blog: 'The quick brown fox. '.repeat(80) } } as unknown as EntityRecord;
+    const cell = cellFor(cols, 'blog', row) as string;
+    expect(cell.length).toBeLessThanOrEqual(91);
+    expect(cell.endsWith('…')).toBe(true);
+    expect(cell).not.toContain('\n');
+  });
 });
