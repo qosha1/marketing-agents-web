@@ -2,12 +2,22 @@
 
 /**
  * Full-page draft editor (bd 768w.16.9 follow-up; reviewer-feedback + AI-revise
- * loop 768w.16.10.4/.5).
+ * loop 768w.16.10.4/.5; two-pane review redesign P1).
  *
  * Promotes the draft editor from a cramped inline panel inside the topic drawer
  * to a first-tier dashboard route (/draft/<id>) so a full article is comfortable
- * to write. It renders inside the (dashboard) layout (sidebar + full-width main),
- * so the DocumentEditor lays out full width as the primary page content.
+ * to write. It renders inside the (dashboard) layout (sidebar + full-width main).
+ *
+ * Two-pane layout (P1): the content pane (blog/LinkedIn/SEO/Sources) sits LEFT and
+ * a Quality rail (validation + AI-judge + reviewer scorecard/notes + revision
+ * history) sits RIGHT, over a pinned decision bar; below `lg` the rail drops under
+ * the content behind a Content|Quality toggle. The presentational shell + rail +
+ * blog card are fork-local (src/components/draft-review/*) pending extraction to a
+ * shared composer — this page still owns ALL section state and persistence. The
+ * blog opens in the rendered (Read) view by default (BlogSection); the remaining
+ * sections stay in the shared DocumentEditor. Accept is gated on the deterministic
+ * checks (with reasoned override) AND a human `approve` verdict — the AI judge is
+ * advisory only and never blocks Accept.
  *
  * The editor is CONTROLLED: this page owns the section values (via onChange) and
  * ALL persistence. The backend PATCH REPLACES the whole `data` blob (no deep
@@ -43,13 +53,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Button,
   notify,
-  ValidationChecklist,
   runContentChecks,
   overallStatus,
-  ReviewScorecard,
-  ReviewNotes,
-  DEFAULT_REVIEW_DIMENSIONS,
-  DiffViewer,
   type JudgeVerdict,
   type ValidationOverride,
   type ReviewScore,
@@ -63,7 +68,16 @@ import {
 
 import { readData } from '@/lib/board';
 import { CONTENT_TYPE_KEY, contentCategoryLabel, contentTabHref } from '@/lib/content';
-import { draftJudgeVerdict, draftStatus, draftTitle, DRAFT_TYPE } from '@/lib/topic-drafts';
+import {
+  draftCandidateIndex,
+  draftJudgeVerdict,
+  draftStatus,
+  draftTitle,
+  DRAFT_TYPE,
+} from '@/lib/topic-drafts';
+import { DraftReviewLayout } from '@/components/draft-review/DraftReviewLayout';
+import { QualityRail } from '@/components/draft-review/QualityRail';
+import { BlogSection } from '@/components/draft-review/BlogSection';
 import { contentFieldsFromSections, OGMC_APPROVED_HOSTS } from '@/lib/content-checks';
 import {
   getEntity,
@@ -235,12 +249,27 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
     [sections, draft.name],
   );
 
-  // Accept is gated: allowed unless a check FAILS, or the reviewer recorded a
-  // reasoned override.
+  // Accept gate (locked decision #2 — the human overrides the judge). Two
+  // conditions, and the AI judge is NOT one of them (it's advisory / display-only):
+  //   1. the deterministic ValidationChecklist checks don't FAIL — unless the
+  //      reviewer records a reasoned override (unchanged); AND
+  //   2. the reviewer has signed off: a human `approve` verdict on the scorecard.
+  // A human `approve` unlocks Accept regardless of what the AI judge said.
   const overriddenWithReason =
     override.overridden && (override.reason ?? '').trim().length > 0;
-  const canAccept = overallStatus(checks) !== 'fail' || overriddenWithReason;
+  const validationOk = overallStatus(checks) !== 'fail' || overriddenWithReason;
+  const reviewerSignedOff = review.verdict === 'approve';
+  const canAccept = validationOk && reviewerSignedOff;
   const failingLabels = checks.filter((c) => c.status === 'fail').map((c) => c.label);
+
+  // The gating hint on the left of the decision bar: fix failing checks first,
+  // else prompt the reviewer to sign off. Null once Accept is unlocked.
+  const acceptGateHint =
+    !validationOk && failingLabels.length > 0
+      ? `Fix to accept: ${failingLabels.join(', ')}`
+      : validationOk && !reviewerSignedOff
+        ? 'Set your verdict to Approve to accept'
+        : null;
 
   const feedbackReady = useMemo(
     () => compileFeedback(review, notes).trim().length > 0,
@@ -263,10 +292,18 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
   const persist = (overrides: Record<string, unknown> = {}) =>
     updateEntity(draft.id, { data: mergedData(overrides) });
 
-  // Debounced autosave from the DocumentEditor. No list invalidation here — the
-  // editor shows its own "Saved" pill, and refetching mid-edit would churn it.
-  async function save(next: DocSection[]) {
-    sectionsRef.current = next;
+  // Debounced autosave from the content editors. No list invalidation here — the
+  // editors show their own "Saved" pill, and refetching mid-edit would churn it.
+  // The DocumentEditor holds a SUBSET of the sections (the blog is edited in its
+  // own BlogSection so it can open in Read — locked decision #3), so merge the
+  // edited subset back into the full section ref rather than replacing it, or a
+  // section would drop out of the ref and the next full-blob PATCH would lose it.
+  async function save(edited?: DocSection[]) {
+    if (edited && edited.length) {
+      sectionsRef.current = sectionsRef.current.map(
+        (s) => edited.find((e) => e.key === s.key) ?? s,
+      );
+    }
     await updateEntity(draft.id, { data: mergedData() });
   }
 
@@ -424,47 +461,71 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
 
   const noteSections = ['general', ...sections.map((s) => s.key)];
 
-  return (
-    <div className="space-y-6 pb-4">
-      <header className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0 space-y-1">
-          <Link
-            href={backHref}
-            className="inline-flex items-center gap-1 text-sm text-neutral-500 hover:text-neutral-900"
-          >
-            ← Back to {contentCategoryLabel(contentType)} board
-          </Link>
-          <h1 className="truncate text-xl font-semibold">{draft.name || draftTitle(draft)}</h1>
-          {topic ? (
-            <p className="truncate text-sm text-neutral-500">
-              Topic: {topic.name || draftTitle(topic)}
-            </p>
-          ) : null}
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          {verdict ? (
-            <span
-              className={`rounded-full px-2.5 py-0.5 text-xs ${
-                verdict === 'accept'
-                  ? 'bg-emerald-100 text-emerald-700'
-                  : 'bg-amber-100 text-amber-700'
-              }`}
-            >
-              judge: {verdict}
-            </span>
-          ) : null}
-          {status ? (
-            <span
-              className={`rounded-full px-2.5 py-0.5 text-xs capitalize ${
-                STATUS_PILL_TONE[status] ?? 'bg-neutral-100 text-neutral-600'
-              }`}
-            >
-              {status.replace(/_/g, ' ')}
-            </span>
-          ) : null}
-        </div>
-      </header>
+  // The blog is edited in its own BlogSection (so it can open in Read — locked
+  // decision #3); the remaining sections stay in the shared DocumentEditor.
+  const nonBlogSections = useMemo(() => sections.filter((s) => s.key !== 'blog'), [sections]);
+  const blogValue = String(sectionValue(sections, 'blog') ?? '');
 
+  // Header pills: AI-judge verdict, status, and candidate ordinal (# of N siblings
+  // sharing this draft's topic).
+  const candidateIndex = draftCandidateIndex(draft);
+  const siblingCount = useMemo(
+    () =>
+      allDrafts.filter(
+        (d) => topicRef && String(readData(d.data, 'topic_ref') ?? '') === topicRef,
+      ).length,
+    [allDrafts, topicRef],
+  );
+
+  const header = (
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="min-w-0 space-y-1">
+        <Link
+          href={backHref}
+          className="inline-flex items-center gap-1 text-sm text-neutral-500 hover:text-neutral-900"
+        >
+          ← Back to {contentCategoryLabel(contentType)} board
+        </Link>
+        <h1 className="text-xl font-semibold">{draft.name || draftTitle(draft)}</h1>
+        {topic ? (
+          <p className="truncate text-sm text-neutral-500">
+            Topic: {topic.name || draftTitle(topic)}
+          </p>
+        ) : null}
+      </div>
+      <div className="flex shrink-0 flex-wrap items-center gap-2">
+        {verdict ? (
+          <span
+            className={`rounded-full px-2.5 py-0.5 text-xs ${
+              verdict === 'accept'
+                ? 'bg-emerald-100 text-emerald-700'
+                : 'bg-amber-100 text-amber-700'
+            }`}
+          >
+            AI judge: {verdict}
+          </span>
+        ) : null}
+        {status ? (
+          <span
+            className={`rounded-full px-2.5 py-0.5 text-xs capitalize ${
+              STATUS_PILL_TONE[status] ?? 'bg-neutral-100 text-neutral-600'
+            }`}
+          >
+            {status.replace(/_/g, ' ')}
+          </span>
+        ) : null}
+        {candidateIndex > 0 ? (
+          <span className="rounded-full border border-border bg-neutral-50 px-2.5 py-0.5 text-xs text-neutral-500">
+            candidate #{candidateIndex}
+            {siblingCount > 1 ? ` of ${siblingCount}` : ''}
+          </span>
+        ) : null}
+      </div>
+    </div>
+  );
+
+  const content = (
+    <div className="space-y-4">
       {/* A newer revision was generated from this draft — surface a jump link. */}
       {latestChild ? (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-800">
@@ -479,136 +540,81 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
         </div>
       ) : null}
 
-      <DocumentEditor sections={sections} onChange={onChange} onSave={save} />
-
-      {/* Reviewer feedback: structured scorecard + section-scoped critique notes.
-          The scorecard autosaves (debounced); notes save on add/resolve. */}
-      <div className="grid gap-4 lg:grid-cols-2">
-        <ReviewScorecard
-          value={review}
-          onChange={onReviewChange}
-          dimensions={DEFAULT_REVIEW_DIMENSIONS}
-          title="Reviewer scorecard"
-        />
-        <div className="space-y-2">
-          <label className="flex items-center gap-2 text-xs text-neutral-500">
-            Note about
-            <select
-              value={noteSection}
-              onChange={(e) => setNoteSection(e.target.value)}
-              className="rounded-md border px-2 py-1 text-xs capitalize"
-              aria-label="Section this note is about"
-            >
-              {noteSections.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
-          </label>
-          <ReviewNotes
-            notes={notes}
-            onAdd={addNote}
-            onResolve={resolveNote}
-            title="Section notes"
-            emptyMessage="No section notes yet."
-          />
-        </div>
-      </div>
-
-      {/* Live validation: deterministic checks recomputed over the edited sections
-          plus the stored AI-judge verdict. Gates Accept below. */}
-      <ValidationChecklist
-        checks={checks}
-        judgeVerdict={judgeVerdict}
-        override={override}
-        onOverride={setOverride}
+      {/* Blog opens in the rendered (Read) view by default; Edit is opt-in and
+          Split only appears in edit mode (locked decision #3). */}
+      <BlogSection
+        value={blogValue}
+        onChange={(v) => onChange('blog', v)}
+        onSave={(v) => save([{ key: 'blog', label: 'Blog post', kind: 'markdown', value: v }])}
       />
 
-      {/* Revision history + parent diff (only when this draft is part of a lineage). */}
-      {chain.length > 1 || parentId ? (
-        <section className="space-y-3 rounded-xl border bg-card p-5 text-card-foreground shadow">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <h3 className="text-sm font-semibold text-neutral-900">Revision history</h3>
-            {parentId ? (
-              <button
-                type="button"
-                onClick={() => setShowDiff((v) => !v)}
-                className="text-xs font-medium text-neutral-600 underline hover:text-neutral-900"
-              >
-                {showDiff ? 'Hide diff' : 'Compare to previous'}
-              </button>
-            ) : null}
-          </div>
-          <ol className="flex flex-wrap items-center gap-2 text-sm">
-            {chain.map((d, i) => {
-              const isCurrent = String(d.id) === String(draft.id);
-              return (
-                <li key={d.id} className="flex items-center gap-2">
-                  {i > 0 ? <span className="text-neutral-300">→</span> : null}
-                  {isCurrent ? (
-                    <span className="rounded-full bg-neutral-900 px-2.5 py-0.5 text-xs font-medium text-white">
-                      v{i + 1} (this)
-                    </span>
-                  ) : (
-                    <Link
-                      href={`/draft/${d.id}`}
-                      className="rounded-full border px-2.5 py-0.5 text-xs text-neutral-600 hover:text-neutral-900"
-                    >
-                      v{i + 1}
-                    </Link>
-                  )}
-                </li>
-              );
-            })}
-          </ol>
-          {parentId && showDiff ? (
-            <div className="h-[480px] overflow-hidden rounded-lg border">
-              <DiffViewer
-                diff={blogDiff}
-                baseRef={`previous version (draft #${parentId})`}
-                isLoading={parentQuery.isLoading}
-                error={parentQuery.isError ? 'Could not load the previous version.' : null}
-                onRefresh={() => parentQuery.refetch()}
-                emptyLabel="No changes to the blog vs the previous version"
-              />
-            </div>
-          ) : null}
-        </section>
-      ) : null}
-
-      {/* Gated Accept + handoff: a sticky footer that stays reachable while
-          scrolling a long article. Negative margins let its border span the full
-          content width against the layout's gray background. */}
-      <div className="sticky bottom-0 -mx-8 flex flex-wrap items-center justify-end gap-3 border-t border-neutral-200 bg-gray-50/95 px-8 py-3 backdrop-blur">
-        {!canAccept && failingLabels.length > 0 ? (
-          <span className="mr-auto text-xs text-red-600">
-            Fix to accept: {failingLabels.join(', ')}
-          </span>
-        ) : null}
-        <Link href={backHref} className="text-sm text-neutral-500 hover:text-neutral-900">
-          Cancel
-        </Link>
-        {!isApproved && !isSent ? (
-          <Button
-            variant="secondary"
-            onClick={requestRevision}
-            disabled={revising || accepting || !feedbackReady}
-            title={feedbackReady ? undefined : 'Record scorecard or section feedback first'}
-          >
-            {revising ? 'Revising… (~1 min)' : 'Request revision'}
-          </Button>
-        ) : null}
-        {isApproved || isSent ? (
-          <Button variant="secondary" onClick={markSent} disabled={sending || isSent}>
-            {isSent ? 'Sent' : sending ? 'Marking…' : 'Mark sent'}
-          </Button>
-        ) : (
-          <Button onClick={accept} disabled={accepting || !canAccept}>
-            {accepting ? 'Accepting…' : 'Accept'}
-          </Button>
-        )}
-      </div>
+      {/* The remaining sections (LinkedIn, SEO, Sources) in the shared editor. */}
+      <DocumentEditor sections={nonBlogSections} onChange={onChange} onSave={save} />
     </div>
+  );
+
+  const rail = (
+    <QualityRail
+      checks={checks}
+      judgeVerdict={judgeVerdict}
+      judgeVerdictWord={verdict}
+      override={override}
+      onOverride={setOverride}
+      review={review}
+      onReviewChange={onReviewChange}
+      notes={notes}
+      onAddNote={addNote}
+      onResolveNote={resolveNote}
+      noteSection={noteSection}
+      onNoteSectionChange={setNoteSection}
+      noteSections={noteSections}
+      chain={chain}
+      currentId={String(draft.id)}
+      parentId={parentId}
+      showDiff={showDiff}
+      onToggleDiff={() => setShowDiff((v) => !v)}
+      blogDiff={blogDiff}
+      parentLoading={parentQuery.isLoading}
+      parentError={parentQuery.isError}
+      onRefreshParent={() => parentQuery.refetch()}
+    />
+  );
+
+  const decisionBar = (
+    <>
+      {acceptGateHint ? (
+        <span className={`mr-auto text-xs ${validationOk ? 'text-amber-700' : 'text-red-600'}`}>
+          {acceptGateHint}
+        </span>
+      ) : (
+        <span className="mr-auto" />
+      )}
+      <Link href={backHref} className="text-sm text-neutral-500 hover:text-neutral-900">
+        Cancel
+      </Link>
+      {!isApproved && !isSent ? (
+        <Button
+          variant="secondary"
+          onClick={requestRevision}
+          disabled={revising || accepting || !feedbackReady}
+          title={feedbackReady ? undefined : 'Record scorecard or section feedback first'}
+        >
+          {revising ? 'Revising… (~1 min)' : 'Request revision'}
+        </Button>
+      ) : null}
+      {isApproved || isSent ? (
+        <Button variant="secondary" onClick={markSent} disabled={sending || isSent}>
+          {isSent ? 'Sent' : sending ? 'Marking…' : 'Mark sent'}
+        </Button>
+      ) : (
+        <Button onClick={accept} disabled={accepting || !canAccept}>
+          {accepting ? 'Accepting…' : 'Accept'}
+        </Button>
+      )}
+    </>
+  );
+
+  return (
+    <DraftReviewLayout header={header} content={content} rail={rail} decisionBar={decisionBar} />
   );
 }
