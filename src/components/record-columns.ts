@@ -2,6 +2,27 @@ import type { ColumnConfig } from '@startsimpli/ui';
 import type { AttributeDef, EntityRecord } from '@/lib/foundry-api';
 
 /**
+ * Human column headers. A few known keys get a domain label (content_type →
+ * "Kind", status → "State" — the vocabulary the content tables use); everything
+ * else is de-snaked and sentence-cased so a raw `country_code` reads as
+ * "Country code" instead of a machine name. Generic — no type is special-cased.
+ */
+const HEADER_LABELS: Record<string, string> = {
+  content_type: 'Kind',
+  status: 'State',
+  judge_verdict: 'Judge',
+  story_title: 'Title',
+  candidate_index: '#',
+};
+
+export function humanizeHeader(name: string): string {
+  const known = HEADER_LABELS[name];
+  if (known) return known;
+  const spaced = name.replace(/_+/g, ' ').trim();
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
+/**
  * Build UnifiedTable columns from a type's declared attributes. Each attribute
  * becomes a column reading out of the record's `data` blob; a leading Name
  * column and a trailing Created column frame them.
@@ -11,7 +32,7 @@ export function buildRecordColumns(
 ): ColumnConfig<EntityRecord>[] {
   const attrColumns: ColumnConfig<EntityRecord>[] = attributes.map((attr) => ({
     id: attr.name,
-    header: attr.name,
+    header: humanizeHeader(attr.name),
     cell: (row) => formatCell(readAttrValue(row.data, attr.name), attr),
   }));
 

@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import { buildNav } from '@/foundry.nav';
-import { CONTENT_CATEGORIES, contentTabHref } from '@/lib/content';
 import type { AttributeDef, EntityTypeDef } from '@/lib/foundry-api';
 
 const statusAttr: AttributeDef = {
@@ -33,27 +32,26 @@ function group(items: ReturnType<typeof buildNav>, label: string) {
 describe('buildNav', () => {
   const items = buildNav([topic, draft, deal, source]);
 
-  it('leads with Dashboard then Drafts top-level links', () => {
+  it('leads with a Dashboard top-level link', () => {
     expect(items[0]).toMatchObject({ href: '/', label: 'Dashboard' });
-    expect(items[1]).toMatchObject({ href: '/drafts', label: 'Drafts' });
   });
 
-  it('builds a Content group with one tab per content_type category', () => {
+  it('builds a Content group of two data tables: Topics + Drafts', () => {
     const content = group(items, 'Content');
-    expect(content.items).toEqual(
-      CONTENT_CATEGORIES.map((c) => ({ href: contentTabHref(c.key), label: c.label })),
-    );
-    // The tabs share a pathname, differ by query — that is what the sidebar's
-    // active matcher disambiguates.
-    expect(content.items.every((i) => i.href.startsWith('/board/topic?'))).toBe(true);
+    expect(content.items.map((i) => ({ href: i.href, label: i.label }))).toEqual([
+      { href: '/t/topic', label: 'Topics' },
+      { href: '/t/draft', label: 'Drafts' },
+    ]);
+    // Both are the flat, clickable table route (not the kanban board).
+    expect(content.items.every((i) => i.href.startsWith('/t/'))).toBe(true);
   });
 
   it('lists the OTHER declared types under Data, excluding topic and draft', () => {
     const data = group(items, 'Data');
     const labels = data.items.map((i) => i.label);
     expect(labels).toEqual(['Deal', 'Source']);
-    expect(labels).not.toContain('Topic'); // covered by Content
-    expect(labels).not.toContain('Draft'); // covered by /drafts
+    expect(labels).not.toContain('Topic'); // covered by Content → Topics
+    expect(labels).not.toContain('Draft'); // covered by Content → Drafts
   });
 
   it('routes a status type to its board and a plain type to its table', () => {
@@ -76,6 +74,7 @@ describe('buildNav', () => {
   it('still renders without any declared types (schema not yet loaded)', () => {
     const items3 = buildNav([]);
     expect(items3[0]).toMatchObject({ href: '/', label: 'Dashboard' });
-    expect(group(items3, 'Content').items).toHaveLength(CONTENT_CATEGORIES.length);
+    // The Content group's two static tables render regardless of schema load.
+    expect(group(items3, 'Content').items.map((i) => i.label)).toEqual(['Topics', 'Drafts']);
   });
 });

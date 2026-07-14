@@ -8,27 +8,33 @@
  *
  * The tree:
  *   - Dashboard (/)               — the review/system-health home
- *   - Drafts (/drafts)            — the bespoke candidate-compare review
- *   - Content group               — the 3 content_type categories of `topic`
+ *   - Content group               — the two content data tables:
+ *       · Topics (/t/topic)       — every idea (all kinds), click → review/edit
+ *       · Drafts (/t/draft)       — every written body, click → the draft editor
  *   - Data group                  — every OTHER declared type (board or table)
  *   - About (/about)
+ *
+ * Content is table-first now: flat, filterable, clickable data lists rather than
+ * three per-kind kanban boards (Kind is a filter inside the Topics table; the
+ * board is still one click away via each table's Board-view toggle). The
+ * candidate-compare workspace still lives at /drafts (reachable by URL) but is no
+ * longer a primary nav item.
  *
  * Icons are built with `React.createElement` (not JSX) so this stays a plain
  * `.ts` module and the pure `buildNav` logic is unit-testable without a DOM.
  */
 import { createElement } from 'react';
-import { LayoutDashboard, FileText, LayoutGrid, Table } from 'lucide-react';
+import { LayoutDashboard, FileText, Lightbulb, LayoutGrid, Table } from 'lucide-react';
 import type { GroupedNavEntry } from '@startsimpli/ui';
 
-import { CONTENT_CATEGORIES, CONTENT_TYPE_KEY, contentTabHref } from '@/lib/content';
+import { CONTENT_TYPE_KEY } from '@/lib/content';
 import { isBoardType, typeRoute } from '@/lib/board';
 import type { EntityTypeDef } from '@/lib/foundry-api';
 
 /**
- * Types the nav does NOT surface as a generic Data link because a bespoke
- * destination already covers them:
- *   - `topic` (CONTENT_TYPE_KEY) — the Content group's 3 content_type tabs.
- *   - `draft`                    — the top-level Drafts item (candidate compare).
+ * Types the nav does NOT surface as a generic Data link because the Content group
+ * already covers them: `topic` (CONTENT_TYPE_KEY) as the Topics table and `draft`
+ * as the Drafts table.
  */
 const DRAFT_TYPE_KEY = 'draft';
 
@@ -44,13 +50,12 @@ export function buildNav(types: EntityTypeDef[]): GroupedNavEntry[] {
 
   const items: GroupedNavEntry[] = [
     { href: '/', label: 'Dashboard', icon: createElement(LayoutDashboard) },
-    { href: '/drafts', label: 'Drafts', icon: createElement(FileText) },
     {
       label: 'Content',
-      items: CONTENT_CATEGORIES.map((c) => ({
-        href: contentTabHref(c.key),
-        label: c.label,
-      })),
+      items: [
+        { href: `/t/${CONTENT_TYPE_KEY}`, label: 'Topics', icon: createElement(Lightbulb) },
+        { href: `/t/${DRAFT_TYPE_KEY}`, label: 'Drafts', icon: createElement(FileText) },
+      ],
     },
   ];
 

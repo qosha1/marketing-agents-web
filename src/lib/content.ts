@@ -30,13 +30,14 @@ export const CONTENT_CATEGORIES: ContentCategory[] = [
 ];
 
 /**
- * The route for a content tab: the `topic` status board filtered to one
- * content_type. Board (not table) because topic is a status type and the pipeline
- * is the natural "manage this content" view. The `board/[typeKey]` route reads the
- * `content_type` query param and filters the records it lays into lanes.
+ * The route to browse one content_type: the `topic` records TABLE pre-filtered to
+ * that category. Table (not board) is the primary content view now — a flat,
+ * clickable data list of every instance in that kind (the board is still one click
+ * away via the table's Board-view toggle). The `t/[typeKey]` route seeds its Kind
+ * facet from the `content_type` query param.
  */
 export function contentTabHref(categoryKey: string): string {
-  return `/board/${CONTENT_TYPE_KEY}?${CONTENT_TYPE_ATTR}=${encodeURIComponent(categoryKey)}`;
+  return `/t/${CONTENT_TYPE_KEY}?${CONTENT_TYPE_ATTR}=${encodeURIComponent(categoryKey)}`;
 }
 
 export function contentCategoryLabel(key: string): string {
