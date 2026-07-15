@@ -9,7 +9,14 @@
 # --frozen-lockfile`). Copying the local node_modules in is fragile — if it's
 # linked to the monorepo's shared pnpm store (e.g. after a workspace `pnpm add`),
 # the symlinks dangle in the image and `next build` fails to resolve its own bin.
+#
+# .next is EXCLUDED for the same reason: once anyone has run `pnpm dev`/`pnpm
+# build` here, the local .next is ~335MB of dev artifacts that `COPY . .` would
+# bake into a layer the push then has to upload (context 28MB -> 322MB, and the
+# ECR push stalls). The image's .next comes from the Dockerfile's own `pnpm
+# build`, never from the host.
 node_modules
+.next
 .env.local
 .env*.local
 .git
