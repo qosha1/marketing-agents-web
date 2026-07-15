@@ -10,7 +10,7 @@
  *   • Signals (read-only) — Checks x/n + the AI judge verdict shown as a SUGGESTION
  *     (never a control). The judge's full reasoning stays reachable in the
  *     Validation panel below.
- *   • Your call — a single verdict control (Approve / Request changes / Reject) that
+ *   • Decision — a single verdict control (Approve / Request changes / Reject) that
  *     DRIVES the decision-bar's one primary action (Accept / Request revision /
  *     Reject). "Request changes" reveals ONE feedback box ("what should the rewrite
  *     fix?", stored on `review.overallNote` so compileFeedback keeps feeding the
@@ -59,7 +59,7 @@ export interface QualityRailProps {
   override: ValidationOverride;
   onOverride: (next: ValidationOverride) => void;
 
-  // Your call + scores
+  // Decision + scores
   review: ReviewScore;
   onReviewChange: (next: ReviewScore) => void;
   /** Whether the compiled feedback is non-empty (drives the revise-ready hint). */
@@ -211,7 +211,7 @@ export function QualityRail(props: QualityRailProps) {
       {/* THE one decision */}
       <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
         <div className="px-4 pt-3">
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-primary">Your call</div>
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-primary">Decision</div>
           <div className="mt-0.5 text-xs text-muted-foreground">
             {call === 'approve'
               ? 'You approve — the button below becomes Accept.'

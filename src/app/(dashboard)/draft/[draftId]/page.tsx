@@ -490,7 +490,7 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
 
   // Reject this candidate. There's no draft 'rejected' status in the enum, so do the
   // minimal correct thing: record the reject verdict (already set on `review` via
-  // Your call) and mark the candidate not-chosen (`chosen: false`) — its sibling
+  // the Decision control) and mark the candidate not-chosen (`chosen: false`) — its sibling
   // drafts stay available. No new lifecycle invented.
   async function reject() {
     setRejecting(true);
@@ -752,14 +752,14 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
     />
   );
 
-  // The decision bar reflects "Your call" (locked decision #2): ONE primary action
-  // driven by the reviewer's verdict. approve → Accept (gated), revise → Request
-  // revision (needs feedback), reject → Reject, none → disabled "Make your call".
+  // The decision bar reflects the rail's "Decision" (locked decision #2): ONE primary
+  // action driven by the reviewer's verdict. approve → Accept (gated), revise → Request
+  // revision (needs feedback), reject → Reject, none → disabled "Choose a decision".
   const call = review.verdict;
   const gateText = isApproved || isSent
     ? null
     : !call
-      ? 'Make your call'
+      ? 'Choose a decision'
       : call === 'approve'
         ? acceptGateHint ?? 'Ready to accept'
         : call === 'revise'
@@ -788,7 +788,7 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
           ? rejecting
             ? 'Rejecting…'
             : 'Reject'
-          : 'Make your call';
+          : 'Choose a decision';
   const primaryDisabled =
     !call ||
     accepting ||
