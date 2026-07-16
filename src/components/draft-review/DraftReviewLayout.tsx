@@ -8,6 +8,11 @@
  * Below `lg` the rail drops under the content and a sticky Content | Quality
  * segmented toggle shows exactly one pane at a time; the decision bar stays pinned.
  *
+ * Optionally CONTROLLED (bd 768w.16.15.3): below `lg` the two panes are mutually
+ * exclusive, so a jump-to-issue fired FROM the rail would land on a content pane
+ * that is still `hidden` — a dead click. Pass `pane` and the page can reveal the
+ * content it just jumped into. Omit it and the internal toggle behaves as before.
+ *
  * Presentational shell — slots only. All state + persistence live in the draft
  * page. Fork-local for now; extracted to a shared composer once confirmed.
  */
@@ -15,17 +20,34 @@ import * as React from 'react';
 
 import { cn } from '@startsimpli/ui/utils';
 
+export type Pane = 'content' | 'quality';
+
 export interface DraftReviewLayoutProps {
   header: React.ReactNode;
   content: React.ReactNode;
   rail: React.ReactNode;
   decisionBar: React.ReactNode;
+  /** Controlled visible pane below `lg`. Provide it and the caller owns it. */
+  pane?: Pane;
+  /** Fires on every pane switch, controlled or not. */
+  onPaneChange?: (pane: Pane) => void;
 }
 
-type Pane = 'content' | 'quality';
+export function DraftReviewLayout({
+  header,
+  content,
+  rail,
+  decisionBar,
+  pane: controlledPane,
+  onPaneChange,
+}: DraftReviewLayoutProps) {
+  const [internalPane, setInternalPane] = React.useState<Pane>('content');
+  const pane = controlledPane ?? internalPane;
 
-export function DraftReviewLayout({ header, content, rail, decisionBar }: DraftReviewLayoutProps) {
-  const [pane, setPane] = React.useState<Pane>('content');
+  const setPane = (next: Pane) => {
+    if (controlledPane === undefined) setInternalPane(next);
+    onPaneChange?.(next);
+  };
 
   return (
     <div className="flex flex-col gap-4 pb-4">

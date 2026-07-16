@@ -41,10 +41,19 @@ export interface SourcesToolProps {
   approvedHosts: string[];
   today: Date;
   judgeVerdict?: JudgeVerdict;
+  /**
+   * Source URLs an active jump-to-issue is pointing at (bd 768w.16.15.3) — the
+   * approved-sources check's `matches`. Rows are a list, not prose, so the offending
+   * ones are marked outright instead of highlighting a substring of them.
+   */
+  flagged?: string[];
   onAdd(url: string): void;
   onRemove(id: string): void;
   onToggleVerify(id: string): void;
 }
+
+/** Stable identity for "nothing flagged". */
+const NO_FLAGS: string[] = [];
 
 /** The judge's guardrails that the Sources tool can act on (recency / sourcing). */
 function sourcingConcerns(judge?: JudgeVerdict): string[] {
@@ -61,6 +70,7 @@ export function SourcesTool({
   approvedHosts,
   today,
   judgeVerdict,
+  flagged = NO_FLAGS,
   onAdd,
   onRemove,
   onToggleVerify,
@@ -123,6 +133,10 @@ export function SourcesTool({
               tier={sourceTier(s.url, approvedHosts)}
               ageDays={sourceAgeDays(s.date, today)}
               verified={!!verified[s.id]}
+              // The check extracts URLs from the same rows we render, so an exact
+              // match is the honest test: a row that doesn't match simply isn't
+              // marked — the jump still opened this channel.
+              flagged={flagged.includes(s.url)}
               onToggleVerify={() => onToggleVerify(s.id)}
               onRemove={() => onRemove(s.id)}
             />
@@ -172,6 +186,7 @@ function SourceRow({
   tier,
   ageDays,
   verified,
+  flagged,
   onToggleVerify,
   onRemove,
 }: {
@@ -179,12 +194,18 @@ function SourceRow({
   tier: 'approved' | 'unverified';
   ageDays: number | null;
   verified: boolean;
+  flagged: boolean;
   onToggleVerify: () => void;
   onRemove: () => void;
 }) {
   const stale = isStale(ageDays);
   return (
-    <li className="rounded-xl border border-border bg-card p-3">
+    <li
+      className={cn(
+        'rounded-xl border border-border bg-card p-3',
+        flagged && 'border-amber-400 ring-2 ring-amber-300',
+      )}
+    >
       <div className="flex items-start gap-3">
         <div
           className={cn(
@@ -260,9 +281,15 @@ function SourceRow({
               </span>
             )}
             {source.url ? (
-              <span className="truncate rounded-md px-1 text-[11px] text-primary/80">
-                {hostOf(source.url) || source.url}
-              </span>
+              flagged ? (
+                <mark className="truncate rounded-md bg-amber-200 px-1 text-[11px] font-medium text-amber-900">
+                  {hostOf(source.url) || source.url}
+                </mark>
+              ) : (
+                <span className="truncate rounded-md px-1 text-[11px] text-primary/80">
+                  {hostOf(source.url) || source.url}
+                </span>
+              )
             ) : null}
           </div>
         </div>

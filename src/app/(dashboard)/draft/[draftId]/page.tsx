@@ -45,9 +45,15 @@
  * unless the reviewer records a reasoned override. Accept flips the draft
  * (chosen + approved) and its parent topic (written) together; once approved, a
  * "Mark sent" hands off (status → sent, posting stays manual).
+ *
+ * Jump-to-issue (P3, bd 768w.16.15.3): the checks now report WHERE they failed, so
+ * this page owns the jump — the active channel + pane (both shells took an optional
+ * controlled mode for it) and the active issue. The reviewer clicks an issue in the
+ * rail (or presses j/k) and lands on the offending field with the text marked,
+ * instead of decoding "Checks 7/8". a/r/x set the Decision from the keyboard.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -75,12 +81,23 @@ import {
   draftTitle,
   DRAFT_TYPE,
 } from '@/lib/topic-drafts';
-import { DraftReviewLayout } from '@/components/draft-review/DraftReviewLayout';
+import { DraftReviewLayout, type Pane } from '@/components/draft-review/DraftReviewLayout';
 import { QualityRail } from '@/components/draft-review/QualityRail';
 import { BlogSection } from '@/components/draft-review/BlogSection';
 import { ContentChannels } from '@/components/draft-review/ContentChannels';
 import { SourcesTool } from '@/components/draft-review/SourcesTool';
 import { contentFieldsFromSections, OGMC_APPROVED_HOSTS } from '@/lib/content-checks';
+import {
+  findStopIndex,
+  isChannelId,
+  issueStops,
+  nextStopIndex,
+  prevStopIndex,
+  stopIndexForCheck,
+  type ChannelId,
+  type StopKey,
+} from '@/lib/issue-jump';
+import { shouldIgnoreShortcut } from '@/lib/keyboard';
 import {
   getEntity,
   listAllEntities,
@@ -163,6 +180,9 @@ function words(s: string): number {
   return t ? t.split(/\s+/).length : 0;
 }
 
+/** Stable "nothing to highlight" identity — keeps the paint effect from churning. */
+const NO_MATCHES: string[] = [];
+
 export default function DraftPage() {
   const params = useParams<{ draftId: string }>();
   const draftId = String(params.draftId);
@@ -205,6 +225,17 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
   });
   const topic = topicQuery.data ?? null;
   const topicMarket = topic ? String(readData(topic.data, 'market') ?? '') : '';
+
+  // The content pane's channel + (narrow-only) visible pane are page state now that
+  // jump-to-issue drives them. Seed the channel from `?channel=` so the shareable
+  // URL still opens the right tab — ContentChannels can no longer do it for us once
+  // it is controlled, and it keeps writing the param back on every switch.
+  const searchParams = useSearchParams();
+  const [channel, setChannel] = useState<ChannelId>(() => {
+    const q = searchParams.get('channel');
+    return isChannelId(q) ? q : 'brief';
+  });
+  const [pane, setPane] = useState<Pane>('content');
 
   const [sections, setSections] = useState<DocSection[]>(() => draftSections(draft));
   const [review, setReview] = useState<ReviewScore>(() => readReview(draft.data));
@@ -306,6 +337,21 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
     });
   }, [sections, sourceItems, draft.name]);
 
+  // --- Jump-to-issue (bd 768w.16.15.3) ---
+  // Every place a non-passing check can send the reviewer, rebuilt with the checks.
+  const stops = useMemo(() => issueStops(checks), [checks]);
+
+  // The active issue is held by IDENTITY, not by index: `stops` is rebuilt on every
+  // keystroke, so a stored index would quietly come to point at a different issue
+  // the moment one is fixed. Re-resolving means a fixed issue simply resolves to -1
+  // and its highlight clears itself.
+  const [activeKey, setActiveKey] = useState<StopKey | null>(null);
+  const activeStop = useMemo(() => findStopIndex(stops, activeKey), [stops, activeKey]);
+  const active = activeStop >= 0 ? stops[activeStop] : undefined;
+
+  const [legendOpen, setLegendOpen] = useState(false);
+  const contentPaneRef = useRef<HTMLDivElement | null>(null);
+
   // Accept gate (locked decision #2 — the human overrides the judge). Two
   // conditions, and the AI judge is NOT one of them (it's advisory / display-only):
   //   1. the deterministic ValidationChecklist checks don't FAIL — unless the
@@ -380,6 +426,79 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
       );
     }, 800);
   }
+
+  // --- Jump-to-issue: the imperative half (bd 768w.16.15.3) ---
+  // Below `onReviewChange` because the a/r/x shortcuts drive it.
+  function goToStop(index: number) {
+    const stop = stops[index];
+    if (!stop) return; // nothing to jump to — never a dead click
+    setActiveKey({ checkId: stop.checkId, field: stop.field });
+    setChannel(stop.channel);
+    // Below `lg` the panes are exclusive: a jump fired from the rail must reveal the
+    // content it just switched to, or it lands on a hidden pane and looks broken.
+    setPane('content');
+    contentPaneRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  // Mirror the shortcut actions so the key listener binds ONCE yet always calls the
+  // freshest handler — `stops`/`activeStop`/`review` all churn on every edit. Synced
+  // after each commit, like the persistence mirrors above.
+  const jumpByRef = useRef<(delta: 1 | -1) => void>(() => {});
+  const setVerdictRef = useRef<(v: NonNullable<ReviewScore['verdict']>) => void>(() => {});
+  useEffect(() => {
+    jumpByRef.current = (delta) =>
+      goToStop(
+        delta === 1
+          ? nextStopIndex(activeStop, stops.length)
+          : prevStopIndex(activeStop, stops.length),
+      );
+    setVerdictRef.current = (v) => onReviewChange({ ...reviewRef.current, verdict: v });
+  });
+
+  // j/k walk the issues; a/r/x set the Decision; ? toggles the legend. Bound to the
+  // document because the reviewer's focus is normally in the content pane, not the
+  // rail — and guarded so a letter typed into the feedback box or the blog editor
+  // can never flip the verdict (see shouldIgnoreShortcut).
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (
+        shouldIgnoreShortcut({
+          key: e.key,
+          metaKey: e.metaKey,
+          ctrlKey: e.ctrlKey,
+          altKey: e.altKey,
+          target: e.target,
+        })
+      ) {
+        return;
+      }
+      switch (e.key) {
+        case 'j':
+          jumpByRef.current(1);
+          break;
+        case 'k':
+          jumpByRef.current(-1);
+          break;
+        case 'a':
+          setVerdictRef.current('approve');
+          break;
+        case 'r':
+          setVerdictRef.current('revise');
+          break;
+        case 'x':
+          setVerdictRef.current('reject');
+          break;
+        case '?':
+          setLegendOpen((v) => !v);
+          break;
+        default:
+          return; // not ours — leave the event alone
+      }
+      e.preventDefault();
+    }
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   function addNote(body: string) {
     const at = new Date().toISOString();
@@ -597,6 +716,13 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
   const seoSection = useMemo(() => sections.filter((s) => s.key === 'seo'), [sections]);
   const sourcesCoverage = coverageSummary(sourceItems, today);
 
+  // What the active jump wants marked, per channel. Only the blog (hype words) and
+  // the sources (unapproved URLs) can actually render a mark: LinkedIn + SEO are
+  // textareas/inputs with no text nodes to paint, and the headline lives in the page
+  // header, outside the channels. Those jumps still switch + scroll — see the bead.
+  const blogHighlight = active?.field === 'blog' ? active.matches : NO_MATCHES;
+  const flaggedSources = active?.field === 'sources' ? active.matches : NO_MATCHES;
+
   // Header pills: AI-judge verdict, status, and candidate ordinal (# of N siblings
   // sharing this draft's topic).
   const candidateIndex = draftCandidateIndex(draft);
@@ -655,8 +781,10 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
     </div>
   );
 
+  // A jump scrolls this container into view — the pane is the target the checks can
+  // always name, whether or not the finding has a span to mark inside it.
   const content = (
-    <div className="space-y-4">
+    <div ref={contentPaneRef} className="space-y-4">
       {/* A newer revision was generated from this draft — surface a jump link. */}
       {latestChild ? (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-800">
@@ -671,9 +799,13 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
         </div>
       ) : null}
 
-      {/* One focused channel at a time — Brief default. */}
+      {/* One focused channel at a time — Brief default. Controlled so the rail's
+          jump-to-issue can open the channel holding a failing check. */}
       <ContentChannels
-        defaultChannel="brief"
+        active={channel}
+        onActiveChange={(id) => {
+          if (isChannelId(id)) setChannel(id);
+        }}
         channels={[
           {
             id: 'brief',
@@ -683,6 +815,7 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
             content: (
               <BlogSection
                 value={blogValue}
+                highlight={blogHighlight}
                 onChange={(v) => onChange('blog', v)}
                 onSave={(v) => save([{ key: 'blog', label: 'Blog post', kind: 'markdown', value: v }])}
               />
@@ -711,6 +844,7 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
                 approvedHosts={OGMC_APPROVED_HOSTS}
                 today={today}
                 judgeVerdict={judgeVerdict}
+                flagged={flaggedSources}
                 onAdd={addSource}
                 onRemove={removeSource}
                 onToggleVerify={toggleVerify}
@@ -725,6 +859,11 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
   const rail = (
     <QualityRail
       checks={checks}
+      stops={stops}
+      activeStop={activeStop}
+      onJumpToCheck={(checkId) => goToStop(stopIndexForCheck(stops, checkId, activeStop))}
+      legendOpen={legendOpen}
+      onToggleLegend={() => setLegendOpen((v) => !v)}
       judgeVerdict={judgeVerdict}
       judgeVerdictWord={verdict}
       override={override}
@@ -828,6 +967,13 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
   );
 
   return (
-    <DraftReviewLayout header={header} content={content} rail={rail} decisionBar={decisionBar} />
+    <DraftReviewLayout
+      header={header}
+      content={content}
+      rail={rail}
+      decisionBar={decisionBar}
+      pane={pane}
+      onPaneChange={setPane}
+    />
   );
 }

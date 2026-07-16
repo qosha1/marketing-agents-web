@@ -10,6 +10,10 @@
  *   • Signals (read-only) — Checks x/n + the AI judge verdict shown as a SUGGESTION
  *     (never a control). The judge's full reasoning stays reachable in the
  *     Validation panel below.
+ *   • Issues (P3, bd 768w.16.15.3) — "Checks 7/8" is a score, not a location: it
+ *     names neither what failed nor where. So every non-passing check is listed
+ *     here, always open, as a BUTTON that jumps the content pane to the offending
+ *     field and marks the text. Validation below keeps the full detail + override.
  *   • Decision — a single verdict control (Approve / Request changes / Reject) that
  *     DRIVES the decision-bar's one primary action (Accept / Request revision /
  *     Reject). "Request changes" reveals ONE feedback box ("what should the rewrite
@@ -46,6 +50,7 @@ import {
 
 import { cn } from '@startsimpli/ui/utils';
 import type { EntityRecord } from '@/lib/foundry-api';
+import type { IssueStop } from '@/lib/issue-jump';
 import { CollapsiblePanel, FLATTEN_CARD } from './CollapsiblePanel';
 
 type Call = NonNullable<ReviewScore['verdict']>;
@@ -53,6 +58,17 @@ type Call = NonNullable<ReviewScore['verdict']>;
 export interface QualityRailProps {
   // Signals + Validation
   checks: ContentCheck[];
+
+  // Jump-to-issue (bd 768w.16.15.3)
+  /** Every place a non-passing check can send the reviewer, in rail order. */
+  stops: IssueStop[];
+  /** Index into `stops` of the issue currently jumped to; -1 when none. */
+  activeStop: number;
+  /** Jump to a check — its first location, or its next one if already there. */
+  onJumpToCheck: (checkId: string) => void;
+  legendOpen: boolean;
+  onToggleLegend: () => void;
+
   judgeVerdict?: JudgeVerdict;
   /** The stored AI-judge verdict word (display-only suggestion). */
   judgeVerdictWord: string;
@@ -144,6 +160,11 @@ const CALLS: { id: Call; label: string; sel: string }[] = [
 export function QualityRail(props: QualityRailProps) {
   const {
     checks,
+    stops,
+    activeStop,
+    onJumpToCheck,
+    legendOpen,
+    onToggleLegend,
     judgeVerdict,
     judgeVerdictWord,
     override,
@@ -207,6 +228,16 @@ export function QualityRail(props: QualityRailProps) {
           why={judgeVerdict?.summary}
         />
       </div>
+
+      {/* Issues — the failing checks, named and reachable. */}
+      <IssuePanel
+        checks={checks}
+        stops={stops}
+        activeStop={activeStop}
+        onJumpToCheck={onJumpToCheck}
+        legendOpen={legendOpen}
+        onToggleLegend={onToggleLegend}
+      />
 
       {/* THE one decision */}
       <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
@@ -412,6 +443,167 @@ export function QualityRail(props: QualityRailProps) {
         </CollapsiblePanel>
       ) : null}
     </div>
+  );
+}
+
+/** How a field reads in the rail — the reviewer thinks "the blog", not "blog". */
+const FIELD_LABEL: Record<string, string> = {
+  blog: 'the blog',
+  headline: 'the headline',
+  linkedin: 'the LinkedIn post',
+  metaDescription: 'the meta description',
+  tags: 'the tags',
+  sources: 'the sources',
+};
+
+const ISSUE_TONE: Record<CheckStatus, string> = {
+  pass: 'bg-emerald-500',
+  warn: 'bg-amber-500',
+  fail: 'bg-red-500',
+};
+
+/**
+ * The non-passing checks as jump controls (bd 768w.16.15.3).
+ *
+ * Each is a real <button> — the rail is keyboard territory (j/k walk this same
+ * list), so a div+onClick would be unreachable by tab and unnamed to a screen
+ * reader. A check with no jumpable location renders as static text instead: it
+ * still needs to be READ, but offering a control that goes nowhere is worse than
+ * offering none.
+ */
+function IssuePanel({
+  checks,
+  stops,
+  activeStop,
+  onJumpToCheck,
+  legendOpen,
+  onToggleLegend,
+}: {
+  checks: ContentCheck[];
+  stops: IssueStop[];
+  activeStop: number;
+  onJumpToCheck: (checkId: string) => void;
+  legendOpen: boolean;
+  onToggleLegend: () => void;
+}) {
+  const failing = checks.filter((c) => c.status !== 'pass');
+  if (failing.length === 0) return null;
+
+  const active = activeStop >= 0 ? stops[activeStop] : undefined;
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-amber-200 bg-card shadow-sm">
+      <div className="flex items-center justify-between gap-2 px-4 pt-3">
+        <div className="text-[11px] font-semibold uppercase tracking-wide text-amber-700">
+          {failing.length} issue{failing.length === 1 ? '' : 's'} to look at
+        </div>
+        <button
+          type="button"
+          onClick={onToggleLegend}
+          aria-expanded={legendOpen}
+          aria-label="Keyboard shortcuts"
+          className="grid h-5 w-5 place-items-center rounded-full border border-border text-[11px] font-semibold text-muted-foreground hover:text-foreground"
+        >
+          ?
+        </button>
+      </div>
+      <p className="px-4 pb-1 pt-0.5 text-xs text-muted-foreground">
+        Jump to what failed — or press <Key>j</Key> / <Key>k</Key>.
+      </p>
+
+      {legendOpen ? <ShortcutLegend /> : null}
+
+      <ul className="px-2 pb-2 pt-1">
+        {failing.map((c) => {
+          const mine = stops.filter((s) => s.checkId === c.id);
+          const on = !!active && active.checkId === c.id;
+          // Where this jump lands. Multi-location checks (no-hype spans fields)
+          // name the CURRENT target once active, so re-clicking to advance is
+          // legible rather than mysterious.
+          const where = on ? active.field : mine[0]?.field;
+          const whereLabel = where ? (FIELD_LABEL[where] ?? where) : null;
+          const body = (
+            <>
+              <span className={cn('mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full', ISSUE_TONE[c.status])} />
+              <span className="min-w-0 flex-1">
+                <span className="block text-[13px] font-medium text-foreground">{c.label}</span>
+                {c.detail ? (
+                  <span className="block truncate text-[11px] text-muted-foreground">{c.detail}</span>
+                ) : null}
+                {whereLabel ? (
+                  <span className="block text-[11px] text-primary/80">
+                    in {whereLabel}
+                    {mine.length > 1 ? ` · ${mine.findIndex((s) => s.field === where) + 1}/${mine.length}` : ''}
+                  </span>
+                ) : null}
+              </span>
+            </>
+          );
+
+          if (mine.length === 0) {
+            return (
+              <li
+                key={c.id}
+                className="flex gap-2 rounded-lg px-2 py-1.5 text-left opacity-70"
+                title="This check has no field to jump to."
+              >
+                {body}
+              </li>
+            );
+          }
+
+          return (
+            <li key={c.id}>
+              <button
+                type="button"
+                onClick={() => onJumpToCheck(c.id)}
+                aria-current={on ? 'true' : undefined}
+                className={cn(
+                  'flex w-full gap-2 rounded-lg px-2 py-1.5 text-left transition-colors',
+                  on ? 'bg-amber-50 ring-1 ring-amber-300' : 'hover:bg-muted',
+                )}
+              >
+                {body}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+function Key({ children }: { children: React.ReactNode }) {
+  return (
+    <kbd className="rounded border border-border bg-muted px-1 font-mono text-[10px] text-foreground">
+      {children}
+    </kbd>
+  );
+}
+
+function ShortcutLegend() {
+  const rows: [React.ReactNode, string][] = [
+    [
+      <>
+        <Key>j</Key> / <Key>k</Key>
+      </>,
+      'Next / previous issue',
+    ],
+    [<Key key="a">a</Key>, 'Approve'],
+    [<Key key="r">r</Key>, 'Request changes'],
+    [<Key key="x">x</Key>, 'Reject'],
+    [<Key key="?">?</Key>, 'Show / hide this list'],
+  ];
+  return (
+    <dl className="mx-2 mb-1 space-y-1 rounded-lg bg-muted/50 px-3 py-2">
+      {rows.map(([keys, what], i) => (
+        <div key={i} className="flex items-center justify-between gap-3 text-[11px]">
+          <dt className="flex items-center gap-1">{keys}</dt>
+          <dd className="text-muted-foreground">{what}</dd>
+        </div>
+      ))}
+      <p className="pt-0.5 text-[10px] text-muted-foreground">Shortcuts pause while you type.</p>
+    </dl>
   );
 }
 

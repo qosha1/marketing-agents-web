@@ -11,6 +11,12 @@
  * Every channel's content stays MOUNTED (hidden when inactive) so a debounced edit
  * in one channel isn't lost by switching to another mid-save.
  *
+ * Optionally CONTROLLED (bd 768w.16.15.3): pass `active` and the caller drives the
+ * tab — the Quality rail's jump-to-issue has to be able to open the channel that
+ * holds a failing check, which internal-only state cannot express. Omit it and the
+ * uncontrolled behaviour above is unchanged; the `?channel=` write happens either
+ * way, since a shareable URL is orthogonal to who owns the value.
+ *
  * Presentational shell — slots only; the page owns each channel's editor + state.
  * Fork-local for now; extracted alongside the two-pane shell once confirmed.
  */
@@ -31,22 +37,38 @@ export interface Channel {
 
 export interface ContentChannelsProps {
   channels: Channel[];
+  /** Seeds the UNCONTROLLED tab (ignored when `active` is given). */
   defaultChannel?: string;
+  /** Controlled active channel id. Provide it and the caller owns the tab. */
+  active?: string;
+  /** Fires on every tab activation, controlled or not. */
+  onActiveChange?: (id: string) => void;
 }
 
-export function ContentChannels({ channels, defaultChannel }: ContentChannelsProps) {
+export function ContentChannels({
+  channels,
+  defaultChannel,
+  active,
+  onActiveChange,
+}: ContentChannelsProps) {
   const searchParams = useSearchParams();
   const ids = React.useMemo(() => channels.map((c) => c.id), [channels]);
   const fallback = defaultChannel && ids.includes(defaultChannel) ? defaultChannel : ids[0];
 
-  const [active, setActive] = React.useState<string>(() => {
+  const [internal, setInternal] = React.useState<string>(() => {
     const q = searchParams.get('channel');
     return q && ids.includes(q) ? q : fallback;
   });
 
+  // Controlled iff `active` is passed. An unknown controlled id falls back rather
+  // than rendering a tablist with nothing selected.
+  const controlled = active !== undefined;
+  const current = controlled ? (ids.includes(active) ? active : fallback) : internal;
+
   // Keep the active tab in view of the URL without a server round-trip.
   const select = (id: string) => {
-    setActive(id);
+    if (!controlled) setInternal(id);
+    onActiveChange?.(id);
     if (typeof window === 'undefined') return;
     const url = new URL(window.location.href);
     url.searchParams.set('channel', id);
@@ -61,7 +83,7 @@ export function ContentChannels({ channels, defaultChannel }: ContentChannelsPro
         className="flex flex-wrap gap-1 border-b border-border bg-muted/40 px-2 pt-1.5"
       >
         {channels.map((c) => {
-          const on = c.id === active;
+          const on = c.id === current;
           return (
             <button
               key={c.id}
@@ -100,7 +122,7 @@ export function ContentChannels({ channels, defaultChannel }: ContentChannelsPro
 
       <div className="p-4">
         {channels.map((c) => (
-          <div key={c.id} hidden={c.id !== active} role="tabpanel">
+          <div key={c.id} hidden={c.id !== current} role="tabpanel">
             {c.content}
           </div>
         ))}
