@@ -65,23 +65,31 @@ function readFields(type: EntityTypeDef, record: EntityRecord): RecordField[] {
   });
 }
 
-function DrawerInner({
+/**
+ * The deep field editor for a record — Name + one AttributeField per declared attr
+ * + Save/Cancel. Extracted so BOTH the read-first EntityDetailDrawer (its "Edit"
+ * mode) AND the shared ReviewDrawer ("Edit fields" toggle) reuse the same form.
+ * Self-contained: owns its draft state + save (PATCH replaces the data blob, so it
+ * sends the full merged blob). Renders as plain content (no scroll container of its
+ * own) so the host drawer supplies the layout.
+ */
+export function RecordEditFields({
   type,
   record,
-  onClose,
   onSaved,
+  onCancel,
 }: {
   type: EntityTypeDef;
   record: EntityRecord;
-  onClose: () => void;
+  /** Called after a successful save (the host closes / returns to read). */
   onSaved: () => void;
+  /** Called when the user cancels out of the editor. */
+  onCancel: () => void;
 }) {
   const qc = useQueryClient();
-  const [mode, setMode] = useState<'read' | 'edit'>('read');
   const [name, setName] = useState(record.name || '');
   const [values, setValues] = useState<Record<string, unknown>>(() => initialValues(type, record));
   const [saving, setSaving] = useState(false);
-  const fields = useMemo(() => readFields(type, record), [type, record]);
 
   async function save() {
     const nextData: Record<string, unknown> = { ...record.data };
@@ -116,13 +124,58 @@ function DrawerInner({
       await qc.invalidateQueries({ queryKey: ['entities', type.key] });
       notify.success('Saved.');
       onSaved();
-      onClose();
     } catch (err) {
       notify.error(err instanceof Error ? err.message : 'Could not save.');
     } finally {
       setSaving(false);
     }
   }
+
+  return (
+    <div className="space-y-4">
+      <div className="space-y-1.5">
+        <Label>Name</Label>
+        <Input value={name} onChange={(e) => setName(e.target.value)} />
+      </div>
+      {type.attributes.map((attr) => (
+        <div key={String(attr.id)} className="space-y-1.5">
+          <Label className="capitalize">{attr.name.replace(/_/g, ' ')}</Label>
+          <AttributeField
+            attr={attr}
+            value={values[attr.name]}
+            onChange={(val) => setValues((prev) => ({ ...prev, [attr.name]: val }))}
+          />
+        </div>
+      ))}
+      <div className="flex gap-2 pt-1">
+        <Button onClick={save} disabled={saving}>
+          {saving ? 'Saving…' : 'Save'}
+        </Button>
+        <button
+          onClick={onCancel}
+          disabled={saving}
+          className="rounded border px-3 py-1.5 text-sm hover:bg-neutral-50 disabled:opacity-50"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function DrawerInner({
+  type,
+  record,
+  onClose,
+  onSaved,
+}: {
+  type: EntityTypeDef;
+  record: EntityRecord;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [mode, setMode] = useState<'read' | 'edit'>('read');
+  const fields = useMemo(() => readFields(type, record), [type, record]);
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
@@ -161,36 +214,17 @@ function DrawerInner({
             ) : null}
           </div>
         ) : (
-          <>
-            <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
-              <div className="space-y-1.5">
-                <Label>Name</Label>
-                <Input value={name} onChange={(e) => setName(e.target.value)} />
-              </div>
-              {type.attributes.map((attr) => (
-                <div key={String(attr.id)} className="space-y-1.5">
-                  <Label className="capitalize">{attr.name.replace(/_/g, ' ')}</Label>
-                  <AttributeField
-                    attr={attr}
-                    value={values[attr.name]}
-                    onChange={(val) => setValues((prev) => ({ ...prev, [attr.name]: val }))}
-                  />
-                </div>
-              ))}
-            </div>
-            <footer className="flex gap-2 border-t px-4 py-3">
-              <Button onClick={save} disabled={saving}>
-                {saving ? 'Saving…' : 'Save'}
-              </Button>
-              <button
-                onClick={() => setMode('read')}
-                disabled={saving}
-                className="rounded border px-3 py-1.5 text-sm hover:bg-neutral-50 disabled:opacity-50"
-              >
-                Cancel
-              </button>
-            </footer>
-          </>
+          <div className="flex-1 overflow-y-auto px-4 py-4">
+            <RecordEditFields
+              type={type}
+              record={record}
+              onSaved={() => {
+                onSaved();
+                onClose();
+              }}
+              onCancel={() => setMode('read')}
+            />
+          </div>
         )}
       </aside>
     </div>
@@ -211,7 +245,7 @@ const GENERATE_WINDOW_MS = 90_000;
  * rendered for the content-spine (topic) type; every other type's drawer is
  * untouched.
  */
-function TopicDrafts({ topic }: { topic: EntityRecord }) {
+export function TopicDrafts({ topic }: { topic: EntityRecord }) {
   const qc = useQueryClient();
   const topicId = topic.id;
   const [generating, setGenerating] = useState(false);

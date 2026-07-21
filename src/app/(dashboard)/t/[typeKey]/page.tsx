@@ -16,12 +16,13 @@ import { useParams, useSearchParams, useRouter, usePathname } from 'next/navigat
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus } from 'lucide-react';
 import { UnifiedTable, Button, BaseDialog, type FiltersConfig } from '@startsimpli/ui';
-import { listTypes, listEntities, listAllEntities, type EntityRecord } from '@/lib/foundry-api';
+import { ReviewDrawer } from '@startsimpli/ui/collection';
+import { listTypes, listEntities, listAllEntities, collectionClient, type EntityRecord } from '@/lib/foundry-api';
 import { RecordForm } from '@/components/record-form';
 import { buildRecordColumns } from '@/components/record-columns';
-import { EntityDetailDrawer } from '@/components/entity-detail-drawer';
+import { EntityDetailDrawer, RecordEditFields, TopicDrafts } from '@/components/entity-detail-drawer';
 import { choicesOf, pickStatusAttr, readData } from '@/lib/board';
-import { CONTENT_CATEGORIES, CONTENT_TYPE_ATTR, contentCategoryLabel } from '@/lib/content';
+import { CONTENT_CATEGORIES, CONTENT_TYPE_ATTR, CONTENT_TYPE_KEY, contentCategoryLabel } from '@/lib/content';
 
 const PAGE_SIZE = 20; // matches DRF PageNumberPagination's default page size
 const DRAFT_TYPE_KEY = 'draft';
@@ -238,14 +239,35 @@ export default function TypeRecordsPage() {
         }}
       />
 
-      <EntityDetailDrawer
-        type={type}
-        record={selected}
-        onClose={() => setSelected(null)}
-        onSaved={() => {
-          void qc.invalidateQueries({ queryKey: ['entities', typeKey] });
-        }}
-      />
+      {typeKey === CONTENT_TYPE_KEY ? (
+        // Topic = the editorial spine → the fast review-first drawer (verdict /
+        // approve / reject / note, ↑↓/j-k to the next, deep field-edit behind
+        // "Edit fields"). Walks the currently-visible list for prev/next.
+        <ReviewDrawer
+          client={collectionClient}
+          type={type}
+          records={records}
+          record={selected}
+          onClose={() => setSelected(null)}
+          onNavigate={setSelected}
+          onSaved={() => {
+            void qc.invalidateQueries({ queryKey: ['entities', typeKey] });
+          }}
+          renderEditFields={({ record: r, type: t, back, saved }) => (
+            <RecordEditFields type={t} record={r} onSaved={saved} onCancel={back} />
+          )}
+          renderExtra={(r) => <TopicDrafts topic={r} />}
+        />
+      ) : (
+        <EntityDetailDrawer
+          type={type}
+          record={selected}
+          onClose={() => setSelected(null)}
+          onSaved={() => {
+            void qc.invalidateQueries({ queryKey: ['entities', typeKey] });
+          }}
+        />
+      )}
 
       <BaseDialog open={addOpen} onOpenChange={setAddOpen} size="lg">
         <RecordForm
