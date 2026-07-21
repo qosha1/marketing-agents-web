@@ -28,6 +28,16 @@ const PAGE_SIZE = 20; // matches DRF PageNumberPagination's default page size
 const DRAFT_TYPE_KEY = 'draft';
 const STATUS_ATTR = 'status';
 
+// Default topic order: by pipeline stage, newest first WITHIN a stage — so new
+// topics sit on top and rejected (and written) sink to the bottom, out of the way.
+const STATUS_RANK: Record<string, number> = { suggested: 0, ready: 1, written: 2, rejected: 3 };
+function defaultTopicOrder(a: EntityRecord, b: EntityRecord): number {
+  const ra = STATUS_RANK[String(readData(a.data, STATUS_ATTR) ?? '')] ?? 0;
+  const rb = STATUS_RANK[String(readData(b.data, STATUS_ATTR) ?? '')] ?? 0;
+  if (ra !== rb) return ra - rb;
+  return String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? ''));
+}
+
 export default function TypeRecordsPage() {
   const params = useParams<{ typeKey: string }>();
   const typeKey = params.typeKey;
@@ -65,13 +75,15 @@ export default function TypeRecordsPage() {
   }, [searchParams, hasContentTypeAttr, statusAttr]);
 
   const anyFilter = Object.keys(filterState).length > 0;
+  const isContent = typeKey === CONTENT_TYPE_KEY;
 
   // Sort is client-side over the full (bounded) set — the backend can't ORDER BY a
-  // data-blob field. So a sort, like a filter, switches the table to fetch-all;
-  // the default (unsorted, unfiltered) view stays server-paginated & cheap.
+  // data-blob field. So a sort, like a filter, switches the table to fetch-all.
   const [sort, setSort] = useState<{ sortBy?: string | null; sortDirection?: 'asc' | 'desc' }>({});
   const anySort = !!sort.sortBy;
-  const needAll = anyFilter || anySort;
+  // The content spine ALWAYS fetches the full (bounded) set so its default order —
+  // active on top, rejected sunk to the bottom — spans every row, not just a page.
+  const needAll = anyFilter || anySort || isContent;
 
   function applyFilters(next: Record<string, unknown>) {
     const sp = new URLSearchParams(searchParams.toString());
@@ -110,7 +122,6 @@ export default function TypeRecordsPage() {
   // The content spine (topic) shows a stacked Title + subtitle (the split-off
   // `subtitle`, else `angle`) as its primary column and folds the now-redundant
   // title/subtitle/angle columns into it — killing the old Name==Title dup.
-  const isContent = typeKey === CONTENT_TYPE_KEY;
   const columns = useMemo(() => {
     const attrs = type?.attributes ?? [];
     if (!isContent) return buildRecordColumns(attrs);
@@ -204,7 +215,13 @@ export default function TypeRecordsPage() {
     else setSelected(row);
   }
 
-  const records = needAll ? filteredRecords : (pagedQuery.data?.results ?? []);
+  const records = useMemo(() => {
+    const base = needAll ? filteredRecords : (pagedQuery.data?.results ?? []);
+    // Default topic order: active on top (newest first), rejected/written sunk to
+    // the bottom — so rejected topics stop reappearing. An explicit column sort wins.
+    if (isContent && !anySort) return [...base].sort(defaultTopicOrder);
+    return base;
+  }, [needAll, filteredRecords, pagedQuery.data, isContent, anySort]);
   const totalCount = needAll ? filteredRecords.length : (pagedQuery.data?.count ?? 0);
   const recordsLoading = needAll ? allQuery.isLoading : pagedQuery.isLoading;
   const activeKind = filterState[CONTENT_TYPE_ATTR];
