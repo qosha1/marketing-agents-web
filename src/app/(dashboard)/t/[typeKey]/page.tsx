@@ -66,6 +66,13 @@ export default function TypeRecordsPage() {
 
   const anyFilter = Object.keys(filterState).length > 0;
 
+  // Sort is client-side over the full (bounded) set — the backend can't ORDER BY a
+  // data-blob field. So a sort, like a filter, switches the table to fetch-all;
+  // the default (unsorted, unfiltered) view stays server-paginated & cheap.
+  const [sort, setSort] = useState<{ sortBy?: string | null; sortDirection?: 'asc' | 'desc' }>({});
+  const anySort = !!sort.sortBy;
+  const needAll = anyFilter || anySort;
+
   function applyFilters(next: Record<string, unknown>) {
     const sp = new URLSearchParams(searchParams.toString());
     for (const key of [CONTENT_TYPE_ATTR, STATUS_ATTR]) {
@@ -83,12 +90,12 @@ export default function TypeRecordsPage() {
   const pagedQuery = useQuery({
     queryKey: ['entities', typeKey, page],
     queryFn: () => listEntities(typeKey, page),
-    enabled: !!type && !anyFilter,
+    enabled: !!type && !needAll,
   });
   const allQuery = useQuery({
     queryKey: ['entities', typeKey, 'all'],
     queryFn: () => listAllEntities(typeKey),
-    enabled: !!type && anyFilter,
+    enabled: !!type && needAll,
   });
 
   const filteredRecords = useMemo(() => {
@@ -173,9 +180,9 @@ export default function TypeRecordsPage() {
     else setSelected(row);
   }
 
-  const records = anyFilter ? filteredRecords : (pagedQuery.data?.results ?? []);
-  const totalCount = anyFilter ? filteredRecords.length : (pagedQuery.data?.count ?? 0);
-  const recordsLoading = anyFilter ? allQuery.isLoading : pagedQuery.isLoading;
+  const records = needAll ? filteredRecords : (pagedQuery.data?.results ?? []);
+  const totalCount = needAll ? filteredRecords.length : (pagedQuery.data?.count ?? 0);
+  const recordsLoading = needAll ? allQuery.isLoading : pagedQuery.isLoading;
   const activeKind = filterState[CONTENT_TYPE_ATTR];
 
   if (typesQuery.isLoading) {
@@ -227,11 +234,23 @@ export default function TypeRecordsPage() {
         onRowClick={handleRowClick}
         filters={filtersConfig}
         columnVisibility={columnVisibility}
+        sorting={{
+          // Client-side sort over whatever set is loaded; picking a sort flips
+          // `needAll` on (above), so it always sorts the FULL bounded set, not
+          // just the current server page.
+          enabled: true,
+          serverSide: false,
+          value: { sortBy: sort.sortBy ?? '', sortDirection: sort.sortDirection ?? 'asc' },
+          onChange: (s) => {
+            setSort(s);
+            setPage(1);
+          },
+        }}
         pagination={{
-          // A filtered view holds the whole (bounded) set, so it paginates
+          // A sorted/filtered view holds the whole (bounded) set, so it paginates
           // client-side; the default view stays server-paginated.
           enabled: true,
-          serverSide: !anyFilter,
+          serverSide: !needAll,
           pageSize: PAGE_SIZE,
           totalCount,
           currentPage: page,

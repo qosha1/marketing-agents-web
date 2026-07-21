@@ -34,6 +34,11 @@ export function buildRecordColumns(
     id: attr.name,
     header: humanizeHeader(attr.name),
     cell: (row) => formatCell(readAttrValue(row.data, attr.name), attr),
+    // Every column is sortable: the header sort needs a comparable value, and the
+    // rendered `cell` is display-only. accessorFn reads the raw scalar from the
+    // data blob (object/blob values sort as '' so they don't explode the compare).
+    sortable: true,
+    accessorFn: (row: EntityRecord) => sortValue(readAttrValue(row.data, attr.name)),
   }));
 
   return [
@@ -49,6 +54,9 @@ export function buildRecordColumns(
       header: 'Created',
       cell: (row) =>
         row.createdAt ? new Date(row.createdAt).toLocaleDateString() : '—',
+      sortable: true,
+      // ISO timestamps sort chronologically as plain strings.
+      accessorFn: (row: EntityRecord) => row.createdAt ?? '',
     },
   ];
 }
@@ -71,6 +79,19 @@ function readAttrValue(
   if (!data) return undefined;
   const camel = name.replace(/_+([a-z0-9])/g, (_m, c: string) => c.toUpperCase());
   return data[camel] ?? data[name];
+}
+
+/**
+ * A comparable scalar for sorting a column: numbers sort numerically, strings
+ * case-insensitively (lower-cased), and null / objects / blobs sort as '' so a
+ * json cell never crashes the comparator or reorders by a giant serialization.
+ */
+function sortValue(value: unknown): string | number {
+  if (value == null) return '';
+  if (typeof value === 'number') return value;
+  if (typeof value === 'boolean') return value ? 1 : 0;
+  if (typeof value === 'object') return '';
+  return String(value).toLowerCase();
 }
 
 /** Cap a stringified blob so one cell never explodes the row height. */
