@@ -1,6 +1,18 @@
-import { createElement } from 'react';
+import { createElement, type ReactNode } from 'react';
 import type { ColumnConfig } from '@startsimpli/ui';
 import type { AttributeDef, EntityRecord } from '@/lib/foundry-api';
+
+/** Fixed widths (px) for the compact meta columns so the Title column can't eat
+ *  the whole row. The Title column is the only flexible one (min/max below). */
+const COL_WIDTH: Record<string, number> = {
+  content_type: 120,
+  status: 116,
+  market: 140,
+  ai_rank: 80,
+  team_verdict: 132,
+  createdAt: 112,
+};
+const DEFAULT_ATTR_WIDTH = 140;
 
 /**
  * Human column headers. A few known keys get a domain label (content_type →
@@ -32,6 +44,8 @@ export interface RecordColumnsOptions {
   subtitleAttrs?: string[];
   /** Attribute names to omit as their own columns (folded into the title cell). */
   hide?: string[];
+  /** Render a trailing, fixed-width, right-aligned "Actions" column (fast triage). */
+  actionsCell?: (row: EntityRecord) => ReactNode;
 }
 
 /** The stacked "Title over subtitle" cell for the primary column. */
@@ -47,9 +61,15 @@ function titleSubtitleCell(row: EntityRecord, subtitleAttrs: string[]) {
   }
   return createElement(
     'div',
-    { className: 'min-w-0' },
-    createElement('div', { className: 'truncate font-medium text-gray-900' }, title || '—'),
-    sub ? createElement('div', { className: 'truncate text-xs text-gray-500' }, sub) : null,
+    { className: 'min-w-0 py-0.5' },
+    createElement(
+      'div',
+      { className: 'line-clamp-2 break-words font-medium leading-snug text-gray-900' },
+      title || '—',
+    ),
+    sub
+      ? createElement('div', { className: 'mt-0.5 line-clamp-1 break-words text-xs text-gray-500' }, sub)
+      : null,
   );
 }
 
@@ -70,6 +90,8 @@ export function buildRecordColumns(
     .map((attr) => ({
     id: attr.name,
     header: humanizeHeader(attr.name),
+    // Fixed, compact width so meta columns stay visible and one-line.
+    width: COL_WIDTH[attr.name] ?? DEFAULT_ATTR_WIDTH,
     cell: (row) => formatCell(readAttrValue(row.data, attr.name), attr),
     // Every column is sortable: the header sort needs a comparable value, and the
     // rendered `cell` is display-only. accessorFn reads the raw scalar from the
@@ -78,12 +100,16 @@ export function buildRecordColumns(
     accessorFn: (row: EntityRecord) => sortValue(readAttrValue(row.data, attr.name)),
   }));
 
+  // The Title column is the ONLY flexible one — bounded so it can't eat the row,
+  // and its cell wraps (2 lines) instead of truncating.
   const nameColumn: ColumnConfig<EntityRecord> = opts.subtitleAttrs?.length
     ? {
         id: 'name',
         header: 'Title',
         accessorKey: 'name',
         sortable: true,
+        minWidth: 280,
+        maxWidth: 560,
         cell: (row) => titleSubtitleCell(row, opts.subtitleAttrs!),
       }
     : {
@@ -91,14 +117,16 @@ export function buildRecordColumns(
         header: 'Name',
         accessorKey: 'name',
         sortable: true,
+        minWidth: 240,
       };
 
-  return [
+  const columns: ColumnConfig<EntityRecord>[] = [
     nameColumn,
     ...attrColumns,
     {
       id: 'createdAt',
       header: 'Created',
+      width: COL_WIDTH.createdAt,
       cell: (row) =>
         row.createdAt ? new Date(row.createdAt).toLocaleDateString() : '—',
       sortable: true,
@@ -106,6 +134,18 @@ export function buildRecordColumns(
       accessorFn: (row: EntityRecord) => row.createdAt ?? '',
     },
   ];
+
+  if (opts.actionsCell) {
+    columns.push({
+      id: '__actions',
+      header: '',
+      width: 132,
+      sortable: false,
+      cell: opts.actionsCell,
+    });
+  }
+
+  return columns;
 }
 
 /**

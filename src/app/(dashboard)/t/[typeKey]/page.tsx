@@ -16,7 +16,7 @@ import { useParams, useSearchParams, useRouter, usePathname } from 'next/navigat
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus } from 'lucide-react';
 import { UnifiedTable, Button, BaseDialog, type FiltersConfig } from '@startsimpli/ui';
-import { ReviewDrawer } from '@startsimpli/ui/collection';
+import { ReviewDrawer, InlineReviewActions } from '@startsimpli/ui/collection';
 import { listTypes, listEntities, listAllEntities, collectionClient, type EntityRecord } from '@/lib/foundry-api';
 import { RecordForm } from '@/components/record-form';
 import { buildRecordColumns } from '@/components/record-columns';
@@ -111,14 +111,27 @@ export default function TypeRecordsPage() {
   // `subtitle`, else `angle`) as its primary column and folds the now-redundant
   // title/subtitle/angle columns into it — killing the old Name==Title dup.
   const isContent = typeKey === CONTENT_TYPE_KEY;
-  const columns = useMemo(
-    () =>
-      buildRecordColumns(
-        type?.attributes ?? [],
-        isContent ? { subtitleAttrs: ['subtitle', 'angle'], hide: ['title', 'subtitle', 'angle'] } : {},
-      ),
-    [type?.attributes, isContent],
-  );
+  const columns = useMemo(() => {
+    const attrs = type?.attributes ?? [];
+    if (!isContent) return buildRecordColumns(attrs);
+    return buildRecordColumns(attrs, {
+      subtitleAttrs: ['subtitle', 'angle'],
+      hide: ['title', 'subtitle', 'angle'],
+      // Per-row fast triage: ✕ reject · ✓ good · ✎ edit, act-in-place (no drawer).
+      actionsCell: type
+        ? (row) => (
+            <InlineReviewActions
+              client={collectionClient}
+              type={type}
+              record={row}
+              onSaved={() => {
+                void qc.invalidateQueries({ queryKey: ['entities', typeKey] });
+              }}
+            />
+          )
+        : undefined,
+    });
+  }, [type, isContent, typeKey, qc]);
 
   const hasStatusBoard = !!statusAttr;
 
@@ -142,9 +155,10 @@ export default function TypeRecordsPage() {
     const visibleAttrs = [...preferred, ...rest].slice(0, 5);
     return {
       enabled: true,
-      alwaysVisible: ['name'],
-      defaultVisible: ['name', ...visibleAttrs, 'createdAt'],
-      persistKey: `records-${typeKey}-v2`,
+      alwaysVisible: isContent ? ['name', '__actions'] : ['name'],
+      defaultVisible: ['name', ...visibleAttrs, 'createdAt', ...(isContent ? ['__actions'] : [])],
+      // v3: introduces the stacked Title + the trailing actions column.
+      persistKey: `records-${typeKey}-v3`,
     };
   }, [type?.attributes, typeKey]);
 
