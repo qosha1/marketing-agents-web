@@ -107,9 +107,17 @@ export default function TypeRecordsPage() {
     );
   }, [allQuery.data, filterState]);
 
+  // The content spine (topic) shows a stacked Title + subtitle (the split-off
+  // `subtitle`, else `angle`) as its primary column and folds the now-redundant
+  // title/subtitle/angle columns into it — killing the old Name==Title dup.
+  const isContent = typeKey === CONTENT_TYPE_KEY;
   const columns = useMemo(
-    () => buildRecordColumns(type?.attributes ?? []),
-    [type?.attributes],
+    () =>
+      buildRecordColumns(
+        type?.attributes ?? [],
+        isContent ? { subtitleAttrs: ['subtitle', 'angle'], hide: ['title', 'subtitle', 'angle'] } : {},
+      ),
+    [type?.attributes, isContent],
   );
 
   const hasStatusBoard = !!statusAttr;
@@ -123,6 +131,8 @@ export default function TypeRecordsPage() {
   const columnVisibility = useMemo(() => {
     const LONG_FIELDS = new Set([
       'blog', 'linkedin', 'seo', 'sources', 'body', 'content', 'auto_checks', '_origin', '_sample',
+      // On the content spine these are folded into the stacked Title column.
+      ...(isContent ? ['title', 'subtitle', 'angle'] : []),
     ]);
     const attrIds = (type?.attributes ?? []).map((a) => a.name).filter((n) => !LONG_FIELDS.has(n));
     const preferred = ['content_type', 'status', 'judge_verdict', 'candidate_index', 'story_title', 'sent_at', 'market'].filter(

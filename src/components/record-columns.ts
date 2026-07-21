@@ -1,3 +1,4 @@
+import { createElement } from 'react';
 import type { ColumnConfig } from '@startsimpli/ui';
 import type { AttributeDef, EntityRecord } from '@/lib/foundry-api';
 
@@ -22,15 +23,51 @@ export function humanizeHeader(name: string): string {
   return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
 
+export interface RecordColumnsOptions {
+  /**
+   * Render the primary column as a stacked Title + subtitle instead of a bare
+   * Name — the subtitle is the first non-empty of these attrs (e.g. the split-off
+   * `subtitle`, falling back to `angle`). Kills the Name/Title duplication.
+   */
+  subtitleAttrs?: string[];
+  /** Attribute names to omit as their own columns (folded into the title cell). */
+  hide?: string[];
+}
+
+/** The stacked "Title over subtitle" cell for the primary column. */
+function titleSubtitleCell(row: EntityRecord, subtitleAttrs: string[]) {
+  const title = String(row.name || '').trim();
+  let sub = '';
+  for (const a of subtitleAttrs) {
+    const v = readAttrValue(row.data, a);
+    if (v != null && String(v).trim()) {
+      sub = String(v).trim();
+      break;
+    }
+  }
+  return createElement(
+    'div',
+    { className: 'min-w-0' },
+    createElement('div', { className: 'truncate font-medium text-gray-900' }, title || '—'),
+    sub ? createElement('div', { className: 'truncate text-xs text-gray-500' }, sub) : null,
+  );
+}
+
 /**
  * Build UnifiedTable columns from a type's declared attributes. Each attribute
  * becomes a column reading out of the record's `data` blob; a leading Name
- * column and a trailing Created column frame them.
+ * column and a trailing Created column frame them. With `opts.subtitleAttrs`, the
+ * leading column becomes a stacked Title + subtitle (and `opts.hide` folds the
+ * now-redundant title/subtitle/angle columns into it).
  */
 export function buildRecordColumns(
   attributes: AttributeDef[],
+  opts: RecordColumnsOptions = {},
 ): ColumnConfig<EntityRecord>[] {
-  const attrColumns: ColumnConfig<EntityRecord>[] = attributes.map((attr) => ({
+  const hidden = new Set(opts.hide ?? []);
+  const attrColumns: ColumnConfig<EntityRecord>[] = attributes
+    .filter((attr) => !hidden.has(attr.name))
+    .map((attr) => ({
     id: attr.name,
     header: humanizeHeader(attr.name),
     cell: (row) => formatCell(readAttrValue(row.data, attr.name), attr),
@@ -41,13 +78,23 @@ export function buildRecordColumns(
     accessorFn: (row: EntityRecord) => sortValue(readAttrValue(row.data, attr.name)),
   }));
 
+  const nameColumn: ColumnConfig<EntityRecord> = opts.subtitleAttrs?.length
+    ? {
+        id: 'name',
+        header: 'Title',
+        accessorKey: 'name',
+        sortable: true,
+        cell: (row) => titleSubtitleCell(row, opts.subtitleAttrs!),
+      }
+    : {
+        id: 'name',
+        header: 'Name',
+        accessorKey: 'name',
+        sortable: true,
+      };
+
   return [
-    {
-      id: 'name',
-      header: 'Name',
-      accessorKey: 'name',
-      sortable: true,
-    },
+    nameColumn,
     ...attrColumns,
     {
       id: 'createdAt',
