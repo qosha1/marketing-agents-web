@@ -16,7 +16,7 @@ import { useParams, useSearchParams, useRouter, usePathname } from 'next/navigat
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus } from 'lucide-react';
 import { UnifiedTable, Button, BaseDialog, type FiltersConfig } from '@startsimpli/ui';
-import { ReviewDrawer, InlineReviewActions } from '@startsimpli/ui/collection';
+import { ReviewDrawer, InlineReviewActions, type ReviewConfig } from '@startsimpli/ui/collection';
 import { listTypes, listEntities, listAllEntities, collectionClient, type EntityRecord } from '@/lib/foundry-api';
 import { RecordForm } from '@/components/record-form';
 import { buildRecordColumns } from '@/components/record-columns';
@@ -26,7 +26,18 @@ import { CONTENT_CATEGORIES, CONTENT_TYPE_ATTR, CONTENT_TYPE_KEY, contentCategor
 
 const PAGE_SIZE = 20; // matches DRF PageNumberPagination's default page size
 const DRAFT_TYPE_KEY = 'draft';
+const NEWS_TYPE_KEY = 'news_item';
 const STATUS_ATTR = 'status';
+
+// News curation: a binary Accept (→acceptable, the gate before topic generation)
+// / Reject (→rejected) — no verdict, no "needs work". Only `acceptable` news is
+// fed to the n8n topic strategist.
+const NEWS_REVIEW_CONFIG: ReviewConfig = {
+  approveStatus: 'acceptable',
+  rejectStatus: 'rejected',
+  verdicts: [],
+  omitNeedsWork: true,
+};
 
 // Default topic order: by pipeline stage, newest first WITHIN a stage — so new
 // topics sit on top and rejected (and written) sink to the bottom, out of the way.
@@ -76,6 +87,7 @@ export default function TypeRecordsPage() {
 
   const anyFilter = Object.keys(filterState).length > 0;
   const isContent = typeKey === CONTENT_TYPE_KEY;
+  const isNews = typeKey === NEWS_TYPE_KEY;
 
   // Sort is client-side over the full (bounded) set — the backend can't ORDER BY a
   // data-blob field. So a sort, like a filter, switches the table to fetch-all.
@@ -124,25 +136,38 @@ export default function TypeRecordsPage() {
   // title/subtitle/angle columns into it — killing the old Name==Title dup.
   const columns = useMemo(() => {
     const attrs = type?.attributes ?? [];
-    if (!isContent) return buildRecordColumns(attrs);
-    return buildRecordColumns(attrs, {
-      subtitleAttrs: ['subtitle', 'angle'],
-      hide: ['title', 'subtitle', 'angle'],
-      // Per-row fast triage: ✕ reject · ✓ good · ✎ edit, act-in-place (no drawer).
-      actionsCell: type
-        ? (row) => (
-            <InlineReviewActions
-              client={collectionClient}
-              type={type}
-              record={row}
-              onSaved={() => {
-                void qc.invalidateQueries({ queryKey: ['entities', typeKey] });
-              }}
-            />
-          )
-        : undefined,
-    });
-  }, [type, isContent, typeKey, qc]);
+    const invalidate = () => void qc.invalidateQueries({ queryKey: ['entities', typeKey] });
+    if (isContent) {
+      return buildRecordColumns(attrs, {
+        subtitleAttrs: ['subtitle', 'angle'],
+        hide: ['title', 'subtitle', 'angle'],
+        // Per-row fast triage: ✕ reject · ✓ good · ✎ edit, act-in-place (no drawer).
+        actionsCell: type
+          ? (row) => (
+              <InlineReviewActions client={collectionClient} type={type} record={row} onSaved={invalidate} />
+            )
+          : undefined,
+      });
+    }
+    if (isNews) {
+      // News curation: ✓ Accept (→acceptable) · ✕ Reject in place — the gate that
+      // decides which articles are eligible for topic generation.
+      return buildRecordColumns(attrs, {
+        actionsCell: type
+          ? (row) => (
+              <InlineReviewActions
+                client={collectionClient}
+                type={type}
+                record={row}
+                config={NEWS_REVIEW_CONFIG}
+                onSaved={invalidate}
+              />
+            )
+          : undefined,
+      });
+    }
+    return buildRecordColumns(attrs);
+  }, [type, isContent, isNews, typeKey, qc]);
 
   const hasStatusBoard = !!statusAttr;
 
@@ -166,8 +191,8 @@ export default function TypeRecordsPage() {
     const visibleAttrs = [...preferred, ...rest].slice(0, 5);
     return {
       enabled: true,
-      alwaysVisible: isContent ? ['name', '__actions'] : ['name'],
-      defaultVisible: ['name', ...visibleAttrs, 'createdAt', ...(isContent ? ['__actions'] : [])],
+      alwaysVisible: isContent || isNews ? ['name', '__actions'] : ['name'],
+      defaultVisible: ['name', ...visibleAttrs, 'createdAt', ...(isContent || isNews ? ['__actions'] : [])],
       // v3: introduces the stacked Title + the trailing actions column.
       persistKey: `records-${typeKey}-v3`,
     };
