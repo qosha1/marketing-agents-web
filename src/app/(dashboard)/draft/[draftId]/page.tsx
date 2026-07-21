@@ -53,7 +53,8 @@
  * instead of decoding "Checks 7/8". a/r/x set the Decision from the keyboard.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useParams, useSearchParams } from 'next/navigation';
+import { useParams, useSearchParams, useRouter } from 'next/navigation';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import Link from 'next/link';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -299,6 +300,22 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
     refetchInterval: revising ? 8000 : false,
   });
   const allDrafts = useMemo(() => draftsQuery.data ?? [], [draftsQuery.data]);
+
+  // Review QUEUE (same fast-review polish as the topic board): step through every
+  // draft with prev/next + a counter, and AUTO-ADVANCE to the next after a decision,
+  // so a reviewer rips through the publish queue instead of bouncing back to a table.
+  const router = useRouter();
+  const queueIndex = useMemo(
+    () => allDrafts.findIndex((d) => String(d.id) === String(draftId)),
+    [allDrafts, draftId],
+  );
+  const prevDraft = queueIndex > 0 ? allDrafts[queueIndex - 1] : null;
+  const nextDraft =
+    queueIndex >= 0 && queueIndex + 1 < allDrafts.length ? allDrafts[queueIndex + 1] : null;
+  function goToDraft(d: EntityRecord | null) {
+    if (d) router.push(`/draft/${d.id}`);
+  }
+
   const chain = useMemo(() => revisionChain(draft, allDrafts), [draft, allDrafts]);
   const children = useMemo(
     () => allDrafts.filter((d) => revisedFrom(d) === String(draft.id)),
@@ -445,6 +462,7 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
   // after each commit, like the persistence mirrors above.
   const jumpByRef = useRef<(delta: 1 | -1) => void>(() => {});
   const setVerdictRef = useRef<(v: NonNullable<ReviewScore['verdict']>) => void>(() => {});
+  const queueByRef = useRef<(delta: 1 | -1) => void>(() => {});
   useEffect(() => {
     jumpByRef.current = (delta) =>
       goToStop(
@@ -453,6 +471,7 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
           : prevStopIndex(activeStop, stops.length),
       );
     setVerdictRef.current = (v) => onReviewChange({ ...reviewRef.current, verdict: v });
+    queueByRef.current = (delta) => goToDraft(delta === 1 ? nextDraft : prevDraft);
   });
 
   // j/k walk the issues; a/r/x set the Decision; ? toggles the legend. Bound to the
@@ -487,6 +506,12 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
           break;
         case 'x':
           setVerdictRef.current('reject');
+          break;
+        case ']':
+          queueByRef.current(1); // next draft in the queue
+          break;
+        case '[':
+          queueByRef.current(-1); // previous draft in the queue
           break;
         case '?':
           setLegendOpen((v) => !v);
@@ -585,6 +610,7 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
       await qc.invalidateQueries({ queryKey: ['entity', draftId] });
       await qc.invalidateQueries({ queryKey: ['entities', CONTENT_TYPE_KEY, 'all'] });
       notify.success('Accepted.');
+      goToDraft(nextDraft); // advance to the next draft in the queue
     } catch (err) {
       notify.error(err instanceof Error ? err.message : 'Could not accept.');
     } finally {
@@ -600,6 +626,7 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
       await qc.invalidateQueries({ queryKey: ['entity', draftId] });
       await qc.invalidateQueries({ queryKey: ['entities', CONTENT_TYPE_KEY, 'all'] });
       notify.success('Marked sent.');
+      goToDraft(nextDraft); // advance to the next draft in the queue
     } catch (err) {
       notify.error(err instanceof Error ? err.message : 'Could not mark sent.');
     } finally {
@@ -618,6 +645,7 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
       await qc.invalidateQueries({ queryKey: ['entity', draftId] });
       await qc.invalidateQueries({ queryKey: ['entities', CONTENT_TYPE_KEY, 'all'] });
       notify.success('Candidate rejected.');
+      goToDraft(nextDraft); // advance to the next draft in the queue
     } catch (err) {
       notify.error(err instanceof Error ? err.message : 'Could not reject.');
     } finally {
@@ -751,6 +779,31 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
         ) : null}
       </div>
       <div className="flex shrink-0 flex-wrap items-center gap-2">
+        {allDrafts.length > 0 && queueIndex >= 0 ? (
+          <div className="flex items-center gap-1 rounded-md border border-border bg-neutral-50 px-1 text-xs text-neutral-500">
+            <button
+              onClick={() => goToDraft(prevDraft)}
+              disabled={!prevDraft}
+              className="rounded p-1 hover:bg-neutral-200 disabled:opacity-30"
+              aria-label="Previous draft"
+              title="Previous draft ( [ )"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <span className="tabular-nums">
+              {queueIndex + 1} / {allDrafts.length}
+            </span>
+            <button
+              onClick={() => goToDraft(nextDraft)}
+              disabled={!nextDraft}
+              className="rounded p-1 hover:bg-neutral-200 disabled:opacity-30"
+              aria-label="Next draft"
+              title="Next draft ( ] )"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
+        ) : null}
         {verdict ? (
           <span
             className={`rounded-full px-2.5 py-0.5 text-xs ${

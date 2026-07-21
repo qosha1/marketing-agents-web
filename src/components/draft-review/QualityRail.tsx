@@ -592,6 +592,12 @@ function ShortcutLegend() {
     [<Key key="a">a</Key>, 'Approve'],
     [<Key key="r">r</Key>, 'Request changes'],
     [<Key key="x">x</Key>, 'Reject'],
+    [
+      <>
+        <Key>[</Key> / <Key>]</Key>
+      </>,
+      'Previous / next draft',
+    ],
     [<Key key="?">?</Key>, 'Show / hide this list'],
   ];
   return (
