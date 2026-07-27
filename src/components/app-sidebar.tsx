@@ -59,7 +59,13 @@ export function AppSidebar() {
   const brand = FOUNDRY.name && !FOUNDRY.name.startsWith('__') ? FOUNDRY.name : FOUNDRY.slug;
 
   return (
-    <aside className="flex w-60 shrink-0 flex-col border-r border-gray-200 bg-white">
+    // sticky + h-screen are load-bearing: as a plain flex child of the layout's
+    // min-h-screen row the aside STRETCHES to the full document height, so the
+    // account footer below lands at the bottom of the *page* (below the fold on
+    // any long table) and `flex-1 overflow-y-auto` on the nav never engages.
+    // Bounding the height to the viewport pins the footer bottom-left and lets a
+    // long nav scroll inside itself. self-start keeps stretch from fighting it.
+    <aside className="sticky top-0 flex h-screen w-60 shrink-0 flex-col self-start border-r border-gray-200 bg-white">
       <div className="flex h-14 items-center gap-2 border-b border-gray-200 px-5">
         <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary-600 text-xs font-bold text-white">
           {brand.slice(0, 2).toUpperCase()}
