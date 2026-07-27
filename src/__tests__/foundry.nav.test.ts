@@ -60,8 +60,11 @@ describe('buildNav', () => {
     expect(data.items.find((i) => i.label === 'Source')?.href).toBe('/t/source');
   });
 
-  it('keeps a trailing About link', () => {
-    expect(items[items.length - 1]).toMatchObject({ href: '/about', label: 'About' });
+  it('surfaces no About link (scaffold leftover, removed)', () => {
+    const hrefs = items.flatMap((e) => (isGroup(e) ? e.items.map((i) => i.href) : [(e as { href: string }).href]));
+    expect(hrefs).not.toContain('/about');
+    // The last entry is now the Data group, not a trailing static link.
+    expect(items[items.length - 1]).toMatchObject({ label: 'Data' });
   });
 
   it('omits the Data group when there are no other declared types', () => {

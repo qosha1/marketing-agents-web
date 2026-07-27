@@ -12,7 +12,6 @@
  *       · Topics (/t/topic)       — every idea (all kinds), click → review/edit
  *       · Drafts (/t/draft)       — every written body, click → the draft editor
  *   - Data group                  — every OTHER declared type (board or table)
- *   - About (/about)
  *
  * Content is table-first now: flat, filterable, clickable data lists rather than
  * three per-kind kanban boards (Kind is a filter inside the Topics table; the
@@ -69,8 +68,6 @@ export function buildNav(types: EntityTypeDef[]): GroupedNavEntry[] {
       })),
     });
   }
-
-  items.push({ href: '/about', label: 'About' });
 
   return items;
 }
