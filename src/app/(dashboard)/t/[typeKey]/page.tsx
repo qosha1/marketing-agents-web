@@ -14,7 +14,7 @@ import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useSearchParams, useRouter, usePathname } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus } from 'lucide-react';
+import { Plus, ChevronDown } from 'lucide-react';
 import { UnifiedTable, Button, BaseDialog, type FiltersConfig } from '@startsimpli/ui';
 import { ReviewDrawer, InlineReviewActions, type ReviewConfig } from '@startsimpli/ui/collection';
 import { listTypes, listEntities, listAllEntities, collectionClient, type EntityRecord } from '@/lib/foundry-api';
@@ -251,6 +251,21 @@ export default function TypeRecordsPage() {
   const recordsLoading = needAll ? allQuery.isLoading : pagedQuery.isLoading;
   const activeKind = filterState[CONTENT_TYPE_ATTR];
 
+  // Collapse rejected out of the main list so they stop cluttering the active
+  // review — kept, not deleted, and expandable below (startsim-ay9l). Skipped
+  // when the user is explicitly viewing the State=rejected filter.
+  const collapseRejected = isContent && filterState[STATUS_ATTR] !== 'rejected';
+  const [showRejected, setShowRejected] = useState(false);
+  const { visibleRecords, rejectedRecords } = useMemo(() => {
+    if (!collapseRejected) return { visibleRecords: records, rejectedRecords: [] as EntityRecord[] };
+    const vis: EntityRecord[] = [];
+    const rej: EntityRecord[] = [];
+    for (const r of records) {
+      (String(readData(r.data, STATUS_ATTR) ?? '') === 'rejected' ? rej : vis).push(r);
+    }
+    return { visibleRecords: vis, rejectedRecords: rej };
+  }, [records, collapseRejected]);
+
   if (typesQuery.isLoading) {
     return <p className="text-sm text-gray-500">Loading…</p>;
   }
@@ -293,7 +308,7 @@ export default function TypeRecordsPage() {
       <UnifiedTable<EntityRecord>
         key={`records-${typeKey}-${JSON.stringify(filterState)}`}
         tableId={`records-${typeKey}`}
-        data={records}
+        data={visibleRecords}
         columns={columns}
         getRowId={(row) => String(row.id)}
         loading={recordsLoading}
@@ -318,11 +333,37 @@ export default function TypeRecordsPage() {
           enabled: true,
           serverSide: !needAll,
           pageSize: PAGE_SIZE,
-          totalCount,
+          totalCount: collapseRejected ? visibleRecords.length : totalCount,
           currentPage: page,
           onPageChange: setPage,
         }}
       />
+
+      {collapseRejected && rejectedRecords.length > 0 ? (
+        <div className="rounded-lg border border-border">
+          <button
+            type="button"
+            onClick={() => setShowRejected((v) => !v)}
+            className="flex w-full items-center justify-between rounded-lg px-4 py-2.5 text-sm font-medium text-muted-foreground hover:bg-muted/50"
+            aria-expanded={showRejected}
+          >
+            <span>Rejected ({rejectedRecords.length})</span>
+            <ChevronDown className={`h-4 w-4 transition-transform ${showRejected ? 'rotate-180' : ''}`} />
+          </button>
+          {showRejected ? (
+            <div className="border-t border-border">
+              <UnifiedTable<EntityRecord>
+                tableId={`records-${typeKey}-rejected`}
+                data={rejectedRecords}
+                columns={columns}
+                getRowId={(row) => String(row.id)}
+                onRowClick={handleRowClick}
+                columnVisibility={columnVisibility}
+              />
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       {typeKey === CONTENT_TYPE_KEY ? (
         // Topic = the editorial spine → the fast review-first drawer (verdict /
@@ -331,7 +372,7 @@ export default function TypeRecordsPage() {
         <ReviewDrawer
           client={collectionClient}
           type={type}
-          records={records}
+          records={showRejected ? [...visibleRecords, ...rejectedRecords] : visibleRecords}
           record={selected}
           onClose={() => setSelected(null)}
           onNavigate={setSelected}
