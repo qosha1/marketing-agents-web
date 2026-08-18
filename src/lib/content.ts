@@ -40,6 +40,17 @@ export function contentTabHref(categoryKey: string): string {
   return `/t/${CONTENT_TYPE_KEY}?${CONTENT_TYPE_ATTR}=${encodeURIComponent(categoryKey)}`;
 }
 
+/**
+ * The route to browse one content_type as a BOARD (startsim-uhmk) — the kanban
+ * pipeline pre-filtered to just that category instead of mixing all three in
+ * shared status lanes. The board's own on-page category tabs use this; it's
+ * the board-view sibling of contentTabHref (the table stays primary — this
+ * doesn't replace it).
+ */
+export function contentBoardHref(categoryKey: string): string {
+  return `/board/${CONTENT_TYPE_KEY}?${CONTENT_TYPE_ATTR}=${encodeURIComponent(categoryKey)}`;
+}
+
 export function contentCategoryLabel(key: string): string {
   return CONTENT_CATEGORIES.find((c) => c.key === key)?.label ?? key;
 }

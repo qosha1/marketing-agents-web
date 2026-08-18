@@ -11,11 +11,25 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Input, Label, notify, RecordDetail, type RecordField } from '@startsimpli/ui';
+import {
+  Button,
+  Input,
+  Label,
+  notify,
+  RecordDetail,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  type RecordField,
+} from '@startsimpli/ui';
 
 import { AttributeField } from './attribute-field';
 import { readData, toCamelKey } from '@/lib/board';
 import { CONTENT_TYPE_KEY } from '@/lib/content';
+import { memberDisplayName, memberSub, normalizeMembers } from '@/lib/roster';
+import { findTag, GOOD_EXAMPLE_LABEL } from '@/lib/tags';
 import {
   buildStoryFromTopic,
   draftCandidateIndex,
@@ -24,7 +38,124 @@ import {
   draftTitle,
   fetchTopicDrafts,
 } from '@/lib/topic-drafts';
-import { updateEntity, type EntityRecord, type EntityTypeDef } from '@/lib/foundry-api';
+import {
+  createTag,
+  deleteTag,
+  listAllTags,
+  orgMembers,
+  updateEntity,
+  type EntityRecord,
+  type EntityTypeDef,
+} from '@/lib/foundry-api';
+
+/** Name convention (any type, not just topic/draft) that upgrades the two plain
+ *  text fields into one roster picker (startsim-71z6). */
+const ASSIGNEE_SUB_ATTR = 'assignee_sub';
+const ASSIGNEE_NAME_ATTR = 'assignee_name';
+const UNASSIGNED_VALUE = '__unassigned__';
+
+/**
+ * "Mark as good example" toggle (startsim-iegx) — generic Tag affordance for ANY
+ * entity type, not topic-specific. A tag's presence/absence over
+ * {entity, label:'good_example'} IS the toggle state. The backend has no
+ * `?entity=` filter, so this fetches the (bounded) full tag set and finds this
+ * record's own tag client-side.
+ */
+export function GoodExampleToggle({ record }: { record: EntityRecord }) {
+  const qc = useQueryClient();
+  const tagsQuery = useQuery({ queryKey: ['tags', 'all'], queryFn: () => listAllTags() });
+  const [pending, setPending] = useState(false);
+  const mine = findTag(tagsQuery.data ?? [], record.id, GOOD_EXAMPLE_LABEL);
+
+  async function toggle() {
+    setPending(true);
+    try {
+      if (mine) {
+        await deleteTag(mine.id);
+      } else {
+        await createTag({ entity: record.id, label: GOOD_EXAMPLE_LABEL });
+      }
+      await qc.invalidateQueries({ queryKey: ['tags'] });
+    } catch (err) {
+      notify.error(err instanceof Error ? err.message : 'Could not update the tag.');
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={toggle}
+      disabled={pending || tagsQuery.isLoading}
+      className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition-colors disabled:opacity-50 ${
+        mine
+          ? 'border-amber-300 bg-amber-50 text-amber-700'
+          : 'border-neutral-200 text-neutral-500 hover:bg-neutral-50'
+      }`}
+    >
+      <span aria-hidden>{mine ? '★' : '☆'}</span> Good example
+    </button>
+  );
+}
+
+/**
+ * Roster picker for the `assignee_sub`/`assignee_name` attribute pair
+ * (startsim-71z6) — writes both together so they never drift apart. Sourced
+ * from GET /api/v1/org/members/, which needs an admin-tier bearer (bd
+ * startsim-q79l): a non-admin caller gets a 403, so this degrades to a plain
+ * text input on ANY roster-fetch error rather than losing the field entirely.
+ */
+function AssigneePicker({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (sub: string, name: string) => void;
+}) {
+  const membersQuery = useQuery({ queryKey: ['org-members'], queryFn: () => orgMembers() });
+
+  if (membersQuery.isError) {
+    return (
+      <Input
+        value={value}
+        onChange={(e) => onChange(e.target.value, e.target.value)}
+        placeholder="assignee_sub (roster unavailable — admin role required)"
+      />
+    );
+  }
+
+  const members = membersQuery.data ? normalizeMembers(membersQuery.data) : [];
+
+  return (
+    <Select
+      value={value || UNASSIGNED_VALUE}
+      onValueChange={(sub) => {
+        if (sub === UNASSIGNED_VALUE) {
+          onChange('', '');
+          return;
+        }
+        const m = members.find((mm) => memberSub(mm) === sub);
+        onChange(sub, m ? memberDisplayName(m) : '');
+      }}
+    >
+      <SelectTrigger>
+        <SelectValue placeholder={membersQuery.isLoading ? 'Loading…' : 'Unassigned'} />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value={UNASSIGNED_VALUE}>Unassigned</SelectItem>
+        {members.map((m) => {
+          const sub = memberSub(m);
+          return sub ? (
+            <SelectItem key={sub} value={sub}>
+              {memberDisplayName(m)}
+            </SelectItem>
+          ) : null;
+        })}
+      </SelectContent>
+    </Select>
+  );
+}
 
 interface Props {
   type: EntityTypeDef;
@@ -137,16 +268,42 @@ export function RecordEditFields({
         <Label>Name</Label>
         <Input value={name} onChange={(e) => setName(e.target.value)} />
       </div>
-      {type.attributes.map((attr) => (
-        <div key={String(attr.id)} className="space-y-1.5">
-          <Label className="capitalize">{attr.name.replace(/_/g, ' ')}</Label>
-          <AttributeField
-            attr={attr}
-            value={values[attr.name]}
-            onChange={(val) => setValues((prev) => ({ ...prev, [attr.name]: val }))}
-          />
-        </div>
-      ))}
+      {(() => {
+        // Assignee name-convention (any type, not just topic/draft): both
+        // halves declared -> ONE roster picker writes them together instead
+        // of two independently-typed text rows that can drift.
+        const hasAssigneePair =
+          type.attributes.some((a) => a.name === ASSIGNEE_SUB_ATTR) &&
+          type.attributes.some((a) => a.name === ASSIGNEE_NAME_ATTR);
+        return type.attributes
+          .filter((attr) => !(hasAssigneePair && attr.name === ASSIGNEE_NAME_ATTR))
+          .map((attr) =>
+            hasAssigneePair && attr.name === ASSIGNEE_SUB_ATTR ? (
+              <div key={String(attr.id)} className="space-y-1.5">
+                <Label>Assignee</Label>
+                <AssigneePicker
+                  value={String(values[ASSIGNEE_SUB_ATTR] ?? '')}
+                  onChange={(sub, assigneeName) =>
+                    setValues((prev) => ({
+                      ...prev,
+                      [ASSIGNEE_SUB_ATTR]: sub,
+                      [ASSIGNEE_NAME_ATTR]: assigneeName,
+                    }))
+                  }
+                />
+              </div>
+            ) : (
+              <div key={String(attr.id)} className="space-y-1.5">
+                <Label className="capitalize">{attr.name.replace(/_/g, ' ')}</Label>
+                <AttributeField
+                  attr={attr}
+                  value={values[attr.name]}
+                  onChange={(val) => setValues((prev) => ({ ...prev, [attr.name]: val }))}
+                />
+              </div>
+            ),
+          );
+      })()}
       <div className="flex gap-2 pt-1">
         <Button onClick={save} disabled={saving}>
           {saving ? 'Saving…' : 'Save'}
@@ -189,6 +346,7 @@ function DrawerInner({
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
+            <GoodExampleToggle record={record} />
             <button
               onClick={() => setMode((m) => (m === 'read' ? 'edit' : 'read'))}
               className="rounded border px-2.5 py-1 text-xs hover:bg-neutral-50"
@@ -252,7 +410,7 @@ export function TopicDrafts({ topic }: { topic: EntityRecord }) {
 
   const draftsQuery = useQuery({
     queryKey: ['topic-drafts', topicId],
-    queryFn: () => fetchTopicDrafts(topicId),
+    queryFn: () => fetchTopicDrafts(topic),
     // While the writer runs (~1 min, async), poll so the new candidates appear.
     refetchInterval: generating ? GENERATE_POLL_MS : false,
   });

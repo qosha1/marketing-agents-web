@@ -31,17 +31,33 @@ import {
   readData,
   toCamelKey,
   UNSET_COLUMN,
+  type RollupCounts,
 } from '@/lib/board';
+import { initialsOf } from '@/lib/roster';
 import { updateEntity, type EntityRecord, type EntityTypeDef } from '@/lib/foundry-api';
+
+/** Attribute-name convention for the assignee chip (startsim-71z6) — any type
+ *  that declares this attr gets the chip, not just topic/draft. */
+const ASSIGNEE_NAME_ATTR = 'assignee_name';
 
 interface Props {
   type: EntityTypeDef;
   records: EntityRecord[];
   onCardClick: (record: EntityRecord) => void;
+  /**
+   * Optional child-status rollup per record id (startsim-4w76/n7s8), e.g. a
+   * topic's linked drafts bucketed by status. EntityBoard stays generic — it
+   * has no idea what a "draft" is — so the caller computes this (typically via
+   * lib/board.ts's rollupByParent) and hands it in; a record with no entry
+   * renders no chip at all, so a type with nothing to roll up is unchanged.
+   */
+  rollupById?: Map<EntityRecord['id'], RollupCounts>;
+  /** Turns one record's rollup counts into the chip text, e.g. "2/3 ready". */
+  rollupLabel?: (counts: RollupCounts) => string | null;
 }
 
 /** Renders null when the type has no status enum — the page falls back to the table. */
-export function EntityBoard({ type, records, onCardClick }: Props) {
+export function EntityBoard({ type, records, onCardClick, rollupById, rollupLabel }: Props) {
   const qc = useQueryClient();
   const statusAttr = useMemo(() => pickStatusAttr(type), [type]);
   const columns = useMemo(() => boardColumns(statusAttr), [statusAttr]);
@@ -55,8 +71,11 @@ export function EntityBoard({ type, records, onCardClick }: Props) {
 
   const choices = choicesOf(statusAttr);
   const statusCamel = toCamelKey(statusName);
+  // Assignee gets its OWN dedicated chip (below), never a plain meta row.
   const displayAttrs = type.attributes
-    .filter((a) => a.name !== statusName && a.dataType !== 'json' && a.dataType !== 'longtext')
+    .filter(
+      (a) => a.name !== statusName && a.dataType !== 'json' && a.dataType !== 'longtext' && a.name !== ASSIGNEE_NAME_ATTR,
+    )
     .slice(0, 3);
   const kanbanCols: KanbanColumnConfig[] = columns.map((c) => ({ id: c.id, label: c.label }));
   const boardKey = ['entities', type.key, 'all'];
@@ -103,51 +122,79 @@ export function EntityBoard({ type, records, onCardClick }: Props) {
           </span>
         </div>
       )}
-      renderCard={(record) => (
-        <div className="m-2 cursor-grab rounded-md border bg-white p-3 shadow-sm active:cursor-grabbing">
-          <button
-            type="button"
-            className="block w-full text-left text-sm font-medium leading-snug hover:underline"
-            onClick={() => onCardClick(record)}
-          >
-            {record.name || record.externalId || `#${record.id}`}
-          </button>
-          <dl className="mt-1 space-y-0.5">
-            {displayAttrs.map((a) => {
-              const v = readData(record.data, a.name);
-              if (v == null || v === '') return null;
-              return (
-                <div key={String(a.id)} className="flex gap-1 text-xs text-neutral-600">
-                  <dt className="capitalize text-neutral-400">{a.name.replace(/_/g, ' ')}:</dt>
-                  <dd className="truncate">{a.dataType === 'boolean' ? (v ? 'Yes' : 'No') : String(v)}</dd>
-                </div>
-              );
-            })}
-          </dl>
-          {/* stop pointerdown so interacting with the select never starts a drag */}
-          <div
-            className="mt-2"
-            onClick={(e) => e.stopPropagation()}
-            onPointerDown={(e) => e.stopPropagation()}
-          >
-            <Select
-              value={String(readData(record.data, statusName) ?? '')}
-              onValueChange={(val) => applyStatus(record, val)}
+      renderCard={(record) => {
+        // Assignee-initials chip (startsim-71z6) and draft-progress rollup chip
+        // (startsim-4w76/n7s8) — the same "small chip" treatment as the filter
+        // badges elsewhere in this app; only rendered when there's something to
+        // show, so a record/type with neither is unchanged.
+        const assigneeVal = readData(record.data, ASSIGNEE_NAME_ATTR);
+        const assigneeInitials =
+          assigneeVal != null && String(assigneeVal).trim() ? initialsOf(String(assigneeVal)) : '';
+        const rollupCounts = rollupById?.get(record.id);
+        const rollupText = rollupCounts && rollupLabel ? rollupLabel(rollupCounts) : null;
+        return (
+          <div className="m-2 cursor-grab rounded-md border bg-white p-3 shadow-sm active:cursor-grabbing">
+            <button
+              type="button"
+              className="block w-full text-left text-sm font-medium leading-snug hover:underline"
+              onClick={() => onCardClick(record)}
             >
-              <SelectTrigger className="h-7 text-xs">
-                <SelectValue placeholder="Set status…" />
-              </SelectTrigger>
-              <SelectContent>
-                {choices.map((c) => (
-                  <SelectItem key={c} value={c}>
-                    {c}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              {record.name || record.externalId || `#${record.id}`}
+            </button>
+            {assigneeInitials || rollupText ? (
+              <div className="mt-1 flex flex-wrap items-center gap-1">
+                {assigneeInitials ? (
+                  <span
+                    title={String(assigneeVal)}
+                    className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-neutral-200 text-[9px] font-medium text-neutral-700"
+                  >
+                    {assigneeInitials}
+                  </span>
+                ) : null}
+                {rollupText ? (
+                  <span className="rounded-full bg-neutral-100 px-1.5 py-0.5 text-[10px] text-neutral-600">
+                    {rollupText}
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
+            <dl className="mt-1 space-y-0.5">
+              {displayAttrs.map((a) => {
+                const v = readData(record.data, a.name);
+                if (v == null || v === '') return null;
+                return (
+                  <div key={String(a.id)} className="flex gap-1 text-xs text-neutral-600">
+                    <dt className="capitalize text-neutral-400">{a.name.replace(/_/g, ' ')}:</dt>
+                    <dd className="truncate">{a.dataType === 'boolean' ? (v ? 'Yes' : 'No') : String(v)}</dd>
+                  </div>
+                );
+              })}
+            </dl>
+            {/* stop pointerdown so interacting with the select never starts a drag */}
+            <div
+              className="mt-2"
+              onClick={(e) => e.stopPropagation()}
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              <Select
+                value={String(readData(record.data, statusName) ?? '')}
+                onValueChange={(val) => applyStatus(record, val)}
+              >
+                <SelectTrigger className="h-7 text-xs">
+                  <SelectValue placeholder="Set status…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {choices.map((c) => (
+                    <SelectItem key={c} value={c}>
+                      {c}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
-        </div>
-      )}
+        );
+      }}
     />
   );
 }

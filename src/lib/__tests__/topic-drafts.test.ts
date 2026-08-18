@@ -1,12 +1,18 @@
 import { describe, it, expect } from 'vitest';
 import {
   matchTopicDrafts,
+  topicIdForDraft,
   draftTitle,
   draftStatus,
   draftCandidateIndex,
   draftJudgeVerdict,
   buildStoryFromTopic,
+  draftLang,
+  matchDraftTranslations,
+  originalOfTranslation,
+  draftLanguageGroup,
   WRITTEN_FOR,
+  TRANSLATION_OF,
 } from '../topic-drafts';
 import type { EntityRecord, RelationshipRecord } from '@/lib/foundry-api';
 
@@ -68,6 +74,44 @@ describe('matchTopicDrafts', () => {
     const mixed = [draft(40, { topicRef: '100' }), draft(41)];
     const rels = [edge(1, WRITTEN_FOR, 40, 100), edge(2, WRITTEN_FOR, 41, 100)];
     expect(matchTopicDrafts(100, rels, mixed).map((d) => d.id)).toEqual([40, 41]);
+  });
+
+  // startsim-ka3j: topic_ref === topic.id is the PRIMARY live-verified signal;
+  // written_for and topic_ref === topic.external_id are defensive fallbacks
+  // only, the external_id one gated behind an explicit 4th arg.
+  it('matches via topic_ref === topic.id with no edge and no external_id passed', () => {
+    expect(matchTopicDrafts(100, [], [draft(50, { topicRef: '100' })]).map((d) => d.id)).toEqual([50]);
+  });
+  it('the external_id fallback only engages when topicExternalId is passed', () => {
+    const extRefDraft = draft(60, { topicRef: 'ext-abc' });
+    expect(matchTopicDrafts(100, [], [extRefDraft])).toEqual([]); // no 4th arg -> no match
+    expect(matchTopicDrafts(100, [], [extRefDraft], 'ext-abc').map((d) => d.id)).toEqual([60]);
+  });
+  it('the external_id fallback never matches a mismatched external_id', () => {
+    const extRefDraft = draft(61, { topicRef: 'ext-abc' });
+    expect(matchTopicDrafts(100, [], [extRefDraft], 'ext-xyz')).toEqual([]);
+  });
+});
+
+describe('topicIdForDraft (the reverse of matchTopicDrafts, startsim-4w76/n7s8)', () => {
+  const t100 = topic(100, {}, 'Topic A');
+  const t200 = topic(200, {}, 'Topic B');
+  const extTopic = { ...topic(300, {}, 'Topic C'), externalId: 'ext-abc' };
+
+  it('primary: matches by topic_ref === topic.id', () => {
+    expect(topicIdForDraft(draft(1, { topicRef: '100' }), [], [t100, t200])).toBe(100);
+  });
+  it('fallback 1: matches by a written_for edge when there is no topic_ref hit', () => {
+    const d = draft(2, {});
+    const rels = [edge(1, WRITTEN_FOR, 2, 200)];
+    expect(topicIdForDraft(d, rels, [t100, t200])).toBe(200);
+  });
+  it('fallback 2: matches by topic_ref === topic.external_id', () => {
+    const d = draft(3, { topicRef: 'ext-abc' });
+    expect(topicIdForDraft(d, [], [t100, extTopic])).toBe(300);
+  });
+  it('is null when the draft matches none of the given topics', () => {
+    expect(topicIdForDraft(draft(4, { topicRef: 'nowhere' }), [], [t100, t200])).toBeNull();
   });
 });
 
@@ -154,5 +198,50 @@ describe('draftStatus', () => {
   });
   it('is empty when unset', () => {
     expect(draftStatus(draft(1, {}))).toBe('');
+  });
+});
+
+// startsim-ka3j: no live `translation_of` rows exist yet (no translations have
+// been produced on the marketing-agents tenant), so these are exercised purely
+// against fixtures — the language-switcher UI correctly renders "no
+// translations yet" against real data today.
+describe('draftLang', () => {
+  it('reads the lang blob value', () => {
+    expect(draftLang(draft(1, { lang: 'ar' }))).toBe('ar');
+  });
+  it('is empty when unset', () => {
+    expect(draftLang(draft(1, {}))).toBe('');
+  });
+});
+
+describe('matchDraftTranslations / originalOfTranslation / draftLanguageGroup', () => {
+  const en = draft(1, { lang: 'en' }, 'English draft');
+  const ar = draft(2, { lang: 'ar' }, 'Arabic draft');
+  const unrelated = draft(3, { lang: 'en' }, 'Unrelated draft');
+  // ar IS a translation_of en: source = the translation (ar), target = the original (en).
+  const rels: RelationshipRecord[] = [edge(1, TRANSLATION_OF, 2, 1)];
+
+  it('matchDraftTranslations: finds drafts whose translation_of edge targets this draft', () => {
+    expect(matchDraftTranslations(1, rels, [en, ar, unrelated]).map((d) => d.id)).toEqual([2]);
+    expect(matchDraftTranslations(2, rels, [en, ar, unrelated])).toEqual([]); // ar has no translations of its own
+  });
+
+  it('originalOfTranslation: follows a translation to what it is OF', () => {
+    expect(originalOfTranslation(2, rels, [en, ar, unrelated])?.id).toBe(1);
+    expect(originalOfTranslation(1, rels, [en, ar, unrelated])).toBeNull(); // en isn't a translation of anything
+    expect(originalOfTranslation(3, rels, [en, ar, unrelated])).toBeNull();
+  });
+
+  it('draftLanguageGroup: opened from the original lists [original, ...translations]', () => {
+    expect(draftLanguageGroup(en, rels, [en, ar, unrelated]).map((d) => d.id)).toEqual([1, 2]);
+  });
+  it('draftLanguageGroup: opened from a translation resolves back to the same group', () => {
+    expect(draftLanguageGroup(ar, rels, [en, ar, unrelated]).map((d) => d.id)).toEqual([1, 2]);
+  });
+  it('draftLanguageGroup: a draft with no translations is a group of one (itself)', () => {
+    expect(draftLanguageGroup(unrelated, rels, [en, ar, unrelated]).map((d) => d.id)).toEqual([3]);
+  });
+  it('draftLanguageGroup: empty relationships -> every draft is its own group', () => {
+    expect(draftLanguageGroup(en, [], [en, ar, unrelated]).map((d) => d.id)).toEqual([1]);
   });
 });

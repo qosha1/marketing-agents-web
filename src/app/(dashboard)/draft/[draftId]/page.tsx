@@ -74,12 +74,14 @@ import {
 } from '@startsimpli/ui/document-editor';
 
 import { readData } from '@/lib/board';
-import { CONTENT_TYPE_KEY, contentCategoryLabel, contentTabHref } from '@/lib/content';
+import { CONTENT_TYPE_KEY, contentBoardHref, contentCategoryLabel } from '@/lib/content';
 import {
   draftCandidateIndex,
   draftJudgeVerdict,
+  draftLang,
   draftStatus,
   draftTitle,
+  fetchDraftTranslations,
   DRAFT_TYPE,
 } from '@/lib/topic-drafts';
 import { DraftReviewLayout, type Pane } from '@/components/draft-review/DraftReviewLayout';
@@ -184,6 +186,52 @@ function words(s: string): number {
 /** Stable "nothing to highlight" identity — keeps the paint effect from churning. */
 const NO_MATCHES: string[] = [];
 
+/**
+ * Language switcher (startsim-ka3j): lists this draft alongside its
+ * translations (via lib/topic-drafts.ts's draft<->draft `translation_of`
+ * matching), each a link to `/draft/<id>` with its language as the label.
+ * No `translation_of` rows exist on the live tenant yet (no translations have
+ * been produced), so "No translations yet" is the correct, honest state today
+ * — this isn't dead code, it's waiting on real data.
+ */
+function LanguageSwitcher({ draft }: { draft: EntityRecord }) {
+  const translationsQuery = useQuery({
+    queryKey: ['draft-translations', draft.id],
+    queryFn: () => fetchDraftTranslations(draft),
+  });
+  const lang = draftLang(draft);
+  const translations = translationsQuery.data ?? [];
+
+  if (translationsQuery.isLoading) return null;
+  if (translations.length === 0) {
+    return (
+      <p className="text-xs text-neutral-400">
+        {lang ? `${lang.toUpperCase()} · ` : ''}No translations yet.
+      </p>
+    );
+  }
+
+  const variants = [draft, ...translations].slice().sort((a, b) => draftLang(a).localeCompare(draftLang(b)));
+  return (
+    <div className="flex items-center gap-1">
+      {variants.map((d) => (
+        <Link
+          key={String(d.id)}
+          href={`/draft/${d.id}`}
+          title={draftTitle(d)}
+          className={`rounded-full border px-2 py-0.5 text-xs uppercase ${
+            d.id === draft.id
+              ? 'border-primary-300 bg-primary-50 text-primary-700'
+              : 'text-neutral-500 hover:bg-neutral-50'
+          }`}
+        >
+          {draftLang(d) || '—'}
+        </Link>
+      ))}
+    </div>
+  );
+}
+
 export default function DraftPage() {
   const params = useParams<{ draftId: string }>();
   const draftId = String(params.draftId);
@@ -200,7 +248,7 @@ export default function DraftPage() {
     return (
       <div className="space-y-3">
         <p className="text-sm text-neutral-500">Couldn’t load this draft.</p>
-        <Link href={contentTabHref('')} className="text-sm text-neutral-600 underline">
+        <Link href={`/board/${CONTENT_TYPE_KEY}`} className="text-sm text-neutral-600 underline">
           Back to the board
         </Link>
       </div>
@@ -216,7 +264,9 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
   const qc = useQueryClient();
 
   const contentType = draftStr(draft.data, 'content_type');
-  const backHref = contentTabHref(contentType);
+  // startsim-uhmk: was contentTabHref (the TABLE) while the label read "…
+  // board" — pointed at the wrong view. Now goes where it says it goes.
+  const backHref = contentBoardHref(contentType);
   const topicRef = draftStr(draft.data, 'topic_ref');
 
   const topicQuery = useQuery({
@@ -777,6 +827,7 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
             Topic: {topic.name || draftTitle(topic)}
           </p>
         ) : null}
+        <LanguageSwitcher draft={draft} />
       </div>
       <div className="flex shrink-0 flex-wrap items-center gap-2">
         {allDrafts.length > 0 && queueIndex >= 0 ? (
