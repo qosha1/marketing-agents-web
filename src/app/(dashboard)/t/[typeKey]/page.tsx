@@ -177,11 +177,12 @@ export default function TypeRecordsPage() {
   const hasStatusBoard = !!statusAttr;
 
   // Default-visible columns: Name + the content-defining fields (Kind, State,
-  // Judge, …) first, then the next few short attrs, then Created. Long body/blob
-  // fields (blog, linkedin, seo, sources, …) are NEVER default-visible — a table
-  // is for scanning, not reading a 500-word article; those live on the detail
-  // page and stay one toggle away in the Columns menu. persistKey is bumped so a
-  // previously-saved column choice that surfaced body fields is reset.
+  // Judge, Assignee, …) first, then the next few short attrs, then Created.
+  // Long body/blob fields (blog, linkedin, seo, sources, …) are NEVER
+  // default-visible — a table is for scanning, not reading a 500-word
+  // article; those live on the detail page and stay one toggle away in the
+  // Columns menu. persistKey is bumped so a previously-saved column choice
+  // (which would otherwise keep hiding a newly-preferred column) is reset.
   const columnVisibility = useMemo(() => {
     const LONG_FIELDS = new Set([
       'blog', 'linkedin', 'seo', 'sources', 'body', 'content', 'auto_checks', '_origin', '_sample',
@@ -189,17 +190,23 @@ export default function TypeRecordsPage() {
       ...(isContent ? ['title', 'subtitle', 'angle'] : []),
     ]);
     const attrIds = (type?.attributes ?? []).map((a) => a.name).filter((n) => !LONG_FIELDS.has(n));
-    const preferred = ['content_type', 'status', 'judge_verdict', 'candidate_index', 'story_title', 'sent_at', 'market'].filter(
-      (p) => attrIds.includes(p),
-    );
+    // assignee_name (startsim-71z6) is preferred so the chip actually surfaces
+    // by default, the same way content_type/status/market already do — not
+    // buried behind the Columns menu.
+    const preferred = [
+      'content_type', 'status', 'judge_verdict', 'candidate_index', 'story_title', 'sent_at', 'market', 'assignee_name',
+    ].filter((p) => attrIds.includes(p));
     const rest = attrIds.filter((a) => !preferred.includes(a));
-    const visibleAttrs = [...preferred, ...rest].slice(0, 5);
+    // Cap raised 5 -> 6 so adding assignee_name to `preferred` doesn't evict an
+    // existing default column (e.g. the draft table's preferred set was
+    // already exactly 5 wide before this attribute existed).
+    const visibleAttrs = [...preferred, ...rest].slice(0, 6);
     return {
       enabled: true,
       alwaysVisible: isContent || isNews ? ['name', '__actions'] : ['name'],
       defaultVisible: ['name', ...visibleAttrs, 'createdAt', ...(isContent || isNews ? ['__actions'] : [])],
-      // v3: introduces the stacked Title + the trailing actions column.
-      persistKey: `records-${typeKey}-v3`,
+      // v4: adds assignee_name to the preferred set (startsim-71z6).
+      persistKey: `records-${typeKey}-v4`,
     };
   }, [type?.attributes, typeKey]);
 

@@ -113,8 +113,13 @@ export default function BoardPage() {
     if (!isTopicBoard) return undefined;
     const drafts = draftsQuery.data ?? [];
     const relationships = relationshipsQuery.data ?? [];
-    return rollupByParent(drafts, (d) => topicIdForDraft(d, relationships, records), 'status');
-  }, [isTopicBoard, draftsQuery.data, relationshipsQuery.data, records]);
+    // Match against the UNFILTERED topic set, not the currently-visible
+    // `records` — a topic's draft-progress rollup is a property of the topic
+    // itself, not of whatever filter happens to be active. Using the filtered
+    // list would make a card's chip depend on which filter was last applied.
+    const allTopics = recordsQuery.data ?? [];
+    return rollupByParent(drafts, (d) => topicIdForDraft(d, relationships, allTopics), 'status');
+  }, [isTopicBoard, draftsQuery.data, relationshipsQuery.data, recordsQuery.data]);
   function rollupLabel(counts: RollupCounts): string | null {
     if (counts.total === 0) return null;
     const done = counts.byStatus[DRAFT_DONE_STATUS] ?? 0;
