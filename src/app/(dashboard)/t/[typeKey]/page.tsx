@@ -20,7 +20,12 @@ import { ReviewDrawer, InlineReviewActions, type ReviewConfig } from '@startsimp
 import { listTypes, listEntities, listAllEntities, collectionClient, type EntityRecord } from '@/lib/foundry-api';
 import { RecordForm } from '@/components/record-form';
 import { buildRecordColumns } from '@/components/record-columns';
-import { EntityDetailDrawer, RecordEditFields, TopicDrafts } from '@/components/entity-detail-drawer';
+import {
+  EntityDetailDrawer,
+  GoodExampleToggle,
+  RecordEditFields,
+  TopicDrafts,
+} from '@/components/entity-detail-drawer';
 import { choicesOf, pickStatusAttr, readData } from '@/lib/board';
 import { CONTENT_CATEGORIES, CONTENT_TYPE_ATTR, CONTENT_TYPE_KEY, contentCategoryLabel } from '@/lib/content';
 
@@ -382,7 +387,12 @@ export default function TypeRecordsPage() {
           renderEditFields={({ record: r, type: t, back, saved }) => (
             <RecordEditFields type={t} record={r} onSaved={saved} onCancel={back} />
           )}
-          renderExtra={(r) => <TopicDrafts topic={r} />}
+          renderExtra={(r) => (
+            <>
+              <GoodExampleToggle record={r} />
+              <TopicDrafts topic={r} />
+            </>
+          )}
         />
       ) : (
         <EntityDetailDrawer

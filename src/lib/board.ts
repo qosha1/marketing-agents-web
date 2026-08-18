@@ -99,3 +99,201 @@ export function groupByStatus(
   }
   return out;
 }
+
+// ---- generic ?<attrName>=<value> filter over a declared enum attribute
+// (ported from the shared template, startsim-uhmk) ----
+
+export interface AttrFilter {
+  name: string;
+  value: string;
+}
+
+/**
+ * The first declared ENUM attribute whose name is present in `params` with a
+ * value that is one of its choices. Generic `?<attrName>=<value>` filtering —
+ * any enum attribute, not just "status" or "content_type". Returns null when
+ * nothing matches, so a list route with no (or an unknown) param behaves
+ * exactly as before.
+ */
+export function pickAttrFilter(
+  type: EntityTypeDef | undefined | null,
+  params: Record<string, string | undefined | null>,
+): AttrFilter | null {
+  const attrs = type?.attributes ?? [];
+  for (const a of attrs) {
+    if (a.dataType !== 'enum') continue;
+    const raw = params[a.name];
+    if (raw == null || raw === '') continue;
+    const value = String(raw);
+    if (choicesOf(a).includes(value)) return { name: a.name, value };
+  }
+  return null;
+}
+
+/** Keep only the records whose declared enum attribute equals the filter value.
+ *  A null filter is the identity (unchanged list). */
+export function applyAttrFilter(
+  records: EntityRecord[],
+  filter: AttrFilter | null,
+): EntityRecord[] {
+  if (!filter) return records;
+  return records.filter((r) => {
+    const raw = readData(r.data, filter.name);
+    return raw != null && String(raw) === filter.value;
+  });
+}
+
+/**
+ * Every declared ENUM attribute present in `params` with a valid choice value —
+ * the multi-facet sibling of pickAttrFilter (startsim-uhmk). A board route can
+ * be pre-filtered by more than one facet at once (e.g. content_type AND
+ * status), the same way the topic table already is.
+ */
+export function pickAttrFilters(
+  type: EntityTypeDef | undefined | null,
+  params: Record<string, string | undefined | null>,
+): AttrFilter[] {
+  const attrs = type?.attributes ?? [];
+  const out: AttrFilter[] = [];
+  for (const a of attrs) {
+    if (a.dataType !== 'enum') continue;
+    const raw = params[a.name];
+    if (raw == null || raw === '') continue;
+    const value = String(raw);
+    if (choicesOf(a).includes(value)) out.push({ name: a.name, value });
+  }
+  return out;
+}
+
+/** Keep only records matching EVERY filter (AND). An empty list is the identity. */
+export function applyAttrFilters(
+  records: EntityRecord[],
+  filters: AttrFilter[],
+): EntityRecord[] {
+  if (filters.length === 0) return records;
+  return filters.reduce((recs, f) => applyAttrFilter(recs, f), records);
+}
+
+// ---- generic free-text attribute filter (startsim-a2oq) ----
+// A NEW, parallel path to the enum filter above, not an extension of it: a
+// free-text attribute (e.g. `assignee_sub`) has no declared `choices` to
+// validate a value against, so "is this a valid value" isn't a meaningful
+// question — any non-empty string is accepted verbatim.
+
+export interface AttrTextFilter {
+  name: string;
+  value: string;
+}
+
+/** Sentinel value meaning "this attribute is blank or absent" — pass as the
+ *  filter value for an "unassigned"-style quick filter over a text attribute. */
+export const BLANK = '__blank__';
+
+/**
+ * A filter over a declared NON-enum attribute, read from `params[attrName]`.
+ * null when the type doesn't declare that attribute (or declares it as an
+ * enum — that's pickAttrFilter's job), or the param is absent/empty.
+ */
+export function pickTextAttrFilter(
+  type: EntityTypeDef | undefined | null,
+  attrName: string,
+  params: Record<string, string | undefined | null>,
+): AttrTextFilter | null {
+  const attrs = type?.attributes ?? [];
+  const attr = attrs.find((a) => a.name === attrName);
+  if (!attr || attr.dataType === 'enum') return null;
+  const raw = params[attrName];
+  if (raw == null || raw === '') return null;
+  return { name: attrName, value: String(raw) };
+}
+
+/**
+ * Keep only records whose attribute exactly matches the filter value. The
+ * BLANK sentinel matches a missing OR empty-string value (the "unassigned"
+ * case). A null filter is the identity.
+ */
+export function applyTextAttrFilter(
+  records: EntityRecord[],
+  filter: AttrTextFilter | null,
+): EntityRecord[] {
+  if (!filter) return records;
+  return records.filter((r) => {
+    const raw = readData(r.data, filter.name);
+    const val = raw == null ? '' : String(raw);
+    return filter.value === BLANK ? val === '' : val === filter.value;
+  });
+}
+
+// ---- generic relationship-edge matching (startsim-ka3j) ----
+
+/** The minimal shape of a relationship edge this module needs — structural, so
+ *  it fits this fork's own RelationshipRecord without an import-time coupling. */
+export interface EdgeLike {
+  relType: string;
+  source: EntityRecord['id'];
+  target: EntityRecord['id'];
+}
+
+/**
+ * Records related to `id` via a `relType` edge, in a given direction — the
+ * generic edge-walk both `written_for` (draft -> topic) and `translation_of`
+ * (draft -> draft) style matching reduce to, so a caller doesn't hand-roll the
+ * same filter/map twice per relationship. 'incoming' (default) returns the
+ * records that point AT `id` (e.g. "drafts written for this topic", or
+ * "translations of this draft"); 'outgoing' returns what `id` itself points AT
+ * (e.g. "the draft this translation is OF").
+ */
+export function relatedByEdge(
+  id: EntityRecord['id'],
+  relType: string,
+  edges: EdgeLike[],
+  records: EntityRecord[],
+  direction: 'incoming' | 'outgoing' = 'incoming',
+): EntityRecord[] {
+  const matchIds = new Set(
+    edges
+      .filter((e) => e.relType === relType && (direction === 'incoming' ? e.target === id : e.source === id))
+      .map((e) => (direction === 'incoming' ? e.source : e.target)),
+  );
+  return records.filter((r) => matchIds.has(r.id));
+}
+
+// ---- generic child-status rollup (startsim-4w76 / startsim-n7s8) ----
+
+export interface RollupCounts {
+  /** Every matched child, regardless of status (including blank/unset). */
+  total: number;
+  /** Count per raw status value ('' for blank/unset). */
+  byStatus: Record<string, number>;
+}
+
+/**
+ * Roll up a set of "child" records into per-parent counts of their status-attr
+ * value — e.g. a topic's linked drafts bucketed by draft.status, so a board
+ * card can show "2/3 ready" without the board knowing what a draft or a topic
+ * is. `parentIdOf` supplies the (caller-specific) child->parent matching — a
+ * relationship edge (relatedByEdge), a `topic_ref`-style stamped field,
+ * whatever the type declares — and returns null for a child with no parent
+ * match, which is then excluded entirely (no bucket, no total).
+ */
+export function rollupByParent(
+  children: EntityRecord[],
+  parentIdOf: (child: EntityRecord) => EntityRecord['id'] | null,
+  statusAttrName: string,
+): Map<EntityRecord['id'], RollupCounts> {
+  const out = new Map<EntityRecord['id'], RollupCounts>();
+  for (const c of children) {
+    const parentId = parentIdOf(c);
+    if (parentId == null) continue;
+    const raw = readData(c.data, statusAttrName);
+    const status = raw == null ? '' : String(raw);
+    let bucket = out.get(parentId);
+    if (!bucket) {
+      bucket = { total: 0, byStatus: {} };
+      out.set(parentId, bucket);
+    }
+    bucket.total += 1;
+    bucket.byStatus[status] = (bucket.byStatus[status] ?? 0) + 1;
+  }
+  return out;
+}

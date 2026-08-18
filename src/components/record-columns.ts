@@ -1,6 +1,11 @@
 import { createElement, type ReactNode } from 'react';
 import type { ColumnConfig } from '@startsimpli/ui';
 import type { AttributeDef, EntityRecord } from '@/lib/foundry-api';
+import { initialsOf } from '@/lib/roster';
+
+/** Attribute-name convention for the assignee chip (startsim-71z6) — any type
+ *  that declares this attr gets the compact initials cell, not just topic/draft. */
+const ASSIGNEE_NAME_ATTR = 'assignee_name';
 
 /** Fixed widths (px) for the compact meta columns so the Title column can't eat
  *  the whole row. The Title column is the only flexible one (min/max below). */
@@ -10,6 +15,7 @@ const COL_WIDTH: Record<string, number> = {
   market: 140,
   ai_rank: 80,
   team_verdict: 132,
+  [ASSIGNEE_NAME_ATTR]: 72,
   createdAt: 112,
 };
 const DEFAULT_ATTR_WIDTH = 140;
@@ -26,7 +32,25 @@ const HEADER_LABELS: Record<string, string> = {
   judge_verdict: 'Judge',
   story_title: 'Title',
   candidate_index: '#',
+  [ASSIGNEE_NAME_ATTR]: 'Assignee',
 };
+
+/** A small rounded initials chip — the assignee column's cell, matching the
+ *  board card's compact treatment (see entity-board.tsx). */
+function assigneeCell(value: unknown) {
+  if (value == null || value === '') return '—';
+  const initials = initialsOf(String(value));
+  if (!initials) return '—';
+  return createElement(
+    'span',
+    {
+      className:
+        'inline-flex h-6 w-6 items-center justify-center rounded-full bg-neutral-200 text-[10px] font-medium text-neutral-700',
+      title: String(value),
+    },
+    initials,
+  );
+}
 
 export function humanizeHeader(name: string): string {
   const known = HEADER_LABELS[name];
@@ -92,7 +116,10 @@ export function buildRecordColumns(
     header: humanizeHeader(attr.name),
     // Fixed, compact width so meta columns stay visible and one-line.
     width: COL_WIDTH[attr.name] ?? DEFAULT_ATTR_WIDTH,
-    cell: (row) => formatCell(readAttrValue(row.data, attr.name), attr),
+    cell: (row) =>
+      attr.name === ASSIGNEE_NAME_ATTR
+        ? assigneeCell(readAttrValue(row.data, attr.name))
+        : formatCell(readAttrValue(row.data, attr.name), attr),
     // Every column is sortable: the header sort needs a comparable value, and the
     // rendered `cell` is display-only. accessorFn reads the raw scalar from the
     // data blob (object/blob values sort as '' so they don't explode the compare).

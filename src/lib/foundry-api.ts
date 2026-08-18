@@ -242,6 +242,42 @@ export function listRelationships(page = 1) {
  */
 export const collectionClient: CollectionClient = { listTypes, listAllEntities, updateEntity };
 
+// ---- tags (generic entity classification, startsim-iegx) ----
+// A tag is just {entity, label} — no category/taxonomy, so any UI (the "good
+// example" toggle, or a future tag picker) works for ANY entity type. The
+// backend has no `?entity=` filter yet, so a caller fetches the (bounded) full
+// set and filters client-side, same pattern as listAllRelationships above.
+
+export interface TagRecord {
+  id: SchemaId;
+  entity: number;
+  label: string;
+  createdAt: string;
+}
+
+export function listTags(page = 1) {
+  return api.client.get<Paginated<TagRecord>>('api/v1/tags', { params: { page } });
+}
+
+/** Every tag in the org across pages (capped) — see the module note above. */
+export async function listAllTags(maxPages = 20): Promise<TagRecord[]> {
+  const all: TagRecord[] = [];
+  for (let page = 1; page <= maxPages; page++) {
+    const res = await listTags(page);
+    all.push(...res.results);
+    if (!res.next) break;
+  }
+  return all;
+}
+
+export function createTag(input: { entity: number | string; label: string }) {
+  return api.client.post<TagRecord>('api/v1/tags', input);
+}
+
+export function deleteTag(id: SchemaId) {
+  return api.client.delete(`api/v1/tags/${id}`);
+}
+
 // ---- identity + org directory (proxied from central by the backend, R9) ----
 
 export interface WhoAmI {
@@ -263,11 +299,18 @@ export interface OrgRow {
   [key: string]: unknown;
 }
 
+/**
+ * A roster row from the central `MemberSerializer` (`{id, org, user: {sub,
+ * email}, role, created_at}`, camelCased on arrival). No top-level `email` —
+ * central nests identity under `user`, and there is no `name` field at all
+ * (see lib/roster.ts, which reads this shape correctly).
+ */
 export interface MemberRow {
   id?: string | number;
-  email?: string;
-  name?: string;
+  org?: string;
+  user?: { sub?: string; email?: string };
   role?: string;
+  createdAt?: string;
   [key: string]: unknown;
 }
 
