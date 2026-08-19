@@ -74,6 +74,8 @@ import {
 } from '@startsimpli/ui/document-editor';
 
 import { readData } from '@/lib/board';
+import { declaredLangChoices, translatableTargets } from '@/lib/draft-translation';
+import { getRegisteredToken } from '@/infrastructure/auth';
 import { CONTENT_TYPE_KEY, contentBoardHref, contentCategoryLabel } from '@/lib/content';
 import {
   draftCandidateIndex,
@@ -104,6 +106,7 @@ import { shouldIgnoreShortcut } from '@/lib/keyboard';
 import {
   getEntity,
   listAllEntities,
+  listTypes,
   updateEntity,
   type EntityRecord,
 } from '@/lib/foundry-api';
@@ -195,38 +198,102 @@ const NO_MATCHES: string[] = [];
  * — this isn't dead code, it's waiting on real data.
  */
 function LanguageSwitcher({ draft }: { draft: EntityRecord }) {
+  const qc = useQueryClient();
+  const [translating, setTranslating] = useState<string | null>(null);
+
   const translationsQuery = useQuery({
     queryKey: ['draft-translations', draft.id],
     queryFn: () => fetchDraftTranslations(draft),
+    // While a translation is being produced the new draft does not exist yet.
+    // The action answers 202 and finishes detached (a 400-500 word brief does
+    // not fit in a request — startsim-jb1z measured 19.6s for one document), so
+    // the only honest way to show the result is to keep looking for it.
+    refetchInterval: translating ? 5_000 : false,
   });
+  // The tenant's DECLARED choices, never a list in this file: adding a language
+  // is a schema change and no code change (startsim-jb1z's naming ban).
+  const typesQuery = useQuery({ queryKey: ['types'], queryFn: () => listTypes() });
+
   const lang = draftLang(draft);
   const translations = translationsQuery.data ?? [];
+  const variants = [draft, ...translations]
+    .slice()
+    .sort((a, b) => draftLang(a).localeCompare(draftLang(b)));
 
-  if (translationsQuery.isLoading) return null;
-  if (translations.length === 0) {
-    return (
-      <p className="text-xs text-neutral-400">
-        {lang ? `${lang.toUpperCase()} · ` : ''}No translations yet.
-      </p>
-    );
+  const draftType = (typesQuery.data?.results ?? []).find((t) => t.key === DRAFT_TYPE);
+  const targets = translatableTargets(
+    declaredLangChoices(draftType),
+    variants.map((d) => draftLang(d)),
+  );
+
+  // The awaited language arrived — stop polling and let the chip render.
+  useEffect(() => {
+    if (translating && translations.some((d) => draftLang(d) === translating)) {
+      setTranslating(null);
+      notify.success('Translation ready.');
+    }
+  }, [translating, translations]);
+
+  async function translateTo(target: string) {
+    setTranslating(target);
+    try {
+      const res = await fetch('/actions/translate-draft', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          // The handler forwards THIS bearer to the tenant API, so the
+          // translation is written with the clicker's own rights.
+          authorization: `Bearer ${getRegisteredToken() ?? ''}`,
+        },
+        body: JSON.stringify({ draftId: draft.id, targetLocale: target }),
+      });
+      if (!res.ok) throw new Error(`Translation request failed (${res.status}).`);
+      notify.success(`Translating to ${target.toUpperCase()} — this takes about a minute.`);
+      void qc.invalidateQueries({ queryKey: ['draft-translations', draft.id] });
+    } catch (err) {
+      setTranslating(null);
+      notify.error(err instanceof Error ? err.message : 'Could not start the translation.');
+    }
   }
 
-  const variants = [draft, ...translations].slice().sort((a, b) => draftLang(a).localeCompare(draftLang(b)));
+  if (translationsQuery.isLoading) return null;
+
   return (
     <div className="flex items-center gap-1">
-      {variants.map((d) => (
-        <Link
-          key={String(d.id)}
-          href={`/draft/${d.id}`}
-          title={draftTitle(d)}
-          className={`rounded-full border px-2 py-0.5 text-xs uppercase ${
-            d.id === draft.id
-              ? 'border-primary-300 bg-primary-50 text-primary-700'
-              : 'text-neutral-500 hover:bg-neutral-50'
-          }`}
+      {variants.length > 1 ? (
+        variants.map((d) => (
+          <Link
+            key={String(d.id)}
+            href={`/draft/${d.id}`}
+            title={draftTitle(d)}
+            className={`rounded-full border px-2 py-0.5 text-xs uppercase ${
+              d.id === draft.id
+                ? 'border-primary-300 bg-primary-50 text-primary-700'
+                : 'text-neutral-500 hover:bg-neutral-50'
+            }`}
+          >
+            {draftLang(d) || '—'}
+          </Link>
+        ))
+      ) : (
+        <span className="text-xs text-neutral-400">
+          {lang ? `${lang.toUpperCase()} · ` : ''}No translations yet.
+        </span>
+      )}
+
+      {/* One button per language still missing. It disappears when every
+          declared language exists, rather than creating a competing copy. */}
+      {targets.map((target) => (
+        <button
+          key={target}
+          type="button"
+          disabled={translating !== null}
+          onClick={() => void translateTo(target)}
+          title={`Translate this draft into ${target.toUpperCase()}`}
+          className="rounded-full border border-dashed border-neutral-300 px-2 py-0.5 text-xs uppercase text-neutral-500 hover:bg-neutral-50 disabled:opacity-50"
         >
-          {draftLang(d) || '—'}
-        </Link>
+          {translating === target ? `${target}…` : `+ ${target}`}
+        </button>
       ))}
     </div>
   );

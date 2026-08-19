@@ -14,10 +14,13 @@
  * per request and is validated against whatever the live schema declares, so
  * adding `zh` for OGMC's WeChat channel is a schema change and nothing else.
  */
-import type { EntityRecord } from '@/lib/foundry-api';
+import type { EntityRecord, EntityTypeDef } from '@/lib/foundry-api';
 
 /** A translation starts as new work for a reviewer, never as an approved artifact. */
 export const TRANSLATED_STATUS = 'drafting';
+
+/** The declared attribute carrying a draft's language. Its CHOICES are the tenant's. */
+export const LANG_FIELD = 'lang';
 
 /** The draft's own headline, addressed like any other segment. */
 const NAME_SEGMENT = 'name';
@@ -155,4 +158,36 @@ export function applyDraftTranslations(
     name: translations.get(NAME_SEGMENT) ?? draft.name,
     data,
   };
+}
+
+// ---------------------------------------------------------------------------
+//  which languages a draft can still be translated INTO (bd startsim-tetf)
+// ---------------------------------------------------------------------------
+
+/**
+ * The locales this tenant has DECLARED on `draft.lang`.
+ *
+ * Read from the runtime schema, never from a list in this file. That is what
+ * makes adding a language a schema change and nothing else — the reason nothing
+ * here names one (`startsim-jb1z`'s naming ban). A tenant that declares
+ * `en, ar, zh` offers three; one that declares two offers two.
+ */
+export function declaredLangChoices(type: EntityTypeDef | null | undefined): string[] {
+  const attr = (type?.attributes ?? []).find((a) => a.name === LANG_FIELD);
+  const choices = attr?.config?.choices;
+  return Array.isArray(choices) ? choices.map((c) => String(c)) : [];
+}
+
+/**
+ * The targets still worth offering: every declared locale that no draft in this
+ * language group already occupies. Offering a language that exists would create
+ * a second, competing translation rather than taking the reviewer to the one
+ * that is already there.
+ */
+export function translatableTargets(
+  declared: readonly string[],
+  presentLangs: readonly string[],
+): string[] {
+  const taken = new Set(presentLangs.filter(Boolean));
+  return declared.filter((choice) => choice && !taken.has(choice));
 }
