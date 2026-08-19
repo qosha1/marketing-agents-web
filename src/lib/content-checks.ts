@@ -117,3 +117,61 @@ export function contentFieldsFromSections(
     sources,
   };
 }
+
+// ---------------------------------------------------------------------------
+//  the approved-source list, from the TENANT (bd startsim-768w.18.14)
+// ---------------------------------------------------------------------------
+
+/** The entity type whose records ARE the approved-source list. */
+export const SOURCE_TYPE = 'source';
+
+/**
+ * The approved hosts, read off the tenant's own `source` records.
+ *
+ * WHY THIS EXISTS AT ALL. Approval was hard-gated on a hardcoded whitelist in
+ * this file that had drifted from the two other lists describing the same
+ * thing: n8n's Tavily `include_domains` (23 domains) and the tenant's `source`
+ * table (23 rows, editable by the team in the Approved Source screen). The
+ * overlap between the hardcoded list and n8n's was NINE, so 14 of the domains
+ * the pipeline is told to source FROM were domains the reviewer then blocked —
+ * and 59 of 59 drafts with sources cited at least one of them. Nothing could be
+ * approved.
+ *
+ * The `source` table is the only one of the three the team can edit, so it is
+ * the one that decides. Editing Approved Source now changes what passes review,
+ * and the drift cannot come back, because there is one list.
+ *
+ * `active: false` is honoured — a retired source stops being approved without
+ * anyone deleting its record and losing its history.
+ */
+export function approvedHostsFromSources(records: readonly SourceRecordish[]): string[] {
+  const hosts: string[] = [];
+  const seen = new Set<string>();
+  for (const record of records) {
+    const data = (record?.data ?? {}) as Record<string, unknown>;
+    if (data.active === false) continue;
+    const host = normalizeHost(data.domain);
+    if (!host || seen.has(host)) continue;
+    seen.add(host);
+    hosts.push(host);
+  }
+  return hosts;
+}
+
+/** The shape this needs off an entity record — deliberately structural, not an import. */
+export interface SourceRecordish {
+  data?: unknown;
+}
+
+/** A bare host: lowercased, no scheme, no www., no path, no port. */
+function normalizeHost(value: unknown): string {
+  if (typeof value !== 'string') return '';
+  let host = value.trim().toLowerCase();
+  if (!host) return '';
+  host = host.replace(/^[a-z]+:\/\//, '');
+  host = host.split('/')[0] ?? '';
+  host = host.split('?')[0] ?? '';
+  host = host.split(':')[0] ?? '';
+  host = host.replace(/^www\./, '');
+  return host;
+}
