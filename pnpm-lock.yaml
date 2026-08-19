@@ -18,8 +18,8 @@ importers:
         specifier: ^0.4.0
         version: 0.4.11(react@19.2.5)(zod@3.25.76)
       '@startsimpli/llm':
-        specifier: ^0.4.14
-        version: 0.4.14
+        specifier: ^0.4.17
+        version: 0.4.17(react@19.2.5)
       '@startsimpli/ui':
         specifier: ^0.4.65
         version: 0.4.65(@startsimpli/api@0.5.37(@tanstack/react-query@5.101.2(react@19.2.5))(next@16.1.6(@babel/core@7.29.7)(react-dom@19.2.5(react@19.2.5))(react@19.2.5))(react@19.2.5))(@startsimpli/auth@0.4.29(next@16.1.6(@babel/core@7.29.7)(react-dom@19.2.5(react@19.2.5))(react@19.2.5))(react@19.2.5))(@tanstack/react-query@5.101.2(react@19.2.5))(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(@xterm/xterm@5.5.0)(next@16.1.6(@babel/core@7.29.7)(react-dom@19.2.5(react@19.2.5))(react@19.2.5))(react-dom@19.2.5(react@19.2.5))(react@19.2.5)(tailwindcss@4.3.2)
@@ -1335,8 +1335,13 @@ packages:
       react: '>=18'
       zod: '>=3'
 
-  '@startsimpli/llm@0.4.14':
-    resolution: {integrity: sha512-kHPa4PryooCLY2LvQGlKxZYTdBGKAmjYB3/bMaP5NzaA5ZqOs/ysyGoAa0TLAAeU7yglEISGfyZg8KTlxZaH1Q==}
+  '@startsimpli/i18n@0.1.3':
+    resolution: {integrity: sha512-E3bT/Mi8TS0y+5XdX/bnoyJNw3Culld/GkBlXCV6l8e/K0My61HW6fC1S5lpMur/WFjRYF00RDop2YwK322Gpg==}
+    peerDependencies:
+      react: '>=18.0.0'
+
+  '@startsimpli/llm@0.4.17':
+    resolution: {integrity: sha512-4pz1b0BoFRvGNx51crpx8n2hcQ/dzaHKqPXHiHecl3qIklcHBtREM3Ic7+V3tBS1pdJlwA8S44vG0us51YMzAw==}
 
   '@startsimpli/ui@0.4.65':
     resolution: {integrity: sha512-qfaiBQAaZj48v+Fy2+ocvcwNsRWTsDTstP1O6OTtX/PpNTu4fSAuKNQ6ICWDvBaxYi4/DRJinY65FpJRkJHVog==}
@@ -5047,9 +5052,16 @@ snapshots:
       react: 19.2.5
       zod: 3.25.76
 
-  '@startsimpli/llm@0.4.14':
+  '@startsimpli/i18n@0.1.3(react@19.2.5)':
     dependencies:
+      react: 19.2.5
+
+  '@startsimpli/llm@0.4.17(react@19.2.5)':
+    dependencies:
+      '@startsimpli/i18n': 0.1.3(react@19.2.5)
       zod: 4.4.3
+    transitivePeerDependencies:
+      - react
 
   '@startsimpli/ui@0.4.65(@startsimpli/api@0.5.37(@tanstack/react-query@5.101.2(react@19.2.5))(next@16.1.6(@babel/core@7.29.7)(react-dom@19.2.5(react@19.2.5))(react@19.2.5))(react@19.2.5))(@startsimpli/auth@0.4.29(next@16.1.6(@babel/core@7.29.7)(react-dom@19.2.5(react@19.2.5))(react@19.2.5))(react@19.2.5))(@tanstack/react-query@5.101.2(react@19.2.5))(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(@xterm/xterm@5.5.0)(next@16.1.6(@babel/core@7.29.7)(react-dom@19.2.5(react@19.2.5))(react@19.2.5))(react-dom@19.2.5(react@19.2.5))(react@19.2.5)(tailwindcss@4.3.2)':
     dependencies:
