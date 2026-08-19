@@ -30,6 +30,8 @@
  * /api/* request to Django before Next sees it, so a handler under /api is
  * unreachable in prod (see generate-drafts/route.ts for the same note).
  */
+import { request as httpRequest } from 'node:http';
+
 import { NextResponse } from 'next/server';
 
 import { createAnthropicProvider, createOpenAIProvider, type ILLMProvider } from '@startsimpli/llm';
@@ -40,7 +42,7 @@ import {
 } from '@startsimpli/llm/translation';
 
 import { applyDraftTranslations, draftSegments } from '@/lib/draft-translation';
-import { tenantApiBase, translationEnv } from '@/lib/translation-config';
+import { tenantApiBase, tenantHost, translationEnv } from '@/lib/translation-config';
 import type { EntityRecord } from '@/lib/foundry-api';
 
 export const dynamic = 'force-dynamic';
@@ -59,7 +61,18 @@ function tenantBase(): string {
 }
 
 /**
- * Direct server-side tenant call.
+ * Direct server-side tenant call, over node:http rather than fetch.
+ *
+ * THE HOST HEADER IS THE WHOLE REASON. Django validates ALLOWED_HOSTS against
+ * it, and a tenant allows only its public domain. nginx preserves it
+ * (`proxy_set_header Host $http_host`); a call that skips nginx does not, so
+ * Django answers 400 "Invalid HTTP_HOST header" before any view runs. Node's
+ * fetch cannot help here — undici derives Host from the URL and silently drops
+ * an explicit one — so this uses node:http, which honours it.
+ *
+ * Going direct rather than hairpinning through the public ALB also keeps the
+ * draft's text inside the VPC, which is the posture a translation product
+ * should hold even on the `open` route.
  *
  * Deliberately NOT the shared browser client: that one reads a token from the
  * browser and redirects to signin on 401, neither of which means anything here.
@@ -71,21 +84,48 @@ async function tenantFetch<T>(
   auth: string,
   init: { method: string; body?: unknown },
 ): Promise<T> {
-  const res = await fetch(`${tenantBase()}/api/v1/${path}/`, {
-    method: init.method,
-    headers: {
-      authorization: auth,
-      'content-type': 'application/json',
-    },
-    body: init.body === undefined ? undefined : JSON.stringify(init.body),
-    cache: 'no-store',
+  const url = new URL(`${tenantBase()}/api/v1/${path}/`);
+  const payload = init.body === undefined ? undefined : JSON.stringify(init.body);
+  const host = tenantHost(process.env as Record<string, string | undefined>);
+
+  return new Promise<T>((resolve, reject) => {
+    const req = httpRequest(
+      {
+        protocol: url.protocol,
+        hostname: url.hostname,
+        port: url.port,
+        path: `${url.pathname}${url.search}`,
+        method: init.method,
+        headers: {
+          authorization: auth,
+          'content-type': 'application/json',
+          ...(host ? { host } : {}),
+          ...(payload ? { 'content-length': Buffer.byteLength(payload) } : {}),
+        },
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (c: Buffer) => chunks.push(c));
+        res.on('end', () => {
+          const status = res.statusCode ?? 0;
+          if (status < 200 || status >= 300) {
+            // Status, method and path only. The body can quote the draft, and a
+            // translation product that logs client material has no wall to sell.
+            reject(new Error(`tenant ${init.method} ${path} responded ${status}`));
+            return;
+          }
+          try {
+            resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')) as T);
+          } catch {
+            reject(new Error(`tenant ${init.method} ${path} returned unparseable JSON`));
+          }
+        });
+      },
+    );
+    req.on('error', () => reject(new Error(`tenant ${init.method} ${path} is unreachable`)));
+    if (payload) req.write(payload);
+    req.end();
   });
-  if (!res.ok) {
-    // Status and path only. The body can carry the draft's own text, and a
-    // translation product that logs client material has no wall to sell.
-    throw new Error(`tenant ${init.method} ${path} responded ${res.status}`);
-  }
-  return (await res.json()) as T;
 }
 
 /** The configured provider, by name. Returns null when the deployment has no key. */
@@ -203,10 +243,14 @@ export async function POST(request: Request) {
 
   void runTranslation(route, provider, auth, draftId, targetLocale.trim()).catch(
     (error: unknown) => {
-      // Name only — never the message, which can quote the draft.
+      // Every Error this file constructs carries only a method, a path and a
+      // status — never a body — so the message is safe to log and is the only
+      // thing that makes a failed job diagnosable. The first live failure logged
+      // just the NAME ('Error') and cost a deploy cycle to identify.
       console.error('[translate-draft] job failed', {
         draftId,
         error: (error as Error).name,
+        detail: (error as Error).message,
       });
     },
   );

@@ -45,6 +45,27 @@ const DEFAULT_POSTURE = 'open';
 export type Env = Record<string, string | undefined>;
 
 /**
+ * The `Host` header a direct-to-Django call must carry.
+ *
+ * Django checks ALLOWED_HOSTS against the Host header, and a tenant's is just
+ * its public domain. nginx preserves it (`proxy_set_header Host $http_host`);
+ * a server-side call that skips nginx does NOT, so Django sees
+ * `django.<namespace>:5000` and answers 400 "Invalid HTTP_HOST header" before
+ * any view runs. DJANGO_ALLOWED_HOSTS is already wired into the frontend task
+ * def, so the right value is in hand — it just has to be sent.
+ *
+ * Note Node's fetch cannot do this: undici derives Host from the URL and
+ * silently drops an explicit one, which is why the caller uses node:http.
+ */
+export function tenantHost(env: Env): string | undefined {
+  const first = (env.DJANGO_ALLOWED_HOSTS ?? '')
+    .split(',')
+    .map((h) => h.trim())
+    .filter((h) => h.length > 0)[0];
+  return first;
+}
+
+/**
  * The base URL for server-side tenant API calls. Deployed first, local second —
  * the deployed case is the one that has no second chance.
  */
