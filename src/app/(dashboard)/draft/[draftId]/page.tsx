@@ -91,7 +91,12 @@ import { QualityRail } from '@/components/draft-review/QualityRail';
 import { BlogSection } from '@/components/draft-review/BlogSection';
 import { ContentChannels } from '@/components/draft-review/ContentChannels';
 import { SourcesTool } from '@/components/draft-review/SourcesTool';
-import { contentFieldsFromSections, OGMC_APPROVED_HOSTS } from '@/lib/content-checks';
+import {
+  approvedHostsFromSources,
+  contentFieldsFromSections,
+  OGMC_APPROVED_HOSTS,
+  SOURCE_TYPE,
+} from '@/lib/content-checks';
 import {
   findStopIndex,
   isChannelId,
@@ -459,6 +464,22 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
   // Sources live outside `sections` now (they're the Sources tool), so re-inject a
   // synthetic sources section built from the tool's rows for the approved-sources
   // check.
+  // THE APPROVED-SOURCE LIST IS TENANT DATA, not a constant (bd startsim-768w.18.14).
+  // A hardcoded list here had drifted from both n8n's search domains and the
+  // team-editable Approved Source table, and approval is HARD-GATED on it — so
+  // 59 of 59 drafts with sources were unapprovable. The tenant's records decide.
+  const sourceRecordsQuery = useQuery({
+    queryKey: ['entities', SOURCE_TYPE],
+    queryFn: () => listAllEntities(SOURCE_TYPE),
+  });
+  const approvedHosts = useMemo(() => {
+    const fromTenant = approvedHostsFromSources(sourceRecordsQuery.data ?? []);
+    // Fallback ONLY while the table is loading or when a tenant declares no
+    // sources at all. An empty list would fail every host and block the whole
+    // corpus, which is the outage this replaced — never fail closed here.
+    return fromTenant.length > 0 ? fromTenant : OGMC_APPROVED_HOSTS;
+  }, [sourceRecordsQuery.data]);
+
   const checks = useMemo(() => {
     const sourcesSection: DocSection = {
       key: 'sources',
@@ -467,9 +488,9 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
       value: sourceItems.map((s) => s.url).filter(Boolean),
     };
     return runContentChecks(contentFieldsFromSections([...sections, sourcesSection], draft.name), {
-      approvedHosts: OGMC_APPROVED_HOSTS,
+      approvedHosts,
     });
-  }, [sections, sourceItems, draft.name]);
+  }, [sections, sourceItems, draft.name, approvedHosts]);
 
   // --- Jump-to-issue (bd 768w.16.15.3) ---
   // Every place a non-passing check can send the reviewer, rebuilt with the checks.
@@ -1012,7 +1033,7 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
               <SourcesTool
                 items={sourceItems}
                 verified={verifiedMap}
-                approvedHosts={OGMC_APPROVED_HOSTS}
+                approvedHosts={approvedHosts}
                 today={today}
                 judgeVerdict={judgeVerdict}
                 flagged={flaggedSources}
