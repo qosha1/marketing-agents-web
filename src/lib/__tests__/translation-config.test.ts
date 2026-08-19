@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { tenantApiBase, translationEnv } from '@/lib/translation-config';
+import { tenantApiBase, tenantHost, translationEnv } from '@/lib/translation-config';
 
 describe('tenantApiBase', () => {
   it('uses the Cloud Map FQDN when deployed, exactly as nginx does', () => {
@@ -80,5 +80,27 @@ describe('translationEnv', () => {
 
     expect(env.TRANSLATION_FALLBACK).toBe('true');
     expect(env.OPENAI_API_KEY).toBe('k');
+  });
+});
+
+describe('tenantHost', () => {
+  it('is the tenant domain, because that is what ALLOWED_HOSTS holds', () => {
+    // Without it a direct-to-Django call gets 400 "Invalid HTTP_HOST header"
+    // before any view runs — which is exactly how the first live translation
+    // failed, silently, after the engine had done all its work.
+    expect(tenantHost({ DJANGO_ALLOWED_HOSTS: 'marketing-agents.ai.startsimpli.com' })).toBe(
+      'marketing-agents.ai.startsimpli.com',
+    );
+  });
+
+  it('takes the first entry when several are allowed', () => {
+    expect(tenantHost({ DJANGO_ALLOWED_HOSTS: ' a.example.com , b.example.com ' })).toBe(
+      'a.example.com',
+    );
+  });
+
+  it('is undefined when unset, so the caller can fall back rather than send junk', () => {
+    expect(tenantHost({})).toBeUndefined();
+    expect(tenantHost({ DJANGO_ALLOWED_HOSTS: '  ' })).toBeUndefined();
   });
 });
