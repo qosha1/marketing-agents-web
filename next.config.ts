@@ -5,6 +5,12 @@ const nextConfig: NextConfig = {
     "@startsimpli/api",
     "@startsimpli/auth",
     "@startsimpli/forms",
+    // TRANSITIVE, and required: @startsimpli/llm/translation imports
+    // @startsimpli/i18n/bidi for stripIsolates (the storage normaliser), and
+    // these packages ship raw TypeScript. Without this the build dies with
+    // "Unknown module type" on bidi.ts — a failure only `next build` surfaces,
+    // never tsc or vitest.
+    "@startsimpli/i18n",
     "@startsimpli/llm",
     "@startsimpli/ui",
   ],
