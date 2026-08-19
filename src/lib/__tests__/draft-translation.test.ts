@@ -23,6 +23,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   applyDraftTranslations,
+  declaredLangChoices,
+  translatableTargets,
   draftSegments,
   TRANSLATED_STATUS,
 } from '@/lib/draft-translation';
@@ -192,5 +194,43 @@ describe('applyDraftTranslations — the new draft that gets created', () => {
     expect(draft.name).toBe('Gulf logistics rebound');
     expect(draft.data.blog).toBe('Revenue grew 12.5% across the corridor.');
     expect(draft.data.lang).toBe('en');
+  });
+});
+
+describe('which languages are still on offer (bd startsim-tetf)', () => {
+  const draftType = {
+    key: 'draft',
+    attributes: [
+      { name: 'status', dataType: 'enum', config: { choices: ['drafting', 'ready'] } },
+      { name: 'lang', dataType: 'enum', config: { choices: ['en', 'ar', 'zh'] } },
+    ],
+  } as unknown as Parameters<typeof declaredLangChoices>[0];
+
+  it('reads the choices off the runtime schema, not a list in the code', () => {
+    // This is what makes adding a language a schema change and nothing else.
+    expect(declaredLangChoices(draftType)).toEqual(['en', 'ar', 'zh']);
+  });
+
+  it('is empty when the type declares no lang attribute, so nothing is offered', () => {
+    expect(declaredLangChoices({ key: 'draft', attributes: [] } as never)).toEqual([]);
+    expect(declaredLangChoices(null)).toEqual([]);
+  });
+
+  it('offers only languages the group does not already have', () => {
+    // The source is en and an ar translation exists, so zh is the only one left.
+    expect(translatableTargets(['en', 'ar', 'zh'], ['en', 'ar'])).toEqual(['zh']);
+  });
+
+  it('never offers the language the draft is already in', () => {
+    expect(translatableTargets(['en', 'ar'], ['en'])).toEqual(['ar']);
+  });
+
+  it('offers nothing once every declared language exists', () => {
+    // The control must disappear rather than create a competing second copy.
+    expect(translatableTargets(['en', 'ar'], ['en', 'ar'])).toEqual([]);
+  });
+
+  it('ignores blank languages rather than offering an empty chip', () => {
+    expect(translatableTargets(['en', 'ar', ''], ['', 'en'])).toEqual(['ar']);
   });
 });
