@@ -40,6 +40,7 @@ import {
 } from '@startsimpli/llm/translation';
 
 import { applyDraftTranslations, draftSegments } from '@/lib/draft-translation';
+import { tenantApiBase, translationEnv } from '@/lib/translation-config';
 import type { EntityRecord } from '@/lib/foundry-api';
 
 export const dynamic = 'force-dynamic';
@@ -47,9 +48,14 @@ export const dynamic = 'force-dynamic';
 const DRAFT_TYPE = 'draft';
 const TRANSLATION_OF = 'translation_of';
 
-/** Server-side base for the tenant backend — the same var the /api/* rewrite uses. */
+/**
+ * Server-side base for the tenant backend. NOT `DJANGO_API_URL` — that is set
+ * only locally, so in a deployed tenant this handler would have pointed at
+ * itself. See `translation-config.ts`; the deployed answer is the Cloud Map
+ * FQDN nginx already proxies to.
+ */
 function tenantBase(): string {
-  return (process.env.DJANGO_API_URL || 'http://localhost:8001').replace(/\/+$/, '');
+  return tenantApiBase(process.env as Record<string, string | undefined>);
 }
 
 /**
@@ -181,7 +187,7 @@ export async function POST(request: Request) {
   // job: a misconfigured deployment is a 500 the clicker can see.
   let route: TranslationRoute;
   try {
-    route = resolveTranslationRoute(process.env as Record<string, string | undefined>);
+    route = resolveTranslationRoute(translationEnv(process.env as Record<string, string | undefined>));
   } catch (error) {
     console.error('[translate-draft] translation route is misconfigured', {
       reason: (error as Error).name,
