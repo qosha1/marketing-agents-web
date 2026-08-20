@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { runContentChecks, type ContentCheck } from '@startsimpli/ui';
 import type { DocSection } from '@startsimpli/ui/document-editor';
-import { contentFieldsFromSections, OGMC_APPROVED_HOSTS } from '../content-checks';
+import { contentFieldsFromSections } from '../content-checks';
 import {
   FIELD_CHANNEL,
   channelForField,
@@ -12,6 +12,10 @@ import {
   prevStopIndex,
   stopIndexForCheck,
 } from '../issue-jump';
+
+/** A stand-in for the tenant's `source` rows. The real allow-list lives in the
+ *  tenant DB (bd 768w.18.14) — a test must never depend on a production list. */
+const APPROVED: string[] = ['reuters.com', 'ft.com', 'arabnews.com', 'zawya.com'];
 
 /** A non-passing check with locations, shaped like runContentChecks emits them. */
 function check(id: string, locations: ContentCheck['locations'], status: ContentCheck['status'] = 'fail'): ContentCheck {
@@ -150,7 +154,7 @@ describe('against the real runContentChecks', () => {
   ];
   const stops = issueStops(
     runContentChecks(contentFieldsFromSections(sections, 'A headline'), {
-      approvedHosts: OGMC_APPROVED_HOSTS,
+      approvedHosts: APPROVED,
     }),
   );
 

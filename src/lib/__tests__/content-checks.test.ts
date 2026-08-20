@@ -1,7 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import type { DocSection } from '@startsimpli/ui/document-editor';
 import { runContentChecks, overallStatus } from '@startsimpli/ui';
-import { contentFieldsFromSections, OGMC_APPROVED_HOSTS } from '../content-checks';
+import { contentFieldsFromSections } from '../content-checks';
+
+/** A stand-in for the tenant's `source` rows. The real allow-list lives in the
+ *  tenant DB (bd 768w.18.14) — a test must never depend on a production list. */
+const APPROVED: string[] = ['reuters.com', 'ft.com', 'arabnews.com', 'zawya.com'];
 
 function section(key: string, kind: DocSection['kind'], value: unknown): DocSection {
   return { key, label: key, kind, value };
@@ -50,7 +54,7 @@ describe('contentFieldsFromSections', () => {
   });
 });
 
-describe('OGMC approved-source gating (integration with runContentChecks)', () => {
+describe('approved-source gating (integration with runContentChecks)', () => {
   const base: DocSection[] = [
     section('blog', 'markdown', 'x '.repeat(450)),
     section('linkedin', 'text', 'post [link] ' + 'y '.repeat(200)),
@@ -61,7 +65,7 @@ describe('OGMC approved-source gating (integration with runContentChecks)', () =
     const sections = [...base, section('sources', 'list', ['https://reddit.com/r/x'])];
     const checks = runContentChecks(
       contentFieldsFromSections(sections, 'A headline of about ten words here now'),
-      { approvedHosts: OGMC_APPROVED_HOSTS },
+      { approvedHosts: APPROVED },
     );
     const src = checks.find((c) => c.id === 'approved-sources');
     expect(src?.status).toBe('fail');
@@ -72,7 +76,7 @@ describe('OGMC approved-source gating (integration with runContentChecks)', () =
     const sections = [...base, section('sources', 'list', ['https://reuters.com/x', 'https://ft.com/y'])];
     const checks = runContentChecks(
       contentFieldsFromSections(sections, 'A headline of about ten words here now'),
-      { approvedHosts: OGMC_APPROVED_HOSTS },
+      { approvedHosts: APPROVED },
     );
     expect(checks.find((c) => c.id === 'approved-sources')?.status).toBe('pass');
   });
