@@ -1,9 +1,10 @@
 /**
  * Marketing Agents home = the system-health dashboard (bd 768w.16.8.5).
  *
- * The home bubbles up the whole system (content pipeline, source freshness, delivery
- * adherence, needs-attention queue) rather than dropping straight into one workflow.
- * Topic review now lives in the Content tabs (the topic status board), not the home.
+ * The home bubbles up the whole system rather than dropping straight into one
+ * workflow: what needs a human (as predicates over fields, not status equality),
+ * the shape of the content pipeline, and whether ingestion is still running.
+ * Topic review itself lives in the Content tabs (the topic status board).
  */
 import { DashboardHome } from '@/components/dashboard';
 
