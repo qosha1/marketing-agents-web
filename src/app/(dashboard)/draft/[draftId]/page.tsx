@@ -58,6 +58,7 @@ import { ChevronLeft, ChevronRight } from 'lucide-react';
 import Link from 'next/link';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  Absence,
   Button,
   notify,
   runContentChecks,
@@ -92,9 +93,11 @@ import { BlogSection } from '@/components/draft-review/BlogSection';
 import { ContentChannels } from '@/components/draft-review/ContentChannels';
 import { SourcesTool } from '@/components/draft-review/SourcesTool';
 import {
-  approvedHostsFromSources,
+  approvedSourceBasis,
+  approvedSourceCheckConfig,
+  approvedSourceGap,
+  approvedSourceStandIn,
   contentFieldsFromSections,
-  OGMC_APPROVED_HOSTS,
   SOURCE_TYPE,
 } from '@/lib/content-checks';
 import {
@@ -468,17 +471,28 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
   // A hardcoded list here had drifted from both n8n's search domains and the
   // team-editable Approved Source table, and approval is HARD-GATED on it — so
   // 59 of 59 drafts with sources were unapprovable. The tenant's records decide.
+  //
+  // And when that read comes back with nothing, THE CHECK DOES NOT RUN
+  // (bd startsim-4ipm). This used to fall back to the hardcoded list on an empty
+  // read, which quietly swapped the basis of an approval gate: measured on prod
+  // 2026-08-20, all 59 drafts-with-sources pass against the tenant's 53 active
+  // hosts and 27 of those same 59 fail against the old hardcoded 43. An empty
+  // read is an ABSENCE — say so, and refuse to compute against another list.
   const sourceRecordsQuery = useQuery({
     queryKey: ['entities', SOURCE_TYPE],
     queryFn: () => listAllEntities(SOURCE_TYPE),
   });
-  const approvedHosts = useMemo(() => {
-    const fromTenant = approvedHostsFromSources(sourceRecordsQuery.data ?? []);
-    // Fallback ONLY while the table is loading or when a tenant declares no
-    // sources at all. An empty list would fail every host and block the whole
-    // corpus, which is the outage this replaced — never fail closed here.
-    return fromTenant.length > 0 ? fromTenant : OGMC_APPROVED_HOSTS;
-  }, [sourceRecordsQuery.data]);
+  const basis = useMemo(
+    () =>
+      approvedSourceBasis({
+        records: sourceRecordsQuery.data,
+        isPending: sourceRecordsQuery.isPending,
+        isError: sourceRecordsQuery.isError,
+      }),
+    [sourceRecordsQuery.data, sourceRecordsQuery.isPending, sourceRecordsQuery.isError],
+  );
+  // Non-null exactly when the check cannot run — three states, three sentences.
+  const sourceGap = approvedSourceGap(basis);
 
   const checks = useMemo(() => {
     const sourcesSection: DocSection = {
@@ -487,10 +501,17 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
       kind: 'list',
       value: sourceItems.map((s) => s.url).filter(Boolean),
     };
-    return runContentChecks(contentFieldsFromSections([...sections, sourcesSection], draft.name), {
-      approvedHosts,
-    });
-  }, [sections, sourceItems, draft.name, approvedHosts]);
+    const computed = runContentChecks(
+      contentFieldsFromSections([...sections, sourcesSection], draft.name),
+      // NOT `{ approvedHosts: [] }` — the checker runs the check whenever the key
+      // is present, so an empty array would fail every host. Absent = skipped.
+      approvedSourceCheckConfig(basis),
+    );
+    // Hold the approved-sources slot with a `warn` stand-in when it was skipped,
+    // so a check that could not run never reads as a check that passed.
+    const standIn = approvedSourceStandIn(basis);
+    return standIn ? [...computed, standIn] : computed;
+  }, [sections, sourceItems, draft.name, basis]);
 
   // --- Jump-to-issue (bd 768w.16.15.3) ---
   // Every place a non-passing check can send the reviewer, rebuilt with the checks.
@@ -521,13 +542,16 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
   const failingLabels = checks.filter((c) => c.status === 'fail').map((c) => c.label);
 
   // The gating hint on the left of the decision bar: fix failing checks first,
-  // else prompt the reviewer to sign off. Null once Accept is unlocked.
+  // else prompt the reviewer to sign off. When Accept IS unlocked but the
+  // approved-source check could not run, the bar says so — an unchecked basis
+  // does not block the queue, but the reviewer must not read "Ready to accept"
+  // over a guardrail that never ran (bd startsim-4ipm).
   const acceptGateHint =
     !validationOk && failingLabels.length > 0
       ? `Fix to accept: ${failingLabels.join(', ')}`
       : validationOk && !reviewerSignedOff
         ? 'Set your verdict to Approve to accept'
-        : null;
+        : (sourceGap?.gateHint ?? null);
 
   const feedbackReady = useMemo(
     () => compileFeedback(review, notes).trim().length > 0,
@@ -1030,17 +1054,50 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
             badge: `${sourceItems.length}`,
             warn: sourcesCoverage.concern,
             content: (
-              <SourcesTool
-                items={sourceItems}
-                verified={verifiedMap}
-                approvedHosts={approvedHosts}
-                today={today}
-                judgeVerdict={judgeVerdict}
-                flagged={flaggedSources}
-                onAdd={addSource}
-                onRemove={removeSource}
-                onToggleVerify={toggleVerify}
-              />
+              <div className="space-y-3">
+                {/* The check's basis, when there isn't one. Loading is a not-yet
+                    (a quiet line); a genuine empty and a failed read are absences
+                    with different fixes — so they are different cards, and neither
+                    is a 0, a green tick or a verdict about this draft. */}
+                {sourceGap ? (
+                  basis.state === 'loading' ? (
+                    <p className="text-sm text-muted-foreground">
+                      {sourceGap.title} {sourceGap.description}
+                    </p>
+                  ) : (
+                    <Absence
+                      tier="card"
+                      title={sourceGap.title}
+                      description={sourceGap.description}
+                      why="Approvability is decided by the tenant’s own Approved Source records. When that list is unavailable the check is skipped, never re-run against a different list — so a draft’s approvability cannot change without someone editing the list."
+                      action={
+                        sourceGap.retryable
+                          ? {
+                              label: 'Try again',
+                              onClick: () => {
+                                sourceRecordsQuery.refetch();
+                              },
+                            }
+                          : { label: 'Open Approved Source', onClick: () => router.push(`/t/${SOURCE_TYPE}`) }
+                      }
+                    />
+                  )
+                ) : null}
+                <SourcesTool
+                  items={sourceItems}
+                  verified={verifiedMap}
+                  // null — NOT [] — when there is no basis: an empty allow-list
+                  // would badge every row "unverified", which is a verdict we
+                  // have not earned. The tool renders an absence instead.
+                  approvedHosts={basis.state === 'ready' ? basis.hosts : null}
+                  today={today}
+                  judgeVerdict={judgeVerdict}
+                  flagged={flaggedSources}
+                  onAdd={addSource}
+                  onRemove={removeSource}
+                  onToggleVerify={toggleVerify}
+                />
+              </div>
             ),
           },
         ]}
@@ -1099,7 +1156,11 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
             : 'Describe the changes to enable Request revision'
           : 'This candidate will be dropped';
   const gateWarn =
-    call === 'approve' ? !validationOk : call === 'revise' ? !feedbackReady : false;
+    call === 'approve'
+      ? !validationOk || !!sourceGap
+      : call === 'revise'
+        ? !feedbackReady
+        : false;
 
   const primaryAction = () => {
     if (call === 'approve') return accept();

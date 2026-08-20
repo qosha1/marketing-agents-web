@@ -5,7 +5,8 @@
  *
  * Turns the draft's stored `sources` (opaque strings behind the brief) into an
  * actionable evidence tool: each row shows publisher · tier (approved when the
- * host is on the OGMC allow-list, else unverified) · date with a staleness flag ·
+ * host is on the tenant's approved-source list, else unverified — and an absence
+ * when that list could not be read) · date with a staleness flag ·
  * Open · Verify (a reviewer-only flag) · the note. A coverage banner at the top
  * ties thin/stale sourcing to the AI judge's recency / source-reliability concern,
  * so a "revise" verdict becomes something to FIX (find a fresher / second source)
@@ -21,7 +22,7 @@ import * as React from 'react';
 import { ExternalLink, Plus, ShieldCheck, ShieldQuestion, Check, Trash2, AlertTriangle } from 'lucide-react';
 
 import { cn } from '@startsimpli/ui/utils';
-import type { JudgeVerdict } from '@startsimpli/ui';
+import { Absence, type JudgeVerdict } from '@startsimpli/ui';
 
 import type { ParsedSource } from '@/lib/sources';
 import {
@@ -38,7 +39,13 @@ export interface SourcesToolProps {
   items: ParsedSource[];
   /** Reviewer's per-source verified flags, keyed by source id (its url/raw). */
   verified: Record<string, boolean>;
-  approvedHosts: string[];
+  /**
+   * The tenant's approved hosts, or NULL when that read has no answer
+   * (bd startsim-4ipm). Null is not an empty allow-list: an empty list would
+   * badge every row "unverified", which is a verdict we have not earned. Rows
+   * render their tier as an absence instead, and the page explains why above.
+   */
+  approvedHosts: string[] | null;
   today: Date;
   judgeVerdict?: JudgeVerdict;
   /**
@@ -80,7 +87,8 @@ export function SourcesTool({
   const concerns = sourcingConcerns(judgeVerdict);
 
   const draftHost = hostOf(draftUrl.trim());
-  const draftTier = draftUrl.trim() ? sourceTier(draftUrl.trim(), approvedHosts) : null;
+  const draftTier =
+    approvedHosts && draftUrl.trim() ? sourceTier(draftUrl.trim(), approvedHosts) : null;
 
   const submitAdd = () => {
     const url = draftUrl.trim();
@@ -130,7 +138,7 @@ export function SourcesTool({
             <SourceRow
               key={s.id}
               source={s}
-              tier={sourceTier(s.url, approvedHosts)}
+              tier={approvedHosts ? sourceTier(s.url, approvedHosts) : null}
               ageDays={sourceAgeDays(s.date, today)}
               verified={!!verified[s.id]}
               // The check extracts URLs from the same rows we render, so an exact
@@ -147,7 +155,9 @@ export function SourcesTool({
       {/* Add a source */}
       <div className="rounded-xl border border-dashed border-border bg-card p-3">
         <label htmlFor="add-source" className="mb-1.5 block text-xs font-medium text-muted-foreground">
-          Add a source — paste a URL; it is checked against the approved-source list
+          {approvedHosts
+            ? 'Add a source — paste a URL; it is checked against the approved-source list'
+            : 'Add a source — paste a URL. It cannot be checked until the approved-source list loads.'}
         </label>
         <div className="flex flex-wrap items-center gap-2">
           <input
@@ -191,7 +201,8 @@ function SourceRow({
   onRemove,
 }: {
   source: ParsedSource;
-  tier: 'approved' | 'unverified';
+  /** null when the approved-source list is unavailable — an unknown, not a no. */
+  tier: 'approved' | 'unverified' | null;
   ageDays: number | null;
   verified: boolean;
   flagged: boolean;
@@ -214,7 +225,7 @@ function SourceRow({
           )}
           aria-hidden="true"
         >
-          {tier === 'approved' ? 'T1' : '—'}
+          {tier === null ? '?' : tier === 'approved' ? 'T1' : '—'}
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-2">
@@ -298,7 +309,24 @@ function SourceRow({
   );
 }
 
-function TierBadge({ tier, host }: { tier: 'approved' | 'unverified'; host: string }) {
+function TierBadge({ tier, host }: { tier: 'approved' | 'unverified' | null; host: string }) {
+  // No list to check against — an unknown, which is not the same statement as
+  // "unverified" (bd startsim-4ipm). The dash carries screen-reader text saying
+  // so; the page's Absence card above says what to do about it.
+  if (tier === null) {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+        <ShieldQuestion className="h-3 w-3" />
+        Tier{' '}
+        <Absence
+          tier="value"
+          title={`Tier of ${host || 'this source'}`}
+          description="Not checked — the approved-source list is unavailable."
+        />
+        {host ? ` · ${host}` : ''}
+      </span>
+    );
+  }
   if (tier === 'approved') {
     return (
       <span className="inline-flex items-center gap-1 rounded-md bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-700">

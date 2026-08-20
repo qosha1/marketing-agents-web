@@ -3,64 +3,18 @@
  *
  * The deterministic guardrail checks themselves live in @startsimpli/ui
  * (`runContentChecks`, pure + shared with the n8n judge). What's OGMC-specific
- * is (a) the approved-source allow-list below, and (b) turning the live
- * DocumentEditor sections into the flat `ContentFields` the checker consumes —
- * so validation recomputes over the reviewer's *edited* content, not the stale
- * stored draft. Both live here (app config), not in the shared package.
+ * is (a) resolving the approved-source allow-list out of the TENANT's own
+ * `source` records, and (b) turning the live DocumentEditor sections into the
+ * flat `ContentFields` the checker consumes — so validation recomputes over the
+ * reviewer's *edited* content, not the stale stored draft. Both live here (app
+ * config), not in the shared package.
+ *
+ * There is no allow-list in this file, and there must never be one again: see
+ * the block comment on {@link approvedHostsFromSources} (bd 768w.18.14) and on
+ * {@link approvedSourceBasis} (bd startsim-4ipm).
  */
 import type { DocSection } from '@startsimpli/ui/document-editor';
-import type { ContentFields } from '@startsimpli/ui';
-
-/**
- * Approved source hosts for OGMC content (Gulf/Saudi business + FDI authorities,
- * major wires, Big-4 advisory). Bare hosts, no `www.` — the checker normalizes.
- * A source URL whose host isn't on this list fails the approved-sources check.
- */
-export const OGMC_APPROVED_HOSTS: string[] = [
-  'arabianbusiness.com',
-  'gulfnews.com',
-  'thenationalnews.com',
-  'khaleejtimes.com',
-  'arabnews.com',
-  'saudigazette.com.sa',
-  'zawya.com',
-  'argaam.com',
-  'meed.com',
-  'gulf-times.com',
-  'vision2030.gov.sa',
-  'investsaudi.sa',
-  'misa.gov.sa',
-  'zatca.gov.sa',
-  'spa.gov.sa',
-  'moec.gov.ae',
-  'tax.gov.ae',
-  'u.ae',
-  'wam.ae',
-  'adio.gov.ae',
-  'dubaifdi.gov.ae',
-  'ded.ae',
-  'det.gov.ae',
-  'difc.ae',
-  'adgm.com',
-  'dmcc.ae',
-  'jafza.ae',
-  'invest.qa',
-  'qfc.qa',
-  'bahrainedb.com',
-  'investoman.om',
-  'fdiintelligence.com',
-  'unctad.org',
-  'worldbank.org',
-  'imf.org',
-  'oecd.org',
-  'reuters.com',
-  'bloomberg.com',
-  'ft.com',
-  'pwc.com',
-  'deloitte.com',
-  'ey.com',
-  'kpmg.com',
-];
+import type { ContentCheck, ContentFields } from '@startsimpli/ui';
 
 /** The current value of a section by key, or undefined when absent. */
 function sectionValue(sections: DocSection[], key: string): unknown {
@@ -161,6 +115,179 @@ export function approvedHostsFromSources(records: readonly SourceRecordish[]): s
 /** The shape this needs off an entity record — deliberately structural, not an import. */
 export interface SourceRecordish {
   data?: unknown;
+}
+
+// ---------------------------------------------------------------------------
+//  an empty read is an ABSENCE, not a fallback (bd startsim-4ipm)
+// ---------------------------------------------------------------------------
+
+/** What the page knows about the tenant `source` read at render time. */
+export interface ApprovedSourceRead {
+  /** The records the read has produced, or undefined before its first success. */
+  records?: readonly SourceRecordish[];
+  /** The first read is still in flight. */
+  isPending: boolean;
+  /** The read errored. May still carry `records` from an earlier success. */
+  isError: boolean;
+}
+
+/**
+ * What the approved-sources check may be computed against — and, in three cases
+ * out of four, that it may not be computed at all.
+ *
+ * - `ready`      — the tenant's list, the only basis the check may ever use.
+ * - `loading`    — nobody has answered yet. Not an absence; a not-yet.
+ * - `undeclared` — the read succeeded and the tenant declares no usable source.
+ * - `failed`     — we asked and did not get an answer.
+ *
+ * The last three are separate STATES, not one "empty", because the fix for each
+ * differs: wait, edit the Approved Source screen, retry.
+ */
+export type ApprovedSourceBasis =
+  | { state: 'ready'; hosts: string[] }
+  | { state: 'loading' }
+  | { state: 'undeclared'; recordCount: number }
+  | { state: 'failed' };
+
+/**
+ * Resolve the read into a basis. Pure.
+ *
+ * WHY THIS EXISTS. This call site used to end in
+ *
+ *     return fromTenant.length > 0 ? fromTenant : OGMC_APPROVED_HOSTS;
+ *
+ * so a network blip, an empty page or an RLS hiccup silently swapped the BASIS
+ * of an approval gate from the team-editable `source` table to a 43-host array
+ * compiled into the bundle. Measured against prod on 2026-08-20: all 59
+ * drafts-with-sources pass against the tenant's 53 active hosts, and 27 of those
+ * same 59 FAIL against the hardcoded 43. Approvability changed with nobody
+ * editing anything — the drift 768w.18.14 was filed to remove, reintroduced as
+ * a "safe" default.
+ *
+ * A basis we do not have is not a different basis. It is an absence, and the
+ * caller says so instead of computing.
+ *
+ * A failed BACKGROUND refetch that still holds records stays `ready`: slightly
+ * stale tenant data is still the tenant's list, and the thing being forbidden
+ * here is substituting a *different* list, not serving one a minute old.
+ */
+export function approvedSourceBasis(read: ApprovedSourceRead): ApprovedSourceBasis {
+  const { records, isPending, isError } = read;
+  // Nothing in hand: still waiting is a not-yet; anything else — an error, or a
+  // read that is neither running nor answered — is a list we do not have.
+  if (records === undefined) {
+    return !isError && isPending ? { state: 'loading' } : { state: 'failed' };
+  }
+
+  const hosts = approvedHostsFromSources(records);
+  if (hosts.length > 0) return { state: 'ready', hosts };
+
+  // Nothing usable came back. An error explains that better than a claim about
+  // what the team declared, and the two must not read the same to a reviewer.
+  return isError ? { state: 'failed' } : { state: 'undeclared', recordCount: records.length };
+}
+
+/**
+ * The `runContentChecks` config fragment for the approved-source check.
+ *
+ * Omits the key entirely unless the basis is `ready`. NEVER `approvedHosts: []`:
+ * the checker runs the check whenever the key is PRESENT
+ * (`if (approvedHosts !== undefined)`), so an empty array fails every host on
+ * earth — the opposite drift, and just as wrong. An absent key skips the check,
+ * which is what "we cannot compute this" actually means.
+ */
+export function approvedSourceCheckConfig(
+  basis: ApprovedSourceBasis,
+): { approvedHosts?: string[] } {
+  return basis.state === 'ready' ? { approvedHosts: basis.hosts } : {};
+}
+
+/** What to say, and whether re-reading could fix it, when the check cannot run. */
+export interface ApprovedSourceGap {
+  /** Heading for the Absence the sources channel renders. */
+  title: string;
+  /** One line of what — never a number standing in for a verdict. */
+  description: string;
+  /** The checklist row's detail. */
+  detail: string;
+  /**
+   * What the decision bar says where the reviewer actually clicks. An unchecked
+   * basis does not block Accept, so the bar must not read "Ready to accept" over
+   * a guardrail that never ran.
+   */
+  gateHint: string;
+  /** Whether asking again is the fix (an error) or not (a genuine empty). */
+  retryable: boolean;
+}
+
+/**
+ * The disclosure for a basis the check cannot use — null when it can.
+ *
+ * Three unknown states, three different sentences. None of them says anything
+ * about the DRAFT: not knowing whether a source is approved is a fact about the
+ * list, and rendering it as a verdict on the content is the same category error
+ * the fallback made.
+ */
+export function approvedSourceGap(basis: ApprovedSourceBasis): ApprovedSourceGap | null {
+  switch (basis.state) {
+    case 'ready':
+      return null;
+    case 'loading':
+      return {
+        title: 'Reading the approved-source list…',
+        description: 'Citations are checked against it as soon as it arrives.',
+        detail: 'not checked yet — still reading the approved-source list',
+        gateHint: 'Approved sources are not checked yet — the list is still loading',
+        retryable: false,
+      };
+    case 'undeclared':
+      return {
+        title: 'No approved sources are declared',
+        description:
+          basis.recordCount > 0
+            ? `All ${basis.recordCount} declared sources are retired or have no domain, so there is nothing to check citations against. Reactivate one in Approved Source.`
+            : 'This tenant has not declared any, so there is nothing to check citations against. Add them in Approved Source.',
+        detail: 'not checked — the tenant declares no approved sources',
+        gateHint: 'Accepting unchecked: the tenant declares no approved sources',
+        retryable: false,
+      };
+    case 'failed':
+      return {
+        title: 'The approved-source list did not load',
+        description:
+          'Citations are checked against the tenant’s Approved Source records, and that read failed — so this check was skipped rather than run against some other list.',
+        detail: 'not checked — the approved-source list did not load',
+        gateHint: 'Accepting unchecked: the approved-source list did not load',
+        retryable: true,
+      };
+  }
+}
+
+/**
+ * A stand-in row for the checklist while the check cannot run — null when it can.
+ *
+ * It keeps the approved-sources SLOT occupied so "7 of 8" never quietly becomes
+ * "7 of 7": a check that silently disappears reads as a check that passed.
+ *
+ * `warn`, deliberately, not `fail`. A `fail` would block the entire review queue
+ * on a transient read error — the 59-of-59 outage 768w.18.14 fixed, reached from
+ * the other direction — and would state a verdict about a draft we have not
+ * checked. `warn` is what the shared checker itself emits when it cannot run a
+ * check meaningfully, and it surfaces in the rail's issue list without inventing
+ * a gate.
+ */
+export function approvedSourceStandIn(basis: ApprovedSourceBasis): ContentCheck | null {
+  const gap = approvedSourceGap(basis);
+  if (!gap) return null;
+  return {
+    id: 'approved-sources',
+    label: 'Approved sources',
+    status: 'warn',
+    detail: gap.detail,
+    // No `matches` — the whole channel is the answer, and the Absence card there
+    // explains it. A jump still opens the right place to read about it.
+    locations: [{ field: 'sources' }],
+  };
 }
 
 /** A bare host: lowercased, no scheme, no www., no path, no port. */

@@ -11,8 +11,10 @@ import {
   formatSourceDate,
   coverageSummary,
 } from '../sources';
-import { OGMC_APPROVED_HOSTS } from '../content-checks';
 
+/** A stand-in for the tenant's `source` rows. The real allow-list lives in the
+ *  tenant DB (bd 768w.18.14) — a test must never depend on a production list. */
+const APPROVED: string[] = ['reuters.com', 'ft.com', 'arabnews.com', 'zawya.com'];
 const TODAY = new Date('2026-07-14T00:00:00Z');
 
 describe('parseSourceEntry', () => {
@@ -87,9 +89,9 @@ describe('canonicalSourceLine', () => {
 
 describe('sourceTier', () => {
   it('marks an approved host Tier-1 and an unknown host unverified', () => {
-    expect(sourceTier('https://arabnews.com/x', OGMC_APPROVED_HOSTS)).toBe('approved');
-    expect(sourceTier('https://randomblog.example/x', OGMC_APPROVED_HOSTS)).toBe('unverified');
-    expect(sourceTier('', OGMC_APPROVED_HOSTS)).toBe('unverified');
+    expect(sourceTier('https://arabnews.com/x', APPROVED)).toBe('approved');
+    expect(sourceTier('https://randomblog.example/x', APPROVED)).toBe('unverified');
+    expect(sourceTier('', APPROVED)).toBe('unverified');
   });
 });
 
