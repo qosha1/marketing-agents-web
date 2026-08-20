@@ -20,7 +20,11 @@ describe('contentCategoryLabel', () => {
   it('maps a declared category key to its label', () => {
     expect(contentCategoryLabel('lead_magnet')).toBe('Lead Magnets');
   });
-  it('falls back to the raw key for an unknown category', () => {
-    expect(contentCategoryLabel('mystery')).toBe('mystery');
+  it('humanizes an unknown category rather than showing the raw enum value', () => {
+    // Changed deliberately: these labels drive the SIDEBAR and page headings now,
+    // and a nav item reading "case_study" is a defect the old raw-key fallback
+    // would have shipped the moment OGMC declares a fourth content type.
+    expect(contentCategoryLabel('case_study')).toBe('Case study');
+    expect(contentCategoryLabel('mystery')).toBe('Mystery');
   });
 });

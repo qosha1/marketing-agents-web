@@ -51,6 +51,36 @@ export function contentBoardHref(categoryKey: string): string {
   return `/board/${CONTENT_TYPE_KEY}?${CONTENT_TYPE_ATTR}=${encodeURIComponent(categoryKey)}`;
 }
 
+/**
+ * `weekly_brief` -> `Weekly brief`. Used only for a key the taxonomy below does
+ * not name, so a content_type declared in the schema but not listed here still
+ * reads as a label rather than as a raw enum value in the sidebar and headings.
+ */
+function humanizeKey(key: string): string {
+  const words = key.replace(/[_-]+/g, ' ').trim();
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : key;
+}
+
 export function contentCategoryLabel(key: string): string {
-  return CONTENT_CATEGORIES.find((c) => c.key === key)?.label ?? key;
+  return CONTENT_CATEGORIES.find((c) => c.key === key)?.label ?? humanizeKey(key);
+}
+
+/**
+ * The content_type values the TENANT actually declares, in schema order.
+ *
+ * Read from the live `content_type` enum rather than from CONTENT_CATEGORIES, so
+ * a kind added in the schema becomes navigable with no code change — the same
+ * data-driven rule the approved-source list follows (bd startsim-768w.18.14).
+ * CONTENT_CATEGORIES stays as the LABEL source, not the membership source.
+ */
+export function declaredContentTypes(
+  type: { attributes?: { name: string; config?: { choices?: unknown } }[] } | null | undefined,
+): ContentCategory[] {
+  const attr = (type?.attributes ?? []).find((a) => a.name === CONTENT_TYPE_ATTR);
+  const choices = attr?.config?.choices;
+  if (!Array.isArray(choices)) return [];
+  return choices
+    .map((c) => String(c))
+    .filter(Boolean)
+    .map((key) => ({ key, label: contentCategoryLabel(key) }));
 }
