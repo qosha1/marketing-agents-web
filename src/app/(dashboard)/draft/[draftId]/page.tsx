@@ -74,7 +74,7 @@ import {
   type DocSection,
 } from '@startsimpli/ui/document-editor';
 
-import { readData } from '@/lib/board';
+import { readData, typeRoute } from '@/lib/board';
 import { declaredLangChoices, translatableTargets } from '@/lib/draft-translation';
 import { getRegisteredToken } from '@/infrastructure/auth';
 import { CONTENT_TYPE_KEY, contentBoardHref, contentCategoryLabel } from '@/lib/content';
@@ -493,6 +493,12 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
   );
   // Non-null exactly when the check cannot run — three states, three sentences.
   const sourceGap = approvedSourceGap(basis);
+  // Where "Approved Source" lives in the nav: board or table, depending on whether
+  // the tenant declared an enum on it. Ask the same helper the sidebar asks, so the
+  // absence's action cannot send a reviewer somewhere the nav never goes.
+  const sourceTypesQuery = useQuery({ queryKey: ['types'], queryFn: () => listTypes() });
+  const sourceTypeDef = (sourceTypesQuery.data?.results ?? []).find((t) => t.key === SOURCE_TYPE);
+  const sourceTypeRoute = sourceTypeDef ? typeRoute(sourceTypeDef) : `/t/${SOURCE_TYPE}`;
 
   const checks = useMemo(() => {
     const sourcesSection: DocSection = {
@@ -1078,7 +1084,14 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
                                 sourceRecordsQuery.refetch();
                               },
                             }
-                          : { label: 'Open Approved Source', onClick: () => router.push(`/t/${SOURCE_TYPE}`) }
+                          : {
+                              label: 'Open Approved Source',
+                              // typeRoute, not a literal: `source` declares an
+                              // enum, so the sidebar sends people to /board/…
+                              // and a hardcoded /t/… would land them somewhere
+                              // the nav never goes.
+                              onClick: () => router.push(sourceTypeRoute),
+                            }
                       }
                     />
                   )
