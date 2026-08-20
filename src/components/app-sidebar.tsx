@@ -18,35 +18,9 @@ import { GroupedNav } from '@startsimpli/ui';
 import { signinUrl } from '@/lib/api';
 import { listTypes } from '@/lib/foundry-api';
 import { buildNav } from '@/foundry.nav';
+import { navIsActive } from '@/lib/nav-active';
 import { FOUNDRY } from '@/foundry.config';
 
-/**
- * Active-state matcher for a nav tree whose Content tabs share a pathname but
- * differ by query (`/board/topic?content_type=…`). GroupedNav's default matches
- * pathname only, which would light up all three at once. So:
- *   - hrefs WITH a query (the content categories): same pathname AND every query
- *     param in the href present in the current URL — extra params (e.g. page)
- *     don't unmatch, but only the one matching category lights up.
- *   - plain hrefs: pathname exact, or the current path is a child of it.
- */
-function navIsActive(href: string, activeHref?: string): boolean {
-  if (!activeHref) return false;
-  const [curPath, curQuery = ''] = activeHref.split('?');
-  const [hrefPath, hrefQuery] = href.split('?');
-
-  if (hrefQuery !== undefined) {
-    if (curPath !== hrefPath) return false;
-    const cur = new URLSearchParams(curQuery);
-    const want = new URLSearchParams(hrefQuery);
-    for (const [k, v] of want) {
-      if (cur.get(k) !== v) return false;
-    }
-    return true;
-  }
-
-  if (hrefPath === '/') return curPath === '/';
-  return curPath === hrefPath || curPath.startsWith(`${hrefPath}/`);
-}
 
 export function AppSidebar() {
   const pathname = usePathname();
