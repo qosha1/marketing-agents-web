@@ -13,7 +13,11 @@ function type(key: string, label: string, attributes: AttributeDef[] = []): Enti
 
 // A representative schema: the content spine (topic), a draft, a status type
 // (board), and a plain config type (table).
-const topic = type('topic', 'Topic', [statusAttr]);
+const contentTypeAttr: AttributeDef = {
+  id: 'ct', name: 'content_type', dataType: 'enum', required: false,
+  config: { choices: ['weekly_brief', 'lead_magnet', 'general'] },
+};
+const topic = type('topic', 'Topic', [statusAttr, contentTypeAttr]);
 const draft = type('draft', 'Draft');
 const deal = type('deal', 'Deal', [statusAttr]); // enum → board
 const source = type('source', 'Source'); // no enum → table
@@ -36,14 +40,39 @@ describe('buildNav', () => {
     expect(items[0]).toMatchObject({ href: '/', label: 'Dashboard' });
   });
 
-  it('builds a Content group of two data tables: Topics + Drafts', () => {
+  it('lists each content TYPE as its own sidebar item, between Topics and Drafts', () => {
+    // The three kinds used to be reachable only as a "Kind:" filter chip inside
+    // the Topics table. They are top-level destinations now.
     const content = group(items, 'Content');
     expect(content.items.map((i) => ({ href: i.href, label: i.label }))).toEqual([
       { href: '/t/topic', label: 'Topics' },
+      { href: '/t/topic?content_type=weekly_brief', label: 'Weekly Briefs' },
+      { href: '/t/topic?content_type=lead_magnet', label: 'Lead Magnets' },
+      { href: '/t/topic?content_type=general', label: 'General' },
       { href: '/t/draft', label: 'Drafts' },
     ]);
-    // Both are the flat, clickable table route (not the kanban board).
+    // Every one is the flat, clickable table route (not the kanban board).
     expect(content.items.every((i) => i.href.startsWith('/t/'))).toBe(true);
+  });
+
+  it('reads the kinds from the DECLARED enum, so a new one appears by itself', () => {
+    // The whole point of deriving instead of hardcoding: OGMC adding a content
+    // type in the schema must not require a code change to be navigable.
+    const topic4 = type('topic', 'Topic', [
+      statusAttr,
+      { ...contentTypeAttr, config: { choices: ['weekly_brief', 'case_study'] } },
+    ]);
+    const content = group(buildNav([topic4, draft]), 'Content');
+    expect(content.items.map((i) => i.label)).toEqual([
+      'Topics', 'Weekly Briefs', 'Case study', 'Drafts',
+    ]);
+    expect(content.items[2]!.href).toBe('/t/topic?content_type=case_study');
+  });
+
+  it('falls back to Topics + Drafts when the type declares no content_type', () => {
+    const plainTopic = type('topic', 'Topic', [statusAttr]);
+    const content = group(buildNav([plainTopic, draft]), 'Content');
+    expect(content.items.map((i) => i.label)).toEqual(['Topics', 'Drafts']);
   });
 
   it('lists the OTHER declared types under Data, excluding topic and draft', () => {
@@ -77,7 +106,7 @@ describe('buildNav', () => {
   it('still renders without any declared types (schema not yet loaded)', () => {
     const items3 = buildNav([]);
     expect(items3[0]).toMatchObject({ href: '/', label: 'Dashboard' });
-    // The Content group's two static tables render regardless of schema load.
+    // With no schema there are no declared kinds — Topics + Drafts still render.
     expect(group(items3, 'Content').items.map((i) => i.label)).toEqual(['Topics', 'Drafts']);
   });
 });

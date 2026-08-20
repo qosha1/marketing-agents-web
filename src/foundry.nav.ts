@@ -8,8 +8,10 @@
  *
  * The tree:
  *   - Dashboard (/)               — the review/system-health home
- *   - Content group               — the two content data tables:
+ *   - Content group               — the content data tables:
  *       · Topics (/t/topic)       — every idea (all kinds), click → review/edit
+ *       · one item PER content_type — the same table pre-filtered to that kind,
+ *         derived from the DECLARED enum so a new kind needs no code change
  *       · Drafts (/t/draft)       — every written body, click → the draft editor
  *   - Data group                  — every OTHER declared type (board or table)
  *
@@ -23,10 +25,10 @@
  * `.ts` module and the pure `buildNav` logic is unit-testable without a DOM.
  */
 import { createElement } from 'react';
-import { LayoutDashboard, FileText, Lightbulb, LayoutGrid, Table } from 'lucide-react';
+import { LayoutDashboard, FileText, Lightbulb, LayoutGrid, Layers, Table } from 'lucide-react';
 import type { GroupedNavEntry } from '@startsimpli/ui';
 
-import { CONTENT_TYPE_KEY } from '@/lib/content';
+import { CONTENT_TYPE_KEY, contentTabHref, declaredContentTypes } from '@/lib/content';
 import { isBoardType, typeRoute } from '@/lib/board';
 import type { EntityTypeDef } from '@/lib/foundry-api';
 
@@ -52,7 +54,16 @@ export function buildNav(types: EntityTypeDef[]): GroupedNavEntry[] {
     {
       label: 'Content',
       items: [
+        // Topics = every kind. Then one destination PER KIND, then the written
+        // bodies. The kinds used to be reachable only as a "Kind:" filter chip
+        // inside the Topics table; a weekly brief and a lead magnet are
+        // different jobs, so they get their own places to stand.
         { href: `/t/${CONTENT_TYPE_KEY}`, label: 'Topics', icon: createElement(Lightbulb) },
+        ...declaredContentTypes(types.find((t) => t.key === CONTENT_TYPE_KEY)).map((c) => ({
+          href: contentTabHref(c.key),
+          label: c.label,
+          icon: createElement(Layers),
+        })),
         { href: `/t/${DRAFT_TYPE_KEY}`, label: 'Drafts', icon: createElement(FileText) },
       ],
     },
