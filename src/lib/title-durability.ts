@@ -86,12 +86,36 @@ export interface DraftWrite {
 }
 
 /**
- * The `external_id` the n8n writer derives from a headline. Reproduced exactly
- * from "Build Tenant Draft"; verified against all 75 robot-written drafts live
- * (75/75 satisfy `external_id === slugForHeadline(name)`).
+ * The slug half of the writer's `external_id`: lowercase, every run of
+ * non-`[a-z0-9]` collapsed to a dash, leading/trailing dashes trimmed, capped at
+ * 80 chars. Verified against all 75 robot-written drafts live (75/75 satisfy
+ * `external_id === slugForHeadline(name)`).
+ *
+ * RETURNS `''` for a headline with no slug characters at all — a CJK or Arabic
+ * title collapses to nothing. That is the honest result of the transform, and
+ * `''` is exactly the value that must never reach the API: the unique
+ * constraint is declared `condition=~Q(external_id="")`, so an empty
+ * `external_id` is EXEMPT from it and silently stops de-duplicating. Two live
+ * drafts sit in that state today. {@link draftExternalId} is what applies the
+ * writer's fallbacks; this function deliberately does not hide the empty case.
  */
 export function slugForHeadline(_headline: string): string {
   throw new TitleDurabilityNotImplementedError('slugForHeadline');
+}
+
+/**
+ * The full `external_id` expression from "Build Tenant Draft", fallbacks and
+ * all — which is why it needs the candidate ordinal the node has and a bare
+ * slug function does not:
+ *
+ *   `(slug(headline || 'cand-'+(i+1))).slice(0,80) || ('draft-'+(i+1))`
+ *
+ * So an absent headline yields `cand-<n>`, and a headline that slugifies to
+ * nothing yields `draft-<n>`. `candidateIndex` is 1-based, matching the node's
+ * `i + 1` and the `candidate_index` it stamps on the row.
+ */
+export function draftExternalId(_headline: string, _candidateIndex: number): string {
+  throw new TitleDurabilityNotImplementedError('draftExternalId');
 }
 
 /**

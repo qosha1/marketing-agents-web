@@ -29,6 +29,7 @@ import type { EntityRecord } from '@/lib/foundry-api';
 import {
   aiRewritePayload,
   applyUpsert,
+  draftExternalId,
   slugForHeadline,
   TITLE_DATA_FIELDS,
   TITLE_NAME_FIELD,
@@ -237,11 +238,37 @@ describe('the slug, reproduced from the writer node', () => {
     expect(slugForHeadline('a'.repeat(200)).length).toBe(80);
   });
 
-  xit('never returns an empty slug for a headline with no slug characters', () => {
-    // The node falls back rather than sending `external_id: ''` — and an empty
-    // external_id is exempt from the unique constraint, so it would silently
-    // stop de-duplicating.
-    expect(slugForHeadline('中文标题')).not.toBe('');
+  xit('collapses a headline with no slug characters to the empty string', () => {
+    // Honest, not convenient. A CJK or Arabic title has nothing to slug, and
+    // pretending otherwise would hide the hazard below.
+    expect(slugForHeadline('中文标题')).toBe('');
+  });
+});
+
+describe('the writer’s fallbacks, which a bare slug cannot express', () => {
+  xit('falls back to draft-<n> when the headline slugifies to nothing', () => {
+    // `slice(0,80) || ('draft-'+(i+1))`. This is why the node carries the
+    // candidate ordinal and `slugForHeadline` alone cannot reproduce it.
+    expect(draftExternalId('中文标题', 2)).toBe('draft-2');
+  });
+
+  xit('falls back to cand-<n> when there is no headline at all', () => {
+    // A different fallback from the one above: the node slugifies
+    // `headline || 'cand-'+(i+1)` BEFORE testing the result for emptiness.
+    expect(draftExternalId('', 1)).toBe('cand-1');
+  });
+
+  xit('is the plain slug whenever the headline has one', () => {
+    expect(draftExternalId(LIVE_HEADLINE, 1)).toBe(LIVE_SLUG);
+  });
+
+  xit('never yields the empty string, which the unique constraint exempts', () => {
+    // `condition=~Q(external_id="")` — an empty external_id is exempt from
+    // uniqueness, so it silently stops de-duplicating. Two live drafts (both
+    // translations) sit in exactly that state, so this is not hypothetical.
+    for (const headline of ['', '中文标题', '   ', '!!!', 'يتطلب تأسيس']) {
+      expect(draftExternalId(headline, 3)).not.toBe('');
+    }
   });
 });
 
