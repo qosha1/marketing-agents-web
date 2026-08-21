@@ -16,8 +16,15 @@
  */
 import type { EntityRecord, EntityTypeDef } from '@/lib/foundry-api';
 
-/** A translation starts as new work for a reviewer, never as an approved artifact. */
-export const TRANSLATED_STATUS = 'drafting';
+/**
+ * A translation starts as new work for a reviewer, never as an approved artifact.
+ *
+ * The team's vocabulary (bd startsim-wn2p.2) names that state `ready_for_review`
+ * — nobody has looked at it yet. It is deliberately NOT `approved`: the source
+ * draft's approval is what CAUSED this translation, and inheriting it would skip
+ * the CN review the diagram draws as stage 5.
+ */
+export const TRANSLATED_STATUS = 'ready_for_review';
 
 /** The declared attribute carrying a draft's language. Its CHOICES are the tenant's. */
 export const LANG_FIELD = 'lang';

@@ -99,7 +99,11 @@ export function draftTitle(d: EntityRecord): string {
   return title || (d.name ?? '').trim() || `#${d.id}`;
 }
 
-/** A draft's status (drafting | ready | published), '' when unset. */
+/**
+ * A draft's status — one of the six the team names (bd startsim-wn2p.2:
+ * ready_for_review | under_review | approved | rejected |
+ * not_for_publication_now | for_repurpose), '' when unset.
+ */
 export function draftStatus(d: EntityRecord): string {
   const s = readData(d.data, 'status');
   return s == null ? '' : String(s);
