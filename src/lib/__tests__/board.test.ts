@@ -227,12 +227,19 @@ describe('rollupByParent (startsim-4w76 / startsim-n7s8)', () => {
     };
   }
   it('buckets children by their parent id and status value', () => {
-    const children = [child(1, 'ready'), child(2, 'drafting'), child(3, 'ready'), child(4, 'ready')];
+    // Draft statuses are the team's own (bd startsim-wn2p.2) so the fixture reads
+    // like the live board; the rollup itself is generic and never names them.
+    const children = [
+      child(1, 'approved'),
+      child(2, 'ready_for_review'),
+      child(3, 'approved'),
+      child(4, 'approved'),
+    ];
     const parentOf = (c: EntityRecord): EntityRecord['id'] | null =>
       c.id === 4 ? null : c.id <= 2 ? 100 : 200;
     const rollup = rollupByParent(children, parentOf, 'status');
-    expect(rollup.get(100)).toEqual({ total: 2, byStatus: { ready: 1, drafting: 1 } });
-    expect(rollup.get(200)).toEqual({ total: 1, byStatus: { ready: 1 } });
+    expect(rollup.get(100)).toEqual({ total: 2, byStatus: { approved: 1, ready_for_review: 1 } });
+    expect(rollup.get(200)).toEqual({ total: 1, byStatus: { approved: 1 } });
     expect(rollup.has(4)).toBe(false);
   });
   it('is an empty map for an empty child list', () => {

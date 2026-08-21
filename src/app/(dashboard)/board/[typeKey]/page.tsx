@@ -43,8 +43,14 @@ import { DRAFT_TYPE, listAllRelationships, topicIdForDraft } from '@/lib/topic-d
 import { listAllEntities, listTypes, whoami, type EntityRecord } from '@/lib/foundry-api';
 
 const ASSIGNEE_SUB_ATTR = 'assignee_sub';
-/** The status a draft counts toward in the "N/total ready" rollup chip. */
-const DRAFT_DONE_STATUS = 'ready';
+/**
+ * The status a draft counts toward in the "N/total approved" rollup chip.
+ *
+ * `approved` is the team's word for a human having signed the piece off — the
+ * old `ready` meant the same thing and was renamed in bd startsim-wn2p.2. It is
+ * NOT `ready_for_review`, which is where every draft starts.
+ */
+const DRAFT_DONE_STATUS = 'approved';
 
 export default function BoardPage() {
   const params = useParams<{ typeKey: string }>();

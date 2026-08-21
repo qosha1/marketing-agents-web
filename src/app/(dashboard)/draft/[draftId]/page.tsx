@@ -34,7 +34,7 @@
  * AI revise loop (768w.16.10.5): "Request revision" compiles the scorecard + notes
  * into a critique and POSTs it to the n8n revise webhook (via /actions/request-
  * revision), which GPT-rewrites the draft into a NEW candidate stamped
- * `revised_from = <this draft id>`; the draft flips to `needs_revision` and we poll
+ * `revised_from = <this draft id>`; the draft flips to `under_review` and we poll
  * the draft set until the new version appears. The "Revision history" affordance
  * lists the lineage, and — when this draft was itself revised from a parent — a
  * "Compare to previous" diff shows the parent blog against the current one.
@@ -78,6 +78,7 @@ import { readData, typeRoute } from '@/lib/board';
 import { declaredLangChoices, translatableTargets } from '@/lib/draft-translation';
 import { getRegisteredToken } from '@/infrastructure/auth';
 import { CONTENT_TYPE_KEY, contentBoardHref, contentCategoryLabel } from '@/lib/content';
+import { draftStatusLabel } from '@/lib/draft-status';
 import {
   draftCandidateIndex,
   draftJudgeVerdict,
@@ -135,13 +136,22 @@ interface SourceMetaEntry {
   verified: boolean;
 }
 
-/** Status-pill tone per draft status (drafting → sent). */
+/**
+ * Status-pill tone per draft status, over the team's six (bd startsim-wn2p.2):
+ * the two review states are neutral/amber, approved is green, and the three
+ * terminal dispositions share a muted red-to-grey band because they all mean
+ * "this is not going out as it stands".
+ *
+ * A status the tenant declares but this map does not name falls back to neutral
+ * rather than rendering untoned — membership is the schema's, not this file's.
+ */
 const STATUS_PILL_TONE: Record<string, string> = {
-  drafting: 'bg-neutral-100 text-neutral-600',
-  ready: 'bg-amber-100 text-amber-700',
-  needs_revision: 'bg-red-100 text-red-700',
+  ready_for_review: 'bg-neutral-100 text-neutral-600',
+  under_review: 'bg-amber-100 text-amber-700',
   approved: 'bg-emerald-100 text-emerald-700',
-  sent: 'bg-blue-100 text-blue-700',
+  rejected: 'bg-red-100 text-red-700',
+  not_for_publication_now: 'bg-neutral-200 text-neutral-700',
+  for_repurpose: 'bg-violet-100 text-violet-700',
 };
 
 /** The stored AI-judge verdict object, or undefined when absent/malformed. */
@@ -413,7 +423,13 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
 
   const status = draftStatus(draft);
   const isApproved = status === 'approved';
-  const isSent = status === 'sent';
+  // "Sent" is no longer a status. The team's six (bd startsim-wn2p.2) have no
+  // published state — their spreadsheet carries a Publication Date column
+  // instead — so the fact that a piece went out lives where it always really
+  // lived: the `sent_at` date stamped by `markSent`. Reading the date rather
+  // than a status keeps the button honest without inventing a seventh value.
+  // Whether a published STATUS should exist is open on bd startsim-wn2p.14.
+  const isSent = draftStr(draft.data, 'sent_at').trim() !== '';
   const verdict = draftJudgeVerdict(draft);
   const judgeVerdict = draftJudgeVerdictObj(draft);
 
@@ -790,7 +806,9 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
     setSending(true);
     try {
       const sentAt = new Date().toISOString().slice(0, 10); // today, ISO date
-      await persist({ status: 'sent', sent_at: sentAt });
+      // Approved + a publication date, per the team's vocabulary: the status
+      // says a human signed it off, `sent_at` says when it went out.
+      await persist({ status: 'approved', sent_at: sentAt });
       await qc.invalidateQueries({ queryKey: ['entity', draftId] });
       await qc.invalidateQueries({ queryKey: ['entities', CONTENT_TYPE_KEY, 'all'] });
       notify.success('Marked sent.');
@@ -802,10 +820,15 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
     }
   }
 
-  // Reject this candidate. There's no draft 'rejected' status in the enum, so do the
-  // minimal correct thing: record the reject verdict (already set on `review` via
-  // the Decision control) and mark the candidate not-chosen (`chosen: false`) — its sibling
-  // drafts stay available. No new lifecycle invented.
+  // Reject this candidate: record the reject verdict (already set on `review` via
+  // the Decision control) and mark the candidate not-chosen (`chosen: false`) — its
+  // sibling drafts stay available.
+  //
+  // The enum now DOES declare `rejected` (bd startsim-wn2p.2), but writing it here
+  // is deliberately not part of the vocabulary move: in the team's workflow a
+  // rejected piece leaves the tracker for a rejected-content repository, and that
+  // whole disposition — status plus removal — is bd startsim-wn2p.8. Stamping the
+  // status without the removal would half-implement it.
   async function reject() {
     setRejecting(true);
     try {
@@ -823,7 +846,8 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
 
   // Compile the reviewer's critique and hand it to the n8n revise webhook, which
   // GPT-rewrites the draft into a NEW candidate (stamped revised_from = this id).
-  // Flip this draft to needs_revision, then poll the draft set for the new version.
+  // Flip this draft to under_review — the team's word for "someone is working on
+  // it" (bd startsim-wn2p.2) — then poll the draft set for the new version.
   async function requestRevision() {
     const feedback = compileFeedback(reviewRef.current, notesRef.current);
     if (!feedback.trim()) {
@@ -863,7 +887,7 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
       }
       // Mark this draft as awaiting a revision (full-blob merge preserves edits +
       // review + notes) and reflect the new status pill.
-      await persist({ status: 'needs_revision' });
+      await persist({ status: 'under_review' });
       await qc.invalidateQueries({ queryKey: ['entity', draftId] });
       notify.success('Revision requested — GPT is rewriting the draft (~1 min).');
       // Stop polling after ~90s even if nothing shows up.
@@ -986,11 +1010,11 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
         ) : null}
         {status ? (
           <span
-            className={`rounded-full px-2.5 py-0.5 text-xs capitalize ${
+            className={`rounded-full px-2.5 py-0.5 text-xs ${
               STATUS_PILL_TONE[status] ?? 'bg-neutral-100 text-neutral-600'
             }`}
           >
-            {status.replace(/_/g, ' ')}
+            {draftStatusLabel(status)}
           </span>
         ) : null}
         {candidateIndex > 0 ? (

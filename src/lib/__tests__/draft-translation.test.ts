@@ -133,14 +133,14 @@ describe('applyDraftTranslations — the new draft that gets created', () => {
     );
   });
 
-  it('stamps the target language and starts the translation in drafting', () => {
+  it('stamps the target language and starts the translation ready for review', () => {
     // A translation is NEW work for a reviewer, not an approved artifact that
     // inherits the source's verdict.
     const next = applyDraftTranslations(sourceDraft(), translated, 'ar');
 
     expect(next.data.lang).toBe('ar');
     expect(next.data.status).toBe(TRANSLATED_STATUS);
-    expect(TRANSLATED_STATUS).toBe('drafting');
+    expect(TRANSLATED_STATUS).toBe('ready_for_review');
   });
 
   it('carries the classification across so the piece lands in its own section', () => {
@@ -201,7 +201,7 @@ describe('which languages are still on offer (bd startsim-tetf)', () => {
   const draftType = {
     key: 'draft',
     attributes: [
-      { name: 'status', dataType: 'enum', config: { choices: ['drafting', 'ready'] } },
+      { name: 'status', dataType: 'enum', config: { choices: ['ready_for_review', 'approved'] } },
       { name: 'lang', dataType: 'enum', config: { choices: ['en', 'ar', 'zh'] } },
     ],
   } as unknown as Parameters<typeof declaredLangChoices>[0];
