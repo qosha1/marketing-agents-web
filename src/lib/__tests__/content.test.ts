@@ -18,7 +18,8 @@ describe('contentBoardHref (startsim-uhmk)', () => {
 
 describe('contentCategoryLabel', () => {
   it('maps a declared category key to its label', () => {
-    expect(contentCategoryLabel('lead_magnet')).toBe('Lead Magnets');
+    // The team's word for this type is "Evergreen"; the stored key stays `lead_magnet`.
+    expect(contentCategoryLabel('lead_magnet')).toBe('Evergreen');
   });
   it('humanizes an unknown category rather than showing the raw enum value', () => {
     // Changed deliberately: these labels drive the SIDEBAR and page headings now,
