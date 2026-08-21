@@ -47,7 +47,10 @@ describe('buildNav', () => {
     expect(content.items.map((i) => ({ href: i.href, label: i.label }))).toEqual([
       { href: '/t/topic', label: 'Topics' },
       { href: '/t/topic?content_type=weekly_brief', label: 'Weekly Briefs' },
-      { href: '/t/topic?content_type=lead_magnet', label: 'Lead Magnets' },
+      // OGMC calls this type "Evergreen" (bd startsim-wn2p.15). Note the href still carries the
+      // STORED value `lead_magnet` — relabelling must not touch the value, or every bookmarked
+      // link of this form dies and the board silently renders empty instead of erroring.
+      { href: '/t/topic?content_type=lead_magnet', label: 'Evergreen' },
       { href: '/t/topic?content_type=general', label: 'General' },
       { href: '/t/draft', label: 'Drafts' },
     ]);

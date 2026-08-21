@@ -25,7 +25,12 @@ export interface ContentCategory {
 
 export const CONTENT_CATEGORIES: ContentCategory[] = [
   { key: 'weekly_brief', label: 'Weekly Briefs' },
-  { key: 'lead_magnet', label: 'Lead Magnets' },
+  // OGMC calls this type "Evergreen" (confirmed by the team 2026-08-21, bd startsim-wn2p.15).
+  // The STORED VALUE stays `lead_magnet` deliberately: it is written by LLM prose in two active
+  // n8n agents (one of which says "use these EXACT values"), branched on by three code nodes and
+  // a no-fallback Switch, and enforced by the Content Judge's LEAD-MAGNET DEPTH guardrail under a
+  // hyphenated spelling. Renaming the value would silently reintroduce it every Mon/Thu run.
+  { key: 'lead_magnet', label: 'Evergreen' },
   { key: 'general', label: 'General' },
 ];
 
