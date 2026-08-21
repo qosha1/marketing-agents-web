@@ -149,8 +149,12 @@ const STATUS_PILL_TONE: Record<string, string> = {
   ready_for_review: 'bg-neutral-100 text-neutral-600',
   under_review: 'bg-amber-100 text-amber-700',
   approved: 'bg-emerald-100 text-emerald-700',
+  // Published is the only state that is BOTH finished and still on the tracker,
+  // so it gets its own tone rather than sharing approved's — a reviewer scanning
+  // the list needs to see at a glance which approved pieces actually went out.
+  published: 'bg-sky-100 text-sky-700',
   rejected: 'bg-red-100 text-red-700',
-  not_for_publication_now: 'bg-neutral-200 text-neutral-700',
+  not_for_publication: 'bg-neutral-200 text-neutral-700',
   for_repurpose: 'bg-violet-100 text-violet-700',
 };
 
