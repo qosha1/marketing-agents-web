@@ -59,11 +59,18 @@ export interface DraftStatus {
  * Pipeline order, top to bottom, as the diagram draws it: the two review states
  * first, then the four dispositions a human picks between at stages 3 and 6.
  *
- * LABEL NOTE (wn2p.2): the diagram writes "Not for publication now" and the
- * team's spreadsheet writes "Not for publication". The longer wording is used
- * here because the diagram is the artifact the enum keys were snake_cased from
- * and `not_for_publication_now` is now declared live; if the team confirms the
- * sheet's shorter wording, it is a label change here and NOT a key change.
+ * WORDING SETTLED (wn2p.2): the diagram wrote "Not for publication now", the
+ * spreadsheet wrote "Not for publication". The team chose the shorter one, so
+ * the KEY changed too, not just the label — `not_for_publication_now` was
+ * declared live but NO ROW HAS EVER CARRIED IT, which made the rename free.
+ * Once a single draft uses a value, renaming it becomes a data migration.
+ *
+ * `published` is the seventh value, added on the team's answer that a published
+ * state "should be" there. It is deliberately NOT terminal: `terminal` here
+ * means "shelved without publishing — goes to a disposition library and leaves
+ * the active tracker" (diagram stages 3 and 6). Published work does the
+ * opposite; it stays visible with its publication date and destination(s), so
+ * treating it as terminal would hide exactly the pieces the team wants shown.
  */
 const STATUSES: DraftStatus[] = [
   { key: 'ready_for_review', label: 'Ready for review', terminal: false },
@@ -71,8 +78,11 @@ const STATUSES: DraftStatus[] = [
   // Approved is the opposite of finished: it is what FIRES the CN translation
   // (diagram stage 4), so it must never be treated as terminal.
   { key: 'approved', label: 'Approved', terminal: false },
+  // Finished, but NOT shelved — see the block comment. It keeps a publication
+  // date and destination(s) rather than disappearing into a disposition library.
+  { key: 'published', label: 'Published', terminal: false },
   { key: 'rejected', label: 'Rejected', terminal: true },
-  { key: 'not_for_publication_now', label: 'Not for publication now', terminal: true },
+  { key: 'not_for_publication', label: 'Not for publication', terminal: true },
   { key: 'for_repurpose', label: 'For repurpose', terminal: true },
 ];
 

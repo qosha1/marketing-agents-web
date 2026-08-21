@@ -41,13 +41,18 @@ const STILL_RED = (() => {
 /** `it` once implemented, `it.fails` while the stub throws. Strict both ways. */
 const xit = STILL_RED ? it.fails : it;
 
-/** The six the diagram names, in pipeline order. */
+/**
+ * The seven, in pipeline order. Six come from the diagram; `published` was added
+ * on the team's answer (2026-08-21) that a published state "should be" there —
+ * without it the tracker cannot tell "approved, not yet posted" from "posted".
+ */
 const REQUIRED = [
   'ready_for_review',
   'under_review',
   'approved',
+  'published',
   'rejected',
-  'not_for_publication_now',
+  'not_for_publication',
   'for_repurpose',
 ];
 
@@ -60,7 +65,7 @@ function typeDef(choices: string[]) {
 const LIVE_TODAY = typeDef(['drafting', 'ready', 'needs_revision', 'approved', 'sent']);
 
 describe('the vocabulary the workflow needs', () => {
-  xit('names all six states the diagram draws', () => {
+  xit('names all seven states the workflow needs', () => {
     expect(draftStatuses().map((s) => s.key)).toEqual(REQUIRED);
   });
 
@@ -69,7 +74,7 @@ describe('the vocabulary the workflow needs', () => {
     // says to each other is most of what makes a tracker legible to them.
     expect(draftStatusLabel('ready_for_review')).toBe('Ready for review');
     expect(draftStatusLabel('under_review')).toBe('Under review');
-    expect(draftStatusLabel('not_for_publication_now')).toBe('Not for publication now');
+    expect(draftStatusLabel('not_for_publication')).toBe('Not for publication');
     expect(draftStatusLabel('for_repurpose')).toBe('For repurpose');
   });
 
@@ -84,13 +89,21 @@ describe('terminal states — what leaves the tracker', () => {
     // Diagram stages 3 and 6: these go to the content repository and are
     // removed from the tracker.
     expect(isTerminalStatus('rejected')).toBe(true);
-    expect(isTerminalStatus('not_for_publication_now')).toBe(true);
+    expect(isTerminalStatus('not_for_publication')).toBe(true);
     expect(isTerminalStatus('for_repurpose')).toBe(true);
   });
 
   xit('does not treat in-flight states as terminal', () => {
     expect(isTerminalStatus('ready_for_review')).toBe(false);
     expect(isTerminalStatus('under_review')).toBe(false);
+  });
+
+  xit('does NOT treat published as terminal', () => {
+    // `terminal` means "shelved without publishing — goes to a disposition
+    // library and leaves the tracker". Published work does the opposite: the
+    // team asked for it to stay visible with its date and destination, so
+    // marking it terminal would hide exactly the pieces they want shown.
+    expect(isTerminalStatus('published')).toBe(false);
   });
 
   xit('does NOT treat approved as terminal', () => {
@@ -114,7 +127,7 @@ describe('membership comes from the live schema', () => {
     expect(declaredDraftStatuses(null)).toEqual([]);
   });
 
-  xit('reports nothing missing once the tenant declares all six', () => {
+  xit('reports nothing missing once the tenant declares all seven', () => {
     expect(missingRequiredStatuses(typeDef(REQUIRED))).toEqual([]);
   });
 
@@ -123,8 +136,9 @@ describe('membership comes from the live schema', () => {
     expect(missingRequiredStatuses(LIVE_TODAY)).toEqual([
       'ready_for_review',
       'under_review',
+      'published',
       'rejected',
-      'not_for_publication_now',
+      'not_for_publication',
       'for_repurpose',
     ]);
   });
