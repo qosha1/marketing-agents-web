@@ -297,3 +297,212 @@ export function rollupByParent(
   }
   return out;
 }
+
+// ---- generic recency window (bd startsim-wn2p.24) ----
+// WHY: a board loads its type's WHOLE history. news_item holds 4,116 records
+// (2026-07-07 onward, 2,573 of them rejected), so /board/news_item renders every
+// article ever ingested into lanes nobody is working. The user's words: "we dont
+// need all things in history on the board it should just be relatively recent
+// ones." So the board gets a window, defaulted to recent, with an explicit All.
+//
+// Generic, like every other helper here: nothing knows what a news_item is. A
+// type with no usable date simply falls back to the record's own createdAt.
+
+/** URL param carrying the window, e.g. `?since=30` or `?since=all`. */
+export const RECENCY_PARAM = 'since';
+
+/** The param value meaning "no window" — every record, as before. */
+export const RECENCY_ALL = 'all';
+
+export interface RecencyWindow {
+  /** Days back from `now`. `null` means all time. */
+  days: number | null;
+}
+
+/** The windows the control offers, narrowest first, All last. */
+export const RECENCY_WINDOWS: { days: number | null; label: string }[] = [
+  { days: 7, label: '7 days' },
+  { days: 14, label: '14 days' },
+  { days: 30, label: '30 days' },
+  { days: 90, label: '90 days' },
+  { days: null, label: 'All' },
+];
+
+/**
+ * The window a board opens in WHEN IT OPENS ON ONE. 14 days, measured: it is the
+ * widest offered window that still cuts the live news board by roughly two
+ * thirds (4,116 -> 1,135 by published_at).
+ */
+export const DEFAULT_RECENCY_DAYS = 14;
+
+/**
+ * Whether a type's board should open windowed at all — and the reason a blanket
+ * default was NOT shipped.
+ *
+ * MEASURED against the live tenant before choosing this rule: a 14-day default
+ * applied to every board would have hidden 57 of 77 drafts, 26 of 59 topics and
+ * the single `client` record. Those boards have no clutter problem; news_item,
+ * at 4,116 records, is the entire complaint. A count threshold would need the
+ * count before the fetch and would make the default flicker, so the rule is the
+ * SCHEMA: a type that records when things HAPPENED (a declared recency
+ * attribute, which is also the only thing the backend can narrow on) opens on a
+ * window; a type that does not opens on everything, exactly as before.
+ *
+ * The control is still offered on every board — narrowing a small board is a
+ * choice a person can make, just not one made for them.
+ */
+export function defaultRecencyDays(attrName: string | null): number | null {
+  return attrName ? DEFAULT_RECENCY_DAYS : null;
+}
+
+/**
+ * Declared date attributes that mean "when this happened", in preference order.
+ *
+ * A NAME convention, not "the first date attribute", and that distinction is the
+ * whole point: `draft` declares `sent_at` — a real date attribute that 1 of 77
+ * live drafts carries — so measuring by "first date attribute" would push 76
+ * drafts outside every window. A type whose dates are none of these measures by
+ * `createdAt` instead, which every record has.
+ */
+const RECENCY_ATTR_NAMES = ['published_at', 'occurred_at', 'happened_at'];
+
+/** The type's recency attribute name, or null to measure by `createdAt`. */
+export function pickRecencyAttr(type: EntityTypeDef | undefined | null): string | null {
+  const attrs = type?.attributes ?? [];
+  for (const name of RECENCY_ATTR_NAMES) {
+    if (attrs.some((a) => a.name === name && a.dataType === 'date')) return name;
+  }
+  return null;
+}
+
+/**
+ * The date a record is measured by: its declared recency attribute, falling back
+ * per-record to `createdAt` when that attribute is blank or absent.
+ *
+ * The fallback is deliberate, not defensive — 167 of the 4,116 live news_items
+ * have no `published_at`, and dropping them would hide rows the window was never
+ * asked to hide. `null` (neither date parses) is likewise NOT a reason to drop:
+ * {@link applyRecencyWindow} keeps those records.
+ */
+export function recencyDate(record: EntityRecord, attrName: string | null): Date | null {
+  const candidates: unknown[] = [];
+  if (attrName) candidates.push(readData(record.data, attrName));
+  candidates.push(record.createdAt);
+  for (const raw of candidates) {
+    if (raw == null || String(raw).trim() === '') continue;
+    const d = new Date(String(raw));
+    if (!Number.isNaN(d.getTime())) return d;
+  }
+  return null;
+}
+
+/**
+ * The window from the URL, falling back to `defaultDays` (see
+ * {@link defaultRecencyDays}). An unrecognised value falls back to that default
+ * rather than to All — a typo in a link should not silently reinstate the
+ * 4,116-card board.
+ */
+export function pickRecencyWindow(
+  params: Record<string, string | undefined | null>,
+  defaultDays: number | null = DEFAULT_RECENCY_DAYS,
+): RecencyWindow {
+  const raw = params[RECENCY_PARAM];
+  if (raw != null && String(raw) !== '') {
+    const value = String(raw);
+    if (value === RECENCY_ALL) return { days: null };
+    const days = Number(value);
+    if (RECENCY_WINDOWS.some((w) => w.days === days)) return { days };
+  }
+  return { days: defaultDays };
+}
+
+/**
+ * The instant a window opens: UTC midnight `days` days before `now`.
+ *
+ * WHOLE DAYS, not `now - days * 24h`, because the attribute being measured is
+ * usually date-TYPED: `published_at` arrives as `2026-08-17` and parses to
+ * midnight. Against a rolling 24h cutoff, a piece published on the boundary day
+ * is in or out depending on what time of day the page is opened — the same board
+ * showing a different record count at 09:00 and at 15:00. Comparing whole days
+ * makes the boundary stable, and makes "7 days" mean seven dates.
+ */
+export function recencyCutoff(days: number, now: Date): Date {
+  const midnight = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  return new Date(midnight - days * 24 * 60 * 60 * 1000);
+}
+
+/**
+ * Keep only records dated within the window. `{ days: null }` is the identity,
+ * and so is a record whose date cannot be read at all — an unparseable date is
+ * an unknown, and hiding unknowns is how a filter loses work silently.
+ * A future date is inside every window.
+ */
+export function applyRecencyWindow(
+  records: EntityRecord[],
+  window: RecencyWindow,
+  attrName: string | null,
+  now: Date = new Date(),
+): EntityRecord[] {
+  if (window.days == null) return records;
+  const cutoff = recencyCutoff(window.days, now).getTime();
+  return records.filter((r) => {
+    const d = recencyDate(r, attrName);
+    return d == null || d.getTime() >= cutoff;
+  });
+}
+
+/**
+ * The SERVER-SIDE half of the window: the tenant backend's own filter for
+ * "dated on or after the cutoff", or `{}` when there is nothing to narrow.
+ *
+ * This is what stops the board fetching a whole type. Narrowing here means
+ * `listAllEntities` walks the window instead of walking 20 pages and truncating
+ * at 1,000 — see its docstring for the measurement.
+ *
+ * `{}` for ALL (no window) and for a type with no declared recency attribute:
+ * the backend has no filter on `created_at`, so that case is narrowed by
+ * {@link applyRecencyWindow} on the client instead. The two agree on the cutoff
+ * because both take it from {@link recencyCutoff}.
+ *
+ * ONE ASYMMETRY, deliberate and worth knowing: a record whose declared date is
+ * BLANK survives the client-side pass (it falls back to `createdAt`) but not
+ * this one — a `>=` comparison against an empty value is false. 167 of the
+ * 4,116 live news_items are in that state, and they are reachable under All.
+ */
+export function recencyFilters(
+  attrName: string | null,
+  window: RecencyWindow,
+  now: Date = new Date(),
+): Record<string, string> {
+  if (window.days == null || !attrName) return {};
+  return { [`attr.${attrName}__gte`]: recencyCutoff(window.days, now).toISOString().slice(0, 10) };
+}
+
+/**
+ * The board's OTHER facets, expressed as backend filters — so a COUNT of "what
+ * this type holds" is a count of the same slice the board is showing.
+ *
+ * Without this, `/board/news_item?status=surfaced` shows 31 records and reports
+ * "4,085 older not shown", which is false twice over: those 4,085 are mostly not
+ * older, and they are not this facet's records. A line whose whole job is to be
+ * honest about what is hidden cannot be the one lying.
+ *
+ * Returns null — meaning "do not claim a number" — for the {@link BLANK}
+ * sentinel, which asks for records where an attribute is ABSENT. The backend's
+ * `__isnull` answers "is there an Attribute row", not "is the value empty", and
+ * those differ: all 4,116 live news_items have a `published_at` row and 167 of
+ * them are blank. Rather than report a count that quietly means something else,
+ * report none.
+ */
+export function facetFilters(
+  filters: AttrFilter[],
+  textFilter: AttrTextFilter | null,
+): Record<string, string> | null {
+  const out: Record<string, string> = {};
+  for (const f of filters) out[`attr.${f.name}`] = f.value;
+  if (textFilter) {
+    if (textFilter.value === BLANK) return null;
+    out[`attr.${textFilter.name}`] = textFilter.value;
+  }
+  return out;
+}

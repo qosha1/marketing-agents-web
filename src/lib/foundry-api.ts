@@ -163,10 +163,49 @@ export function deleteRelationshipDef(id: SchemaId) {
 
 // ---- entity instances ----
 
-export function listEntities(type: string, page = 1) {
-  return api.client.get<Paginated<EntityRecord>>('api/v1/entities', {
+/**
+ * Server-side narrowing understood by the tenant backend's EntityQuery
+ * (tenant-starter apps/api/filters.py): `attr.<name>__<op>=<value>`, where op is
+ * one of exact/in/gt/gte/lt/lte/icontains/isnull. VERIFIED live against
+ * marketing-agents 2026-08-24 — `attr.published_at__gte=2026-08-10` returns
+ * 1,135 of 4,116, and `attr.status=surfaced` returns 31.
+ *
+ * These go into the URL as a raw query string rather than through the shared
+ * client's `params`, because that layer rewrites request keys between camel and
+ * snake case and `attr.published_at__gte` is neither.
+ *
+ * CAVEAT, measured: the DEPLOYED tenant image SILENTLY IGNORES a parameter it
+ * does not recognise (`?bogus_param=1` returns all 4,116 rather than a 400).
+ * So an unsupported filter reads as "no filter", never as an error — only send
+ * filters this comment says are verified.
+ */
+export type EntityFilters = Record<string, string>;
+
+function withFilters(path: string, filters: EntityFilters | undefined): string {
+  const entries = Object.entries(filters ?? {});
+  if (entries.length === 0) return path;
+  const qs = entries
+    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+    .join('&');
+  return `${path}${path.includes('?') ? '&' : '?'}${qs}`;
+}
+
+export function listEntities(type: string, page = 1, filters?: EntityFilters) {
+  return api.client.get<Paginated<EntityRecord>>(withFilters('api/v1/entities', filters), {
     params: { type, page },
   });
+}
+
+/**
+ * How many records of a type match `filters`, without fetching any of them.
+ *
+ * `page_size=1` so the answer costs one row plus the COUNT. Used to say how many
+ * records a board's recency window is holding back — a number that has to come
+ * from the server, because the client never fetched the ones it is reporting.
+ */
+export async function countEntities(type: string, filters?: EntityFilters): Promise<number> {
+  const res = await listEntities(type, 1, { ...filters, page_size: '1' });
+  return res.count ?? 0;
 }
 
 /** Fetch a single entity record by id. Path carries no trailing slash (the Next
@@ -200,14 +239,40 @@ export function deleteEntity(id: number | string) {
   return api.client.delete(`api/v1/entities/${id}`);
 }
 
+export interface ListAllOptions {
+  /** Hard cap on pages walked. The bound is real: hitting it TRUNCATES. */
+  maxPages?: number;
+  /** Rows per request. Fewer round trips; the backend accepts up to 200. */
+  pageSize?: number;
+  /** Server-side narrowing — see {@link EntityFilters}. */
+  filters?: EntityFilters;
+}
+
 /**
  * Fetch every record of a type across pages — the status board groups the full
  * set client-side. Capped so a huge type can't trigger an unbounded fetch.
+ *
+ * THE CAP IS A SILENT TRUNCATION, and that is why `filters` exists. At the old
+ * 20 pages x 50 rows the news_item board fetched the newest 1,000 of 4,116 in 20
+ * sequential round trips (~7s before a single card rendered) and then reported
+ * "1,000 records" as though that were the whole type. Narrow server-side first;
+ * the cap is the backstop, not the plan. `pageSize` 200 also cuts the round
+ * trips by 4x for whatever is still fetched in full.
  */
-export async function listAllEntities(type: string, maxPages = 20): Promise<EntityRecord[]> {
+export async function listAllEntities(
+  type: string,
+  optsOrMaxPages: ListAllOptions | number = {},
+): Promise<EntityRecord[]> {
+  const opts: ListAllOptions =
+    typeof optsOrMaxPages === 'number' ? { maxPages: optsOrMaxPages } : optsOrMaxPages;
+  // 50 x 200 = 10,000. The live ceiling is news_item at 4,116, so an unwindowed
+  // "All" now genuinely reaches the end of the type instead of stopping 116 rows
+  // short of it — and the caller still reports anything the cap does hold back.
+  const { maxPages = 50, pageSize = 200, filters } = opts;
+  const withSize: EntityFilters = { ...filters, page_size: String(pageSize) };
   const all: EntityRecord[] = [];
   for (let page = 1; page <= maxPages; page++) {
-    const res = await listEntities(type, page);
+    const res = await listEntities(type, page, withSize);
     all.push(...res.results);
     if (!res.next) break;
   }
