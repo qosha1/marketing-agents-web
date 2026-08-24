@@ -24,24 +24,30 @@
  * a date the backend can filter on. That matters more than the decluttering: at
  * 20 pages x 50 rows the old unfiltered fetch never reached past the newest
  * 1,000 records anyway, and reported that truncated set as the whole type.
+ *
+ * AND EACH LANE PAGES ITSELF (startsim-wn2p.27). The window alone still pulled
+ * its whole 1,135 up front, 808 of them into one lane. So the board's data is a
+ * query PER LANE — every lane asks for its first 50 in parallel on mount, and
+ * scrolling a lane to its end asks that lane alone for its next 50. Every filter
+ * on this page (the window, the enum facets, the assignee) folds into those lane
+ * queries rather than being applied to a big list afterwards.
  */
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useParams, usePathname, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { useQuery } from '@tanstack/react-query';
+import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 
-import { EntityBoard } from '@/components/entity-board';
+import { EntityBoard, type LaneState } from '@/components/entity-board';
 import { EntityDetailDrawer } from '@/components/entity-detail-drawer';
 import {
-  applyAttrFilters,
-  applyRecencyWindow,
-  applyTextAttrFilter,
+  boardColumns,
   BLANK,
   pickAttrFilters,
   pickRecencyAttr,
   pickRecencyWindow,
   pickStatusAttr,
   pickTextAttrFilter,
+  UNSET_COLUMN,
   RECENCY_ALL,
   RECENCY_PARAM,
   RECENCY_WINDOWS,
@@ -61,11 +67,22 @@ import {
 import { DRAFT_TYPE, listAllRelationships, topicIdForDraft } from '@/lib/topic-drafts';
 import {
   countEntities,
+  fetchEntityPages,
+  getEntity,
   listAllEntities,
   listTypes,
   whoami,
+  type EntityPageSlice,
   type EntityRecord,
 } from '@/lib/foundry-api';
+import {
+  LANE_PAGE_SIZE,
+  laneFilters,
+  lanePages,
+  unaccountedFor,
+  withOneMorePage,
+  type LanePages,
+} from '@/lib/lanes';
 
 const ASSIGNEE_SUB_ATTR = 'assignee_sub';
 /**
@@ -84,6 +101,7 @@ export default function BoardPage() {
   const router = useRouter();
   const pathname = usePathname();
 
+  const qc = useQueryClient();
   const typesQuery = useQuery({ queryKey: ['schema-types'], queryFn: () => listTypes() });
   const type = typesQuery.data?.results.find((t) => t.key === typeKey);
 
@@ -100,24 +118,6 @@ export default function BoardPage() {
     () => recencyFilters(recencyAttr, recency),
     [recencyAttr, recency],
   );
-  const serverNarrowed = Object.keys(recencyQuery).length > 0;
-
-  // The filters are part of the fetch's identity: widening the window is a
-  // different fetch, not a re-render of the same one. One value, used by both
-  // the query and EntityBoard's optimistic move, so they cannot drift apart.
-  const recordsKey = useMemo(
-    () => ['entities', typeKey, 'all', recencyQuery],
-    [typeKey, recencyQuery],
-  );
-
-  const recordsQuery = useQuery({
-    queryKey: recordsKey,
-    queryFn: () => listAllEntities(typeKey, { filters: recencyQuery }),
-    // The type has to load first — pickRecencyAttr reads its declared attributes,
-    // and fetching before it resolves would fetch the whole type unnarrowed.
-    enabled: !typesQuery.isLoading,
-  });
-
   // Generic ?<enumAttr>=<value> filters (any number, ANDed) — replaces the old
   // content_type-only hand-rolled filter; content_type is just one enum among
   // however many the type declares.
@@ -150,44 +150,103 @@ export default function BoardPage() {
     router.replace(qs ? `${pathname}?${qs}` : pathname);
   }
 
-  const records = useMemo(() => {
-    const enumFiltered = applyAttrFilters(recordsQuery.data ?? [], filters);
-    const assigned = applyTextAttrFilter(enumFiltered, assigneeFilter);
-    // Only when the fetch was NOT already narrowed — re-running the window over
-    // server-filtered rows would apply the client's blank-date fallback to a set
-    // the server had already decided, and the two disagree by design.
-    return serverNarrowed ? assigned : applyRecencyWindow(assigned, recency, recencyAttr);
-  }, [recordsQuery.data, filters, assigneeFilter, recency, recencyAttr, serverNarrowed]);
+  // ---- the lane queries (startsim-wn2p.27) ----
+  //
+  // Every filter this page offers is expressible as a backend predicate, so ALL
+  // of them go into the lane queries. There is no client-side filtering pass
+  // left: what a lane returns is what a lane shows, and its `count` is the true
+  // size of that lane under exactly these filters.
+  const statusAttr = useMemo(() => pickStatusAttr(type), [type]);
+  const columns = useMemo(() => boardColumns(statusAttr), [statusAttr]);
+
+  const baseFilters = useMemo(() => {
+    const facets = facetFilters(filters, assigneeFilter);
+    // A BLANK assignee facet ("unassigned") has no backend predicate — see
+    // facetFilters. Rather than quietly drop it and show everyone's work, the
+    // page keeps the board unfiltered and says so in the header chip.
+    return { ...recencyQuery, ...(facets ?? {}) };
+  }, [recencyQuery, filters, assigneeFilter]);
+
+  /** How many pages each lane has asked for. Scrolling one lane bumps one entry. */
+  const [pages, setPages] = useState<LanePages>({});
+  // A filter change makes every lane a different question, so the page counts
+  // reset with it — otherwise a lane scrolled deep under one window would fetch
+  // four pages of a window that has three.
+  const filterKey = JSON.stringify(baseFilters);
+  const [pagesFor, setPagesFor] = useState(filterKey);
+  if (pagesFor !== filterKey) {
+    setPagesFor(filterKey);
+    setPages({});
+  }
+
+  const laneKey = useCallback(
+    (laneId: string) => ['entities', typeKey, 'lane', laneId, baseFilters, lanePages(pages, laneId)] as const,
+    [typeKey, baseFilters, pages],
+  );
+
+  const statusName = statusAttr?.name ?? '';
+  const laneQueries = useQueries({
+    queries: columns.map((col) => {
+      const lf = statusName ? laneFilters(statusName, col.id, baseFilters) : null;
+      return {
+        queryKey: laneKey(col.id),
+        queryFn: () => fetchEntityPages(typeKey, lf ?? undefined, lanePages(pages, col.id), LANE_PAGE_SIZE),
+        // The type must resolve first: its declared enum is what the lanes ARE,
+        // and its declared date attribute is what the window filters on. The
+        // Unset lane has no query at all — see lib/lanes.ts.
+        enabled: !typesQuery.isLoading && lf != null,
+      };
+    }),
+  });
+
+  const lanes = useMemo(() => {
+    const out: Record<string, LaneState> = {};
+    columns.forEach((col, i) => {
+      const q = laneQueries[i];
+      const slice = q?.data as EntityPageSlice | undefined;
+      out[col.id] = {
+        records: slice?.records ?? [],
+        count: slice?.count ?? 0,
+        hasMore: slice?.hasMore ?? false,
+        loading: Boolean(q?.isFetching),
+      };
+    });
+    return out;
+  }, [columns, laneQueries]);
+
+  const loadMore = useCallback((laneId: string) => {
+    setPages((prev) => withOneMorePage(prev, laneId));
+  }, []);
+
+  const loadedCount = useMemo(
+    () => Object.values(lanes).reduce((sum, l) => sum + l.records.length, 0),
+    [lanes],
+  );
+  const laneCounts = useMemo(
+    () => columns.filter((c) => c.id !== UNSET_COLUMN.id).map((c) => lanes[c.id]?.count ?? 0),
+    [columns, lanes],
+  );
+  const lanesSettled = laneQueries.every((q) => !q.isLoading);
 
   /**
-   * How many records of this type the board is NOT showing.
+   * The whole board's size under the current filters, and the Unset residual.
    *
-   * A COUNT query rather than arithmetic on what we fetched, because the whole
-   * point is that we deliberately never fetched them. It runs unconditionally,
-   * not only while a window is active, because there is a SECOND way to be
-   * short: listAllEntities' page cap. Either way the honest line is the same —
-   * "the type holds this many more than you can see" — and a board that silently
-   * shows a subset while implying it is the whole type is the defect this issue
-   * started from.
+   * The lane counts already say how many records exist per lane, so `matching`
+   * is only needed for one thing the lanes cannot answer: how many records carry
+   * a status NO lane names. No filter can select those (see lib/lanes.ts), so
+   * they are found by subtraction — and a residual that can be computed is a
+   * residual that can never be silently zero.
    */
-  // The count is taken over the SAME facets the board is showing, minus the
-  // window — otherwise `?status=surfaced` (31 records) would report the other
-  // 4,085 as "older", which they mostly are not. `null` means the facet cannot
-  // be expressed as a count, so no number is claimed at all.
-  const countFilters = useMemo(
-    () => facetFilters(filters, assigneeFilter),
-    [filters, assigneeFilter],
-  );
   const totalQuery = useQuery({
-    queryKey: ['entities', typeKey, 'count', countFilters],
-    queryFn: () => countEntities(typeKey, countFilters ?? undefined),
-    enabled: countFilters != null,
+    queryKey: ['entities', typeKey, 'count', baseFilters],
+    queryFn: () => countEntities(typeKey, baseFilters),
+    enabled: !typesQuery.isLoading,
   });
-  const notShown =
-    totalQuery.data == null ? 0 : Math.max(0, totalQuery.data - records.length);
+  const matching = totalQuery.data ?? null;
+  const unaccounted = lanesSettled ? unaccountedFor(matching, laneCounts) : 0;
+  const notShown = matching == null ? 0 : Math.max(0, matching - loadedCount - unaccounted);
 
   const [selected, setSelected] = useState<EntityRecord | null>(null);
-  const statusAttr = useMemo(() => pickStatusAttr(type), [type]);
   const activeContentType = filters.find((f) => f.name === CONTENT_TYPE_ATTR)?.value ?? null;
 
   // Draft-progress rollup (startsim-4w76/n7s8) — topic board only, and only
@@ -203,24 +262,38 @@ export default function BoardPage() {
     queryFn: () => listAllRelationships(),
     enabled: isTopicBoard,
   });
+  /**
+   * Every topic, for the rollup's draft->topic matching — an EXPLICIT fetch, not
+   * the union of whatever the lanes happen to have paged in.
+   *
+   * The union would be complete today (59 topics across four lanes of 50) and
+   * would start silently dropping chips the moment a lane passed its first page.
+   * A rollup that quietly degrades with data volume is worse than one extra
+   * request for 59 records, and this only runs on the topic board.
+   */
+  const allTopicsQuery = useQuery({
+    queryKey: ['entities', CONTENT_TYPE_KEY, 'all'],
+    queryFn: () => listAllEntities(CONTENT_TYPE_KEY),
+    enabled: isTopicBoard,
+  });
   const rollupById = useMemo(() => {
     if (!isTopicBoard) return undefined;
     const drafts = draftsQuery.data ?? [];
     const relationships = relationshipsQuery.data ?? [];
-    // Match against the UNFILTERED topic set, not the currently-visible
-    // `records` — a topic's draft-progress rollup is a property of the topic
-    // itself, not of whatever filter happens to be active. Using the filtered
-    // list would make a card's chip depend on which filter was last applied.
-    const allTopics = recordsQuery.data ?? [];
+    // Match against the UNFILTERED topic set — a topic's draft-progress rollup is
+    // a property of the topic itself, not of whatever filter happens to be
+    // active. Using the visible set would make a card's chip depend on which
+    // filter was last applied.
+    const allTopics = allTopicsQuery.data ?? [];
     return rollupByParent(drafts, (d) => topicIdForDraft(d, relationships, allTopics), 'status');
-  }, [isTopicBoard, draftsQuery.data, relationshipsQuery.data, recordsQuery.data]);
+  }, [isTopicBoard, draftsQuery.data, relationshipsQuery.data, allTopicsQuery.data]);
   function rollupLabel(counts: RollupCounts): string | null {
     if (counts.total === 0) return null;
     const done = counts.byStatus[DRAFT_DONE_STATUS] ?? 0;
     return `${done}/${counts.total} ${DRAFT_DONE_STATUS}`;
   }
 
-  const loading = typesQuery.isLoading || recordsQuery.isLoading;
+  const loading = typesQuery.isLoading || !lanesSettled;
   const mySub = whoamiQuery.data?.sub;
 
   return (
@@ -231,7 +304,10 @@ export default function BoardPage() {
             {activeContentType ? contentCategoryLabel(activeContentType) : `${type?.label ?? typeKey} — Board`}
           </h1>
           <p className="flex flex-wrap items-center gap-2 text-sm text-neutral-500">
-            <span>{records.length} records</span>
+            <span>
+              {loadedCount.toLocaleString()}
+              {matching != null && matching !== loadedCount ? ` of ${matching.toLocaleString()}` : ''} records
+            </span>
             {filters.map((f) => (
               <span key={f.name} className="rounded-full bg-primary-50 px-2 py-0.5 text-xs text-primary-700">
                 {f.name.replace(/_/g, ' ')}: {f.value}
@@ -244,7 +320,7 @@ export default function BoardPage() {
             ) : null}
             {notShown > 0 ? (
               <span className="text-xs text-neutral-400">
-                {notShown.toLocaleString()} {recency.days == null ? 'not loaded' : 'older not shown'}
+                {notShown.toLocaleString()} more in the lanes — scroll to load
               </span>
             ) : null}
           </p>
@@ -345,8 +421,10 @@ export default function BoardPage() {
       ) : (
         <EntityBoard
           type={type}
-          records={records}
-          queryKey={recordsKey}
+          lanes={lanes}
+          onLoadMore={loadMore}
+          laneKey={laneKey}
+          unaccounted={unaccounted}
           onCardClick={setSelected}
           rollupById={rollupById}
           rollupLabel={isTopicBoard ? rollupLabel : undefined}
@@ -362,8 +440,19 @@ export default function BoardPage() {
             // Refetch the board AND re-point `selected` at the fresh record so the
             // open drawer reflects mutations made from inside it (e.g. Mark ready
             // moves the topic to 'written') instead of showing the stale prop.
-            const res = await recordsQuery.refetch();
-            setSelected((cur) => (cur ? (res.data?.find((r) => r.id === cur.id) ?? cur) : cur));
+            //
+            // Invalidating the whole `['entities', typeKey]` prefix catches every
+            // lane and the count, because an edit can move a record between lanes
+            // and only the server knows which one it landed in. The record itself
+            // is re-read by id rather than hunted for across the refreshed lanes —
+            // an edit that moves it out of the loaded page of its new lane would
+            // otherwise leave the open drawer showing the stale prop.
+            const id = selected?.id;
+            await qc.invalidateQueries({ queryKey: ['entities', typeKey] });
+            if (id != null) {
+              const fresh = await getEntity(id).catch(() => null);
+              if (fresh) setSelected(fresh);
+            }
           }}
         />
       ) : null}
