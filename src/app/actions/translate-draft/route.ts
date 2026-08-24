@@ -41,7 +41,11 @@ import {
   type TranslationRoute,
 } from '@startsimpli/llm/translation';
 
-import { applyDraftTranslations, draftSegments } from '@/lib/draft-translation';
+import {
+  applyDraftTranslations,
+  draftSegments,
+  existingTranslationQuery,
+} from '@/lib/draft-translation';
 import { tenantApiBase, tenantHost, translationEnv } from '@/lib/translation-config';
 import type { EntityRecord } from '@/lib/foundry-api';
 
@@ -84,7 +88,11 @@ async function tenantFetch<T>(
   auth: string,
   init: { method: string; body?: unknown },
 ): Promise<T> {
-  const url = new URL(`${tenantBase()}/api/v1/${path}/`);
+  // The trailing slash goes on the PATH, never after a query string. DRF 301s a
+  // slash-less POST into a GET (the recorded tenant-nginx failure), and naively
+  // appending to the whole thing would have made `page_size=1` into `page_size=1/`.
+  const [rawPath, rawQuery] = path.split('?');
+  const url = new URL(`${tenantBase()}/api/v1/${rawPath}/${rawQuery ? `?${rawQuery}` : ''}`);
   const payload = init.body === undefined ? undefined : JSON.stringify(init.body);
   const host = tenantHost(process.env as Record<string, string | undefined>);
 
@@ -147,6 +155,26 @@ async function runTranslation(
   targetLocale: string,
 ): Promise<void> {
   const draft = await tenantFetch<EntityRecord>(`entities/${draftId}`, auth, { method: 'GET' });
+
+  // BEFORE the model, not after. The durable external_id refuses a duplicate from
+  // the same person, but the unique constraint includes `owner_sub` — measured:
+  // a different owner posting the same external_id gets 201, not 400 — so two
+  // reviewers, or a reviewer and an automatic trigger running as somebody else,
+  // would each get a translation. This asks the edge instead, which has no owner
+  // dimension. It is also where the money is: without it a duplicate press pays
+  // for a full translation and then throws it away.
+  const existing = await tenantFetch<{ count?: number }>(
+    existingTranslationQuery(String(draft.id), targetLocale),
+    auth,
+    { method: 'GET' },
+  );
+  if ((existing?.count ?? 0) > 0) {
+    console.info('[translate-draft] a translation already exists — not making a second', {
+      draftId,
+      targetLocale,
+    });
+    return;
+  }
 
   const segments = draftSegments(draft);
   if (segments.length === 0) {

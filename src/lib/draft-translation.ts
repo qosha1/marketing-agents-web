@@ -134,6 +134,42 @@ export function translationExternalId(source: EntityRecord, targetLocale: string
   return `${head}${suffix}`;
 }
 
+/** The edge that makes a draft a translation OF another draft. */
+const TRANSLATION_OF_REL = 'translation_of';
+
+/**
+ * The tenant query answering "is there already a translation of this draft into
+ * this language?" — path only, so it is asserted without a network.
+ *
+ * WHY THIS EXISTS ALONGSIDE {@link translationExternalId}. The durable key stops
+ * a duplicate from the SAME person and no further. Measured live 2026-08-24: the
+ * unique constraint is (org_id, entity_type, external_id, owner_sub), and
+ * owner_sub is part of it, so
+ *
+ *   same owner,      same external_id  ->  400 conflict
+ *   different owner, same external_id  ->  201 Created
+ *
+ * Two reviewers, or one reviewer and an automatic trigger running as somebody
+ * else, would each get a translation. The database cannot answer that question;
+ * the `translation_of` edge can.
+ *
+ * `related_direction=out` is named rather than left to the default because the
+ * word that reads right is wrong: `in` returns nothing here. The TRANSLATION is
+ * the row holding the outgoing edge to its source.
+ */
+export function existingTranslationQuery(sourceId: string, targetLocale: string): string {
+  const params = new URLSearchParams({
+    type: 'draft',
+    related_to: sourceId,
+    related_via: TRANSLATION_OF_REL,
+    related_direction: 'out',
+    'attr.lang': targetLocale,
+    // A yes/no question: the answer is the envelope's `count`, not the rows.
+    page_size: '1',
+  });
+  return `entities?${params.toString()}`;
+}
+
 export interface DraftSegment {
   id: string;
   text: string;
