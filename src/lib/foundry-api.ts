@@ -239,6 +239,47 @@ export function deleteEntity(id: number | string) {
   return api.client.delete(`api/v1/entities/${id}`);
 }
 
+/** One lane's slice of the board: what is loaded, and how much there is. */
+export interface EntityPageSlice {
+  records: EntityRecord[];
+  /** The lane's TRUE size on the server, from the DRF envelope — not what loaded. */
+  count: number;
+  /** Whether a further page exists beyond the ones fetched. */
+  hasMore: boolean;
+}
+
+/**
+ * Fetch pages 1..`pageCount` of a filtered slice (bd startsim-wn2p.27).
+ *
+ * This is what a board LANE calls. It stops the moment the backend says there is
+ * no `next`, so asking for four pages of a lane that holds twenty-three records
+ * costs one request, not four — which matters because every lane on the board
+ * runs this on mount and most of them are short.
+ *
+ * Pages are walked in order rather than in parallel: the backend orders by
+ * `-created_at, id` and page N+1 is defined relative to page N, so firing them
+ * at once buys little and risks a torn read if a row lands mid-walk.
+ */
+export async function fetchEntityPages(
+  type: string,
+  filters: EntityFilters | undefined,
+  pageCount: number,
+  pageSize: number,
+): Promise<EntityPageSlice> {
+  const withSize: EntityFilters = { ...filters, page_size: String(pageSize) };
+  const records: EntityRecord[] = [];
+  let count = 0;
+  let hasMore = false;
+  for (let page = 1; page <= Math.max(1, pageCount); page++) {
+    const res = await listEntities(type, page, withSize);
+    count = res.count ?? count;
+    records.push(...res.results);
+    hasMore = Boolean(res.next);
+    if (!hasMore) break;
+  }
+  return { records, count, hasMore };
+}
+
 export interface ListAllOptions {
   /** Hard cap on pages walked. The bound is real: hitting it TRUNCATES. */
   maxPages?: number;
