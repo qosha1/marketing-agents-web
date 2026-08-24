@@ -48,24 +48,13 @@ import {
   UNSET_COLUMN,
   type RollupCounts,
 } from '@/lib/board';
+import type { LaneState } from '@/lib/lanes';
 import { initialsOf } from '@/lib/roster';
-import { updateEntity, type EntityPageSlice, type EntityRecord, type EntityTypeDef } from '@/lib/foundry-api';
+import { updateEntity, type Paginated, type EntityRecord, type EntityTypeDef } from '@/lib/foundry-api';
 
 /** Attribute-name convention for the assignee chip (startsim-71z6) — any type
  *  that declares this attr gets the chip, not just topic/draft. */
 const ASSIGNEE_NAME_ATTR = 'assignee_name';
-
-/** What one lane knows about itself. */
-export interface LaneState {
-  /** The records fetched so far, in server order. */
-  records: EntityRecord[];
-  /** How many exist on the server for this lane — not how many are loaded. */
-  count: number;
-  /** Whether a further page exists. */
-  hasMore: boolean;
-  /** A page request is in flight. */
-  loading: boolean;
-}
 
 interface Props {
   type: EntityTypeDef;
@@ -73,7 +62,11 @@ interface Props {
   lanes: Record<string, LaneState>;
   /** Ask this lane for its next page. Called once per arrival at the lane's end. */
   onLoadMore: (laneId: string) => void;
-  /** The react-query key a lane's slice is cached under, for the optimistic move. */
+  /**
+   * The react-query key of a lane's FIRST page — where an optimistic move lands.
+   * First page because that is where the backend would put a just-touched record
+   * anyway: lanes are ordered newest-first and the move is what makes it newest.
+   */
   laneKey: (laneId: string) => readonly unknown[];
   onCardClick: (record: EntityRecord) => void;
   /**
@@ -175,13 +168,13 @@ export function EntityBoard({
   const patchLanes = useCallback(
     (record: EntityRecord, from: string, to: string, newStatus: string) => {
       const moved = { ...record, data: { ...record.data, [statusCamel]: newStatus } };
-      qc.setQueryData<EntityPageSlice>(laneKey(from), (old) =>
+      qc.setQueryData<Paginated<EntityRecord>>(laneKey(from), (old) =>
         old
-          ? { ...old, records: old.records.filter((r) => r.id !== record.id), count: Math.max(0, old.count - 1) }
+          ? { ...old, results: old.results.filter((r) => r.id !== record.id), count: Math.max(0, old.count - 1) }
           : old,
       );
-      qc.setQueryData<EntityPageSlice>(laneKey(to), (old) =>
-        old ? { ...old, records: [moved, ...old.records], count: old.count + 1 } : old,
+      qc.setQueryData<Paginated<EntityRecord>>(laneKey(to), (old) =>
+        old ? { ...old, results: [moved, ...old.results], count: old.count + 1 } : old,
       );
     },
     [qc, laneKey, statusCamel],
@@ -192,15 +185,17 @@ export function EntityBoard({
       const current = String(readData(record.data, statusName) ?? '');
       if (current === newStatus) return;
       const from = columns.some((c) => c.id === current) ? current : UNSET_COLUMN.id;
-      const prevFrom = qc.getQueryData<EntityPageSlice>(laneKey(from));
-      const prevTo = qc.getQueryData<EntityPageSlice>(laneKey(newStatus));
+      const prevFrom = qc.getQueryData<Paginated<EntityRecord>>(laneKey(from));
+      const prevTo = qc.getQueryData<Paginated<EntityRecord>>(laneKey(newStatus));
       patchLanes(record, from, newStatus, newStatus);
       try {
         await updateEntity(record.id, { data: { ...record.data, [statusCamel]: newStatus } });
-        // Re-fetch BOTH lanes rather than the whole board: the counts moved, and
-        // the source lane may now have room for a record it had not paged to.
-        await qc.invalidateQueries({ queryKey: laneKey(from) });
-        await qc.invalidateQueries({ queryKey: laneKey(newStatus) });
+        // Re-fetch BOTH lanes rather than the whole board. Dropping the trailing
+        // ['page', n] segment invalidates EVERY page of the lane, not only the
+        // one that was patched: removing a record shifts every later page up by
+        // one, so a lane scrolled past page 1 would otherwise show a duplicate.
+        await qc.invalidateQueries({ queryKey: laneKey(from).slice(0, -2) });
+        await qc.invalidateQueries({ queryKey: laneKey(newStatus).slice(0, -2) });
       } catch (err) {
         if (prevFrom) qc.setQueryData(laneKey(from), prevFrom);
         if (prevTo) qc.setQueryData(laneKey(newStatus), prevTo);
