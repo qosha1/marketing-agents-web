@@ -192,3 +192,40 @@ export function assembleLanes(
   });
   return out;
 }
+
+/** Minimal shape of a DOM node for {@link nearestScrollParent} — structural so
+ *  it is testable without a DOM, matching this module's no-framework rule. */
+export interface HasParent<T> {
+  parentElement: T | null;
+}
+
+/**
+ * The scrolling ancestor a lane's load-more sentinel must be observed against.
+ *
+ * MEASURED, and the reason this exists: with the observer rooted at the VIEWPORT,
+ * scrolling the rejected lane to its end on the deployed board (scrollTop 0 ->
+ * 8549 of scrollHeight 9213) fired zero requests, while the explicit "Load 50
+ * more" button fired exactly one and worked. `rootMargin` grows the ROOT's rect;
+ * it does not grow the clip rect of a scrolling ancestor. So a 1px sentinel
+ * sitting at the exact bottom edge of the lane never intersected — zero pixels
+ * of it were ever visible, however far the lane scrolled.
+ *
+ * Rooting the observer at the lane makes `rootMargin` mean what it reads as:
+ * "fire when the end is within 300px", measured inside the thing being scrolled.
+ *
+ * Returns null when nothing above the node scrolls; the caller then falls back
+ * to the viewport, which is the correct root for a board that is not height-bound.
+ */
+export function nearestScrollParent<T extends HasParent<T>>(
+  node: T | null,
+  overflowY: (el: T) => string,
+): T | null {
+  // Start at the PARENT: a node is not its own scroll root.
+  let el = node?.parentElement ?? null;
+  while (el) {
+    const oy = overflowY(el);
+    if (oy === 'auto' || oy === 'scroll') return el;
+    el = el.parentElement;
+  }
+  return null;
+}
