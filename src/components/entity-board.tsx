@@ -48,7 +48,7 @@ import {
   UNSET_COLUMN,
   type RollupCounts,
 } from '@/lib/board';
-import type { LaneState } from '@/lib/lanes';
+import { nearestScrollParent, type LaneState } from '@/lib/lanes';
 import { initialsOf } from '@/lib/roster';
 import { updateEntity, type Paginated, type EntityRecord, type EntityTypeDef } from '@/lib/foundry-api';
 
@@ -106,19 +106,27 @@ function LoadMoreSentinel({ onVisible }: { onVisible: () => void }) {
   useEffect(() => {
     const node = ref.current;
     if (!node || typeof IntersectionObserver === 'undefined') return;
+    // Rooted at the LANE, not the viewport. `rootMargin` grows the root's rect,
+    // never the clip rect of a scrolling ancestor — so a viewport-rooted
+    // observer left this sentinel permanently invisible at the lane's bottom
+    // edge and the board only ever loaded more via the button. See
+    // nearestScrollParent for the measurement.
+    const root = nearestScrollParent<HTMLElement>(node, (el) => getComputedStyle(el).overflowY);
     const io = new IntersectionObserver(
       (entries) => {
         if (entries.some((e) => e.isIntersecting)) cb.current();
       },
-      // Ask one card-height early so the next page is usually there by the time
-      // the reader reaches the bottom, rather than after a visible stall.
-      { rootMargin: '300px' },
+      // Ask a few cards early so the next page is usually there by the time the
+      // reader reaches the bottom, rather than after a visible stall.
+      { root, rootMargin: '400px 0px' },
     );
     io.observe(node);
     return () => io.disconnect();
   }, []);
 
-  return <div ref={ref} aria-hidden data-testid="lane-load-more-sentinel" className="h-px w-full" />;
+  // Tall enough to be unambiguously inside the lane rather than balanced on its
+  // bottom edge, short enough to read as nothing.
+  return <div ref={ref} aria-hidden data-testid="lane-load-more-sentinel" className="h-2 w-full" />;
 }
 
 /** Renders null when the type has no status enum — the page falls back to the table. */

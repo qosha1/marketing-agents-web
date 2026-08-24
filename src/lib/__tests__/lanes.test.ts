@@ -11,6 +11,7 @@ import {
   lanePages,
   assembleLanes,
   lanePageRequests,
+  nearestScrollParent,
   unaccountedFor,
   withOneMorePage,
 } from '../lanes';
@@ -204,5 +205,51 @@ describe('assembleLanes', () => {
     const reqs = lanePageRequests(columns, 'status', { rejected: 2 }, BASE);
     const lanes = assembleLanes(columns, reqs, [{}, {}, {}]);
     expect(lanes.rejected).toEqual({ records: [], count: 0, hasMore: false, loading: false });
+  });
+});
+
+describe('nearestScrollParent — the sentinel needs the LANE as its root', () => {
+  // MEASURED on the deployed board before this fix: scrolling the rejected lane
+  // to its end (scrollTop 0 -> 8549 of scrollHeight 9213) fired ZERO requests,
+  // while the explicit "Load 50 more" button fired exactly one and worked. The
+  // observer was watching the viewport, and `rootMargin` grows the ROOT rect —
+  // it does not grow the clip rect of a scrolling ancestor. So a 1px sentinel
+  // sitting at the exact bottom edge of the lane never intersected: zero pixels
+  // of it were ever visible, no matter how far the lane scrolled.
+  type Node = { name: string; overflow: string; parentElement: Node | null };
+  const read = (n: Node) => n.overflow;
+  const chain = (...specs: [string, string][]): Node[] => {
+    let parent: Node | null = null;
+    return specs.map(([name, overflow]) => (parent = { name, overflow, parentElement: parent }));
+  };
+
+  it('finds the lane scroller rather than the page', () => {
+    const [, , , sentinel] = chain(
+      ['page', 'auto'],
+      ['lane', 'auto'],
+      ['card', 'visible'],
+      ['sentinel', 'visible'],
+    );
+    // The LANE, not the page — even though the page scrolls too.
+    expect(nearestScrollParent(sentinel, read)?.name).toBe('lane');
+  });
+
+  it('accepts scroll as well as auto', () => {
+    const [, , sentinel] = chain(['page', 'visible'], ['lane', 'scroll'], ['sentinel', 'visible']);
+    expect(nearestScrollParent(sentinel, read)?.name).toBe('lane');
+  });
+
+  it('never returns the node itself, only an ancestor', () => {
+    const [, sentinel] = chain(['outer', 'visible'], ['sentinel', 'auto']);
+    expect(nearestScrollParent(sentinel, read)).toBeNull();
+  });
+
+  it('is null when nothing scrolls — the caller falls back to the viewport', () => {
+    const [, sentinel] = chain(['page', 'visible'], ['sentinel', 'visible']);
+    expect(nearestScrollParent(sentinel, read)).toBeNull();
+  });
+
+  it('is null for a detached node', () => {
+    expect(nearestScrollParent(null, read)).toBeNull();
   });
 });
