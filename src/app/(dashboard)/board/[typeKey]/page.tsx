@@ -37,7 +37,7 @@ import { useParams, usePathname, useRouter, useSearchParams } from 'next/navigat
 import Link from 'next/link';
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 
-import { EntityBoard, type LaneState } from '@/components/entity-board';
+import { EntityBoard } from '@/components/entity-board';
 import { EntityDetailDrawer } from '@/components/entity-detail-drawer';
 import {
   boardColumns,
@@ -67,18 +67,17 @@ import {
 import { DRAFT_TYPE, listAllRelationships, topicIdForDraft } from '@/lib/topic-drafts';
 import {
   countEntities,
-  fetchEntityPages,
   getEntity,
   listAllEntities,
+  listEntities,
   listTypes,
   whoami,
-  type EntityPageSlice,
   type EntityRecord,
 } from '@/lib/foundry-api';
 import {
+  assembleLanes,
   LANE_PAGE_SIZE,
-  laneFilters,
-  lanePages,
+  lanePageRequests,
   unaccountedFor,
   withOneMorePage,
   type LanePages,
@@ -179,40 +178,44 @@ export default function BoardPage() {
     setPages({});
   }
 
-  const laneKey = useCallback(
-    (laneId: string) => ['entities', typeKey, 'lane', laneId, baseFilters, lanePages(pages, laneId)] as const,
-    [typeKey, baseFilters, pages],
+  const statusName = statusAttr?.name ?? '';
+
+  // ONE QUERY PER (LANE, PAGE). Keying by the lane's page COUNT instead would
+  // re-walk from page 1 on every load-more — measured on the live board: getting
+  // one lane to page 4 fired ten requests. Per-page keys make page 1 cacheable
+  // forever and a load-more exactly one request.
+  const requests = useMemo(
+    () => lanePageRequests(columns, statusName, pages, baseFilters),
+    [columns, statusName, pages, baseFilters],
   );
 
-  const statusName = statusAttr?.name ?? '';
+  const lanePageKey = useCallback(
+    (laneId: string, page: number, filters: typeof baseFilters) =>
+      ['entities', typeKey, 'lane', laneId, filters, 'page', page] as const,
+    [typeKey],
+  );
+
   const laneQueries = useQueries({
-    queries: columns.map((col) => {
-      const lf = statusName ? laneFilters(statusName, col.id, baseFilters) : null;
-      return {
-        queryKey: laneKey(col.id),
-        queryFn: () => fetchEntityPages(typeKey, lf ?? undefined, lanePages(pages, col.id), LANE_PAGE_SIZE),
-        // The type must resolve first: its declared enum is what the lanes ARE,
-        // and its declared date attribute is what the window filters on. The
-        // Unset lane has no query at all — see lib/lanes.ts.
-        enabled: !typesQuery.isLoading && lf != null,
-      };
-    }),
+    queries: requests.map((req) => ({
+      queryKey: lanePageKey(req.laneId, req.page, req.filters),
+      queryFn: () =>
+        listEntities(typeKey, req.page, { ...req.filters, page_size: String(LANE_PAGE_SIZE) }),
+      // The type must resolve first: its declared enum is what the lanes ARE, and
+      // its declared date attribute is what the window filters on.
+      enabled: !typesQuery.isLoading,
+    })),
   });
 
-  const lanes = useMemo(() => {
-    const out: Record<string, LaneState> = {};
-    columns.forEach((col, i) => {
-      const q = laneQueries[i];
-      const slice = q?.data as EntityPageSlice | undefined;
-      out[col.id] = {
-        records: slice?.records ?? [],
-        count: slice?.count ?? 0,
-        hasMore: slice?.hasMore ?? false,
-        loading: Boolean(q?.isFetching),
-      };
-    });
-    return out;
-  }, [columns, laneQueries]);
+  const lanes = useMemo(
+    () => assembleLanes(columns, requests, laneQueries),
+    [columns, requests, laneQueries],
+  );
+
+  /** The key EntityBoard patches for an optimistic move: a lane's FIRST page. */
+  const laneKey = useCallback(
+    (laneId: string) => lanePageKey(laneId, 1, { ...baseFilters, [`attr.${statusName}`]: laneId }),
+    [lanePageKey, baseFilters, statusName],
+  );
 
   const loadMore = useCallback((laneId: string) => {
     setPages((prev) => withOneMorePage(prev, laneId));
@@ -226,7 +229,7 @@ export default function BoardPage() {
     () => columns.filter((c) => c.id !== UNSET_COLUMN.id).map((c) => lanes[c.id]?.count ?? 0),
     [columns, lanes],
   );
-  const lanesSettled = laneQueries.every((q) => !q.isLoading);
+  const lanesSettled = laneQueries.length > 0 && laneQueries.every((q) => !q.isLoading);
 
   /**
    * The whole board's size under the current filters, and the Unset residual.

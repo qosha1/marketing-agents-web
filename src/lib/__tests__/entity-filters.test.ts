@@ -20,7 +20,7 @@
  *   -> {"count": 1135}   (unfiltered: 4116)
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { fetchEntityPages, listAllEntities, listEntities } from '../foundry-api';
+import { listAllEntities, listEntities } from '../foundry-api';
 
 const seen: string[] = [];
 const realFetch = globalThis.fetch;
@@ -91,56 +91,3 @@ describe('listAllEntities', () => {
   });
 });
 
-describe('fetchEntityPages — one lane at a time', () => {
-  it('walks exactly the pages asked for, at the lane page size', async () => {
-    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
-      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-      seen.push(url);
-      return page([{ id: 1 }], 'http://next');
-    }) as typeof globalThis.fetch;
-    const slice = await fetchEntityPages('news_item', { 'attr.status': 'rejected' }, 3, 50);
-    expect(seen).toHaveLength(3);
-    expect(slice.records).toHaveLength(3);
-    expect(slice.hasMore).toBe(true);
-    for (const url of seen) expect(decodeURIComponent(url)).toContain('page_size=50');
-    expect(decodeURIComponent(seen[2])).toContain('page=3');
-  });
-
-  it('stops the moment the backend says there is no next page', async () => {
-    // A lane of 23 records asked for 4 pages must cost ONE request, not four.
-    // Every lane runs this on mount and most of them are short.
-    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
-      seen.push(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
-      return page([{ id: 1 }], null);
-    }) as typeof globalThis.fetch;
-    const slice = await fetchEntityPages('news_item', { 'attr.status': 'new' }, 4, 50);
-    expect(seen).toHaveLength(1);
-    expect(slice.hasMore).toBe(false);
-  });
-
-  it('reports the server total, not the number of records loaded', async () => {
-    globalThis.fetch = vi.fn(async () => ({
-      ok: true,
-      status: 200,
-      headers: new Headers({ 'content-type': 'application/json' }),
-      json: async () => ({ count: 808, next: 'http://next', previous: null, results: [{ id: 1 }] }),
-      text: async () => '',
-    })) as unknown as typeof globalThis.fetch;
-    const slice = await fetchEntityPages('news_item', { 'attr.status': 'rejected' }, 1, 50);
-    expect(slice.count).toBe(808);
-    expect(slice.records).toHaveLength(1);
-  });
-
-  it('carries the lane filter on every page', async () => {
-    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
-      seen.push(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
-      return page([{ id: 1 }], 'http://next');
-    }) as typeof globalThis.fetch;
-    await fetchEntityPages('news_item', { 'attr.status': 'rejected', 'attr.published_at__gte': '2026-08-10' }, 2, 50);
-    for (const url of seen) {
-      const q = decodeURIComponent(url);
-      expect(q).toContain('attr.status=rejected');
-      expect(q).toContain('attr.published_at__gte=2026-08-10');
-    }
-  });
-});

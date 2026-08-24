@@ -74,11 +74,6 @@ export function withOneMorePage(pages: LanePages, laneId: string): LanePages {
   return { ...pages, [laneId]: lanePages(pages, laneId) + 1 };
 }
 
-/** The most a lane can be holding after N pages. */
-export function loadedIn(pageCount: number): number {
-  return pageCount * LANE_PAGE_SIZE;
-}
-
 /**
  * How many records the lane queries cannot account for — the true size of the
  * Unset lane, arrived at by subtraction because it cannot be arrived at by
@@ -102,4 +97,98 @@ export function unaccountedFor(
   if (total == null) return 0;
   const accounted = laneCounts.reduce((sum, n) => sum + n, 0);
   return Math.max(0, total - accounted);
+}
+
+/** One page of one lane — the unit that is fetched and cached. */
+export interface LanePageRequest {
+  laneId: string;
+  /** 1-based, matching the backend's own page numbering. */
+  page: number;
+  filters: EntityFilters;
+}
+
+/**
+ * Every (lane, page) a board currently wants.
+ *
+ * ONE REQUEST PER PAGE, and that is the whole design. The first cut of this
+ * keyed a lane's query by its page COUNT and re-walked from page 1 on every
+ * load-more — reaching page 4 cost four requests and page 10 would cost ten, on
+ * a board whose entire reason to exist is not over-fetching. Measured on the
+ * live board before the fix: scrolling one lane to page 4 fired 1+2+3+4 = 10
+ * requests. Giving each page its own identity makes page 1 cacheable forever and
+ * a load-more exactly one request.
+ *
+ * The Unset lane is skipped entirely — see {@link laneFilters}.
+ */
+export function lanePageRequests(
+  columns: { id: string }[],
+  statusAttrName: string,
+  pages: LanePages,
+  base: EntityFilters,
+): LanePageRequest[] {
+  if (!statusAttrName) return [];
+  const out: LanePageRequest[] = [];
+  for (const col of columns) {
+    const filters = laneFilters(statusAttrName, col.id, base);
+    if (!filters) continue;
+    for (let page = 1; page <= lanePages(pages, col.id); page++) {
+      out.push({ laneId: col.id, page, filters });
+    }
+  }
+  return out;
+}
+
+/** The part of a react-query result this module reads. Structural, so the test
+ *  can hand in plain objects and the page can hand in the real thing. */
+export interface LanePageResult {
+  data?: {
+    count?: number;
+    next?: string | null;
+    results?: unknown[];
+  };
+  isFetching?: boolean;
+}
+
+/** What one lane knows about itself, assembled from its pages. */
+export interface LaneState {
+  records: import('@/lib/foundry-api').EntityRecord[];
+  /** How many exist on the server — not how many are loaded. */
+  count: number;
+  hasMore: boolean;
+  loading: boolean;
+}
+
+/**
+ * Fold per-page results back into one state per lane, in page order.
+ *
+ * `count` comes from the envelope rather than from `records.length`, and
+ * `hasMore` from the LAST page fetched rather than the first — a lane that has
+ * paged to its end must stop asking, and reading `next` off page 1 would keep it
+ * asking forever.
+ *
+ * Every column gets an entry, including Unset, so the board lays out its full
+ * set of lanes whether or not anything was fetched for them.
+ */
+export function assembleLanes(
+  columns: { id: string }[],
+  requests: LanePageRequest[],
+  results: LanePageResult[],
+): Record<string, LaneState> {
+  const out: Record<string, LaneState> = {};
+  for (const col of columns) {
+    out[col.id] = { records: [], count: 0, hasMore: false, loading: false };
+  }
+  requests.forEach((req, i) => {
+    const lane = out[req.laneId];
+    if (!lane) return;
+    const res = results[i];
+    if (res?.isFetching) lane.loading = true;
+    const data = res?.data;
+    if (!data) return;
+    lane.records.push(...((data.results ?? []) as LaneState['records']));
+    lane.count = data.count ?? lane.count;
+    // Last page wins: the requests for one lane are emitted in page order.
+    lane.hasMore = Boolean(data.next);
+  });
+  return out;
 }
