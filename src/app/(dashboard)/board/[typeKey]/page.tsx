@@ -46,6 +46,7 @@ import {
   RECENCY_PARAM,
   RECENCY_WINDOWS,
   defaultRecencyDays,
+  facetFilters,
   recencyFilters,
   rollupByParent,
   type RollupCounts,
@@ -169,12 +170,21 @@ export default function BoardPage() {
    * shows a subset while implying it is the whole type is the defect this issue
    * started from.
    */
+  // The count is taken over the SAME facets the board is showing, minus the
+  // window — otherwise `?status=surfaced` (31 records) would report the other
+  // 4,085 as "older", which they mostly are not. `null` means the facet cannot
+  // be expressed as a count, so no number is claimed at all.
+  const countFilters = useMemo(
+    () => facetFilters(filters, assigneeFilter),
+    [filters, assigneeFilter],
+  );
   const totalQuery = useQuery({
-    queryKey: ['entities', typeKey, 'count'],
-    queryFn: () => countEntities(typeKey),
+    queryKey: ['entities', typeKey, 'count', countFilters],
+    queryFn: () => countEntities(typeKey, countFilters ?? undefined),
+    enabled: countFilters != null,
   });
   const notShown =
-    totalQuery.data == null ? 0 : Math.max(0, totalQuery.data - (recordsQuery.data?.length ?? 0));
+    totalQuery.data == null ? 0 : Math.max(0, totalQuery.data - records.length);
 
   const [selected, setSelected] = useState<EntityRecord | null>(null);
   const statusAttr = useMemo(() => pickStatusAttr(type), [type]);

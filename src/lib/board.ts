@@ -477,3 +477,32 @@ export function recencyFilters(
   if (window.days == null || !attrName) return {};
   return { [`attr.${attrName}__gte`]: recencyCutoff(window.days, now).toISOString().slice(0, 10) };
 }
+
+/**
+ * The board's OTHER facets, expressed as backend filters — so a COUNT of "what
+ * this type holds" is a count of the same slice the board is showing.
+ *
+ * Without this, `/board/news_item?status=surfaced` shows 31 records and reports
+ * "4,085 older not shown", which is false twice over: those 4,085 are mostly not
+ * older, and they are not this facet's records. A line whose whole job is to be
+ * honest about what is hidden cannot be the one lying.
+ *
+ * Returns null — meaning "do not claim a number" — for the {@link BLANK}
+ * sentinel, which asks for records where an attribute is ABSENT. The backend's
+ * `__isnull` answers "is there an Attribute row", not "is the value empty", and
+ * those differ: all 4,116 live news_items have a `published_at` row and 167 of
+ * them are blank. Rather than report a count that quietly means something else,
+ * report none.
+ */
+export function facetFilters(
+  filters: AttrFilter[],
+  textFilter: AttrTextFilter | null,
+): Record<string, string> | null {
+  const out: Record<string, string> = {};
+  for (const f of filters) out[`attr.${f.name}`] = f.value;
+  if (textFilter) {
+    if (textFilter.value === BLANK) return null;
+    out[`attr.${textFilter.name}`] = textFilter.value;
+  }
+  return out;
+}

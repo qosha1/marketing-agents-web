@@ -18,6 +18,8 @@ import {
   pickRecencyWindow,
   recencyDate,
   recencyFilters,
+  facetFilters,
+  BLANK,
 } from '../board';
 import type { AttributeDef, EntityRecord, EntityTypeDef } from '@/lib/foundry-api';
 
@@ -218,5 +220,36 @@ describe('recencyFilters — the SERVER-SIDE half', () => {
       NOW,
     );
     expect(kept).toHaveLength(1);
+  });
+});
+
+describe('facetFilters — so the "not shown" count counts the right slice', () => {
+  it('turns enum facets into the backend attr.<name> filter', () => {
+    expect(facetFilters([{ name: 'status', value: 'surfaced' }], null)).toEqual({
+      'attr.status': 'surfaced',
+    });
+  });
+
+  it('ANDs several facets, the way the board does', () => {
+    expect(
+      facetFilters(
+        [{ name: 'status', value: 'surfaced' }, { name: 'content_type', value: 'general' }],
+        null,
+      ),
+    ).toEqual({ 'attr.status': 'surfaced', 'attr.content_type': 'general' });
+  });
+
+  it('includes a named text facet', () => {
+    expect(facetFilters([], { name: 'assignee_sub', value: 'u-1' })).toEqual({
+      'attr.assignee_sub': 'u-1',
+    });
+  });
+
+  it('declines to answer for the BLANK sentinel rather than answering a different question', () => {
+    expect(facetFilters([], { name: 'assignee_sub', value: BLANK })).toBeNull();
+  });
+
+  it('is empty — not null — when no facet is active', () => {
+    expect(facetFilters([], null)).toEqual({});
   });
 });
