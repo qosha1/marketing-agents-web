@@ -14,6 +14,16 @@
  * Magnets / General) that pre-filter it the same way, plus a separate
  * free-text `assignee_sub` quick-filter (startsim-a2oq: "assigned to me" /
  * "unassigned" / anyone) shown only when the type declares that attribute.
+ *
+ * Every board also opens on a RECENCY WINDOW (startsim-wn2p.24) — the last 14
+ * days by default, `?since=` to widen, `?since=all` for the old behaviour. A
+ * board is a work surface, not an archive: news_item alone holds 4,116 records
+ * and rendering all of them buried the 31 anyone is actually triaging.
+ *
+ * The window narrows the FETCH, not just the render, wherever the type declares
+ * a date the backend can filter on. That matters more than the decluttering: at
+ * 20 pages x 50 rows the old unfiltered fetch never reached past the newest
+ * 1,000 records anyway, and reported that truncated set as the whole type.
  */
 import { useMemo, useState } from 'react';
 import { useParams, usePathname, useRouter, useSearchParams } from 'next/navigation';
@@ -24,11 +34,19 @@ import { EntityBoard } from '@/components/entity-board';
 import { EntityDetailDrawer } from '@/components/entity-detail-drawer';
 import {
   applyAttrFilters,
+  applyRecencyWindow,
   applyTextAttrFilter,
   BLANK,
   pickAttrFilters,
+  pickRecencyAttr,
+  pickRecencyWindow,
   pickStatusAttr,
   pickTextAttrFilter,
+  RECENCY_ALL,
+  RECENCY_PARAM,
+  RECENCY_WINDOWS,
+  defaultRecencyDays,
+  recencyFilters,
   rollupByParent,
   type RollupCounts,
 } from '@/lib/board';
@@ -40,7 +58,13 @@ import {
   contentCategoryLabel,
 } from '@/lib/content';
 import { DRAFT_TYPE, listAllRelationships, topicIdForDraft } from '@/lib/topic-drafts';
-import { listAllEntities, listTypes, whoami, type EntityRecord } from '@/lib/foundry-api';
+import {
+  countEntities,
+  listAllEntities,
+  listTypes,
+  whoami,
+  type EntityRecord,
+} from '@/lib/foundry-api';
 
 const ASSIGNEE_SUB_ATTR = 'assignee_sub';
 /**
@@ -62,9 +86,35 @@ export default function BoardPage() {
   const typesQuery = useQuery({ queryKey: ['schema-types'], queryFn: () => listTypes() });
   const type = typesQuery.data?.results.find((t) => t.key === typeKey);
 
+  // The recency window (startsim-wn2p.24). `recencyAttr` is null for a type that
+  // declares no "when this happened" date; the window then measures by each
+  // record's own createdAt, client-side — so this is on for every board, not
+  // just news. It is computed BEFORE the fetch because it narrows the fetch.
+  const recencyAttr = useMemo(() => pickRecencyAttr(type), [type]);
+  const recency = useMemo(
+    () => pickRecencyWindow(Object.fromEntries(searchParams.entries()), defaultRecencyDays(recencyAttr)),
+    [searchParams, recencyAttr],
+  );
+  const recencyQuery = useMemo(
+    () => recencyFilters(recencyAttr, recency),
+    [recencyAttr, recency],
+  );
+  const serverNarrowed = Object.keys(recencyQuery).length > 0;
+
+  // The filters are part of the fetch's identity: widening the window is a
+  // different fetch, not a re-render of the same one. One value, used by both
+  // the query and EntityBoard's optimistic move, so they cannot drift apart.
+  const recordsKey = useMemo(
+    () => ['entities', typeKey, 'all', recencyQuery],
+    [typeKey, recencyQuery],
+  );
+
   const recordsQuery = useQuery({
-    queryKey: ['entities', typeKey, 'all'],
-    queryFn: () => listAllEntities(typeKey),
+    queryKey: recordsKey,
+    queryFn: () => listAllEntities(typeKey, { filters: recencyQuery }),
+    // The type has to load first — pickRecencyAttr reads its declared attributes,
+    // and fetching before it resolves would fetch the whole type unnarrowed.
+    enabled: !typesQuery.isLoading,
   });
 
   // Generic ?<enumAttr>=<value> filters (any number, ANDed) — replaces the old
@@ -85,6 +135,12 @@ export default function BoardPage() {
   );
   const whoamiQuery = useQuery({ queryKey: ['whoami'], queryFn: () => whoami(), enabled: hasAssigneeAttr });
 
+  function setRecencyParam(days: number | null) {
+    const sp = new URLSearchParams(searchParams.toString());
+    sp.set(RECENCY_PARAM, days == null ? RECENCY_ALL : String(days));
+    router.replace(`${pathname}?${sp.toString()}`);
+  }
+
   function setAssigneeParam(value: string | null) {
     const sp = new URLSearchParams(searchParams.toString());
     if (value) sp.set(ASSIGNEE_SUB_ATTR, value);
@@ -95,8 +151,30 @@ export default function BoardPage() {
 
   const records = useMemo(() => {
     const enumFiltered = applyAttrFilters(recordsQuery.data ?? [], filters);
-    return applyTextAttrFilter(enumFiltered, assigneeFilter);
-  }, [recordsQuery.data, filters, assigneeFilter]);
+    const assigned = applyTextAttrFilter(enumFiltered, assigneeFilter);
+    // Only when the fetch was NOT already narrowed — re-running the window over
+    // server-filtered rows would apply the client's blank-date fallback to a set
+    // the server had already decided, and the two disagree by design.
+    return serverNarrowed ? assigned : applyRecencyWindow(assigned, recency, recencyAttr);
+  }, [recordsQuery.data, filters, assigneeFilter, recency, recencyAttr, serverNarrowed]);
+
+  /**
+   * How many records of this type the board is NOT showing.
+   *
+   * A COUNT query rather than arithmetic on what we fetched, because the whole
+   * point is that we deliberately never fetched them. It runs unconditionally,
+   * not only while a window is active, because there is a SECOND way to be
+   * short: listAllEntities' page cap. Either way the honest line is the same —
+   * "the type holds this many more than you can see" — and a board that silently
+   * shows a subset while implying it is the whole type is the defect this issue
+   * started from.
+   */
+  const totalQuery = useQuery({
+    queryKey: ['entities', typeKey, 'count'],
+    queryFn: () => countEntities(typeKey),
+  });
+  const notShown =
+    totalQuery.data == null ? 0 : Math.max(0, totalQuery.data - (recordsQuery.data?.length ?? 0));
 
   const [selected, setSelected] = useState<EntityRecord | null>(null);
   const statusAttr = useMemo(() => pickStatusAttr(type), [type]);
@@ -154,9 +232,29 @@ export default function BoardPage() {
                 assignee: {assigneeFilter.value === BLANK ? 'unassigned' : assigneeFilter.value}
               </span>
             ) : null}
+            {notShown > 0 ? (
+              <span className="text-xs text-neutral-400">
+                {notShown.toLocaleString()} {recency.days == null ? 'not loaded' : 'older not shown'}
+              </span>
+            ) : null}
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 text-xs">
+            <span className="text-neutral-400">Showing</span>
+            {RECENCY_WINDOWS.map((w) => (
+              <button
+                key={w.days ?? RECENCY_ALL}
+                type="button"
+                onClick={() => setRecencyParam(w.days)}
+                className={`rounded border px-2 py-1 hover:bg-neutral-50 ${
+                  recency.days === w.days ? 'border-primary-300 bg-primary-50 text-primary-700' : ''
+                }`}
+              >
+                {w.label}
+              </button>
+            ))}
+          </div>
           {hasAssigneeAttr ? (
             <div className="flex items-center gap-1.5 text-xs">
               <button
@@ -238,6 +336,7 @@ export default function BoardPage() {
         <EntityBoard
           type={type}
           records={records}
+          queryKey={recordsKey}
           onCardClick={setSelected}
           rollupById={rollupById}
           rollupLabel={isTopicBoard ? rollupLabel : undefined}

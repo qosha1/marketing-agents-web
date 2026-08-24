@@ -54,10 +54,18 @@ interface Props {
   rollupById?: Map<EntityRecord['id'], RollupCounts>;
   /** Turns one record's rollup counts into the chip text, e.g. "2/3 ready". */
   rollupLabel?: (counts: RollupCounts) => string | null;
+  /**
+   * The react-query key the board's records were fetched under, for the
+   * optimistic move. It is a PROP rather than rebuilt here because the page's
+   * key carries the recency window (startsim-wn2p.24) — a key rebuilt from
+   * `type.key` alone would write the optimistic update somewhere nothing reads,
+   * making a drag look like it snapped back before the refetch caught up.
+   */
+  queryKey: readonly unknown[];
 }
 
 /** Renders null when the type has no status enum — the page falls back to the table. */
-export function EntityBoard({ type, records, onCardClick, rollupById, rollupLabel }: Props) {
+export function EntityBoard({ type, records, onCardClick, rollupById, rollupLabel, queryKey }: Props) {
   const qc = useQueryClient();
   const statusAttr = useMemo(() => pickStatusAttr(type), [type]);
   const columns = useMemo(() => boardColumns(statusAttr), [statusAttr]);
@@ -78,7 +86,7 @@ export function EntityBoard({ type, records, onCardClick, rollupById, rollupLabe
     )
     .slice(0, 3);
   const kanbanCols: KanbanColumnConfig[] = columns.map((c) => ({ id: c.id, label: c.label }));
-  const boardKey = ['entities', type.key, 'all'];
+  const boardKey = queryKey;
 
   async function applyStatus(record: EntityRecord, newStatus: string) {
     if (String(readData(record.data, statusName) ?? '') === newStatus) return;
