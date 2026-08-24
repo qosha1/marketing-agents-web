@@ -172,10 +172,39 @@ async function runTranslation(
   }
 
   const next = applyDraftTranslations(draft, translations, targetLocale);
+
+  // external_id is what makes this record findable forever, and what makes a
+  // SECOND translation of the same draft into the same language a 400 from the
+  // database rather than a rival row nothing can tell apart (bd wn2p.21). The
+  // create endpoint is deliberate: a translation is written once and then
+  // belongs to its reviewer. Re-translating has to be an explicit act, not a
+  // silent overwrite of someone's edits — which is exactly what pointing this at
+  // /entities/upsert/ would buy, since upsert merges `data` but assigns `name`
+  // outright (measured in title-durability.ts).
   const created = await tenantFetch<EntityRecord>('entities', auth, {
     method: 'POST',
-    body: { entity_type: DRAFT_TYPE, name: next.name, data: next.data },
+    body: {
+      entity_type: DRAFT_TYPE,
+      external_id: next.externalId,
+      name: next.name,
+      data: next.data,
+    },
+  }).catch((error: unknown) => {
+    // A conflict here is the guard WORKING. Say so plainly rather than logging
+    // it as a failure: the reviewer already has a translation in this language,
+    // and the app should send them to it rather than make them a second one.
+    const detail = (error as Error).message;
+    if (detail.includes('409') || detail.includes('400')) {
+      console.info('[translate-draft] a translation already exists', {
+        draftId,
+        targetLocale,
+        externalId: next.externalId,
+      });
+      return null;
+    }
+    throw error;
   });
+  if (!created) return;
 
   // The edge is what makes the pair a language GROUP rather than two unrelated
   // drafts: source = the translation, target = the original (topic-drafts.ts's

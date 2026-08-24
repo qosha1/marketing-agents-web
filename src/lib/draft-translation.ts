@@ -32,8 +32,32 @@ export const LANG_FIELD = 'lang';
 /** The draft's own headline, addressed like any other segment. */
 const NAME_SEGMENT = 'name';
 
-/** Top-level prose fields. `sources` is URLs and everything else is machine state. */
-const PROSE_FIELDS = ['blog', 'linkedin'] as const;
+/**
+ * Top-level prose fields. `sources` is URLs and everything else is machine state.
+ *
+ * `story_title` and `angle` were added after measuring the live zh translation
+ * (2026-08-24): both were being copied across in English, and `story_title` is
+ * the one that SHOWS — `draftTitle()` reads it first and only falls back to
+ * `name`, so the drawer's draft list labelled the Chinese piece with its English
+ * headline.
+ *
+ * `topic_title` is deliberately NOT here. It is provenance rather than content:
+ * it names the English topic record this draft was written for, and that record
+ * keeps its English name. Translating it would leave the draft claiming a topic
+ * that does not exist under that title. (It is also not a join key — matching
+ * runs on `topic_ref` and the `written_for` edge — so nothing breaks either way;
+ * this is a meaning decision, not a safety one.)
+ */
+const PROSE_FIELDS = ['blog', 'linkedin', 'story_title', 'angle'] as const;
+
+/**
+ * The display title, which duplicates `name` on every live draft.
+ *
+ * When the source has them equal, the translation takes ONE answer for both:
+ * two independent translations of one headline drift, and a record that
+ * disagrees with itself about its own title is worse than either version.
+ */
+const TITLE_FIELD = 'story_title';
 
 /** The one prose field nested inside the structured `seo` blob. */
 const SEO_PROSE_FIELD = 'meta_description';
@@ -57,6 +81,59 @@ const NOT_INHERITED = [
   'assignee_name',
 ];
 
+/**
+ * The tenant's `external_id` column width. A key longer than this is refused by
+ * the backend, so the key is built to fit rather than hoping.
+ */
+const EXTERNAL_ID_MAX = 255;
+
+/** Separates the source's key from the locale. Not a slug character, so it can
+ *  never be produced by `slugForHeadline` and confused with part of a headline. */
+const LOCALE_SEPARATOR = '@';
+
+/**
+ * The durable identity of a translation (bd startsim-wn2p.21).
+ *
+ * WHY THIS EXISTS. Every translation ever written by this app landed with
+ * `external_id = ''` — measured live, 2 of 77 drafts, and they are precisely the
+ * two translations. The partial unique constraint on the tenant is declared
+ * `condition=~Q(external_id="")`, so blank rows are EXEMPT from it: the database
+ * accepts unlimited translations of the same draft into the same language, and
+ * nothing can address one afterwards to edit or replace it. A record you cannot
+ * name is not stored perpetually; it is stored until something makes a rival.
+ *
+ * WHY IT KEYS OFF THE SOURCE. The obvious key — a slug of the translation's own
+ * headline — reproduces the bug exactly. `slugForHeadline` collapses a CJK or
+ * Arabic title to '' (see title-durability.ts, which measured it), and '' is the
+ * one value the constraint ignores. The source draft is Latin-slugged, so its
+ * key plus the target locale is stable, unique, and never blank.
+ *
+ * WHAT THIS BUYS. Two attempts at the same (source, locale) now produce the SAME
+ * key, so the second is refused by the database rather than quietly creating a
+ * competing translation. `translatableTargets()` hiding a button stops a careful
+ * human; this stops a retried approval, a double-click, and a direct API call —
+ * which matters because wn2p.10 turns that button into an automatic trigger.
+ */
+export function translationExternalId(source: EntityRecord, targetLocale: string): string {
+  const locale = targetLocale.trim();
+  // A blank locale would produce a key that collides across languages, which is
+  // worse than no key at all — so it is refused rather than defaulted.
+  if (!locale) {
+    throw new Error('translationExternalId: a target locale is required');
+  }
+  // The source's own key when it has one, else its id. Both live translations
+  // have a blank external_id themselves, so the fallback is a real case, not a
+  // defensive flourish.
+  const base = String(source.externalId ?? '').trim() || String(source.id);
+  const suffix = `${LOCALE_SEPARATOR}${locale}`;
+  const room = EXTERNAL_ID_MAX - suffix.length;
+  // Keep the TAIL of an over-long base: a slug's distinguishing part is at the
+  // end (…-for-entrants), so trimming the head keeps two similar sources apart
+  // where trimming the tail would silently merge them.
+  const head = base.length > room ? base.slice(base.length - room) : base;
+  return `${head}${suffix}`;
+}
+
 export interface DraftSegment {
   id: string;
   text: string;
@@ -65,6 +142,13 @@ export interface DraftSegment {
 export interface TranslatedDraft {
   name: string;
   data: Record<string, unknown>;
+  /**
+   * The durable key. Part of the payload rather than something the route
+   * computes on the side, because a translation written WITHOUT one is the
+   * defect this whole module exists to close — making it a field of the return
+   * type means a caller cannot forget it.
+   */
+  externalId: string;
 }
 
 /** snake_case -> camelCase, matching the tenant client's key transform. */
@@ -135,8 +219,16 @@ export function applyDraftTranslations(
     delete data[toCamelKey(key)];
   }
 
+  // The source's own title, before anything is written, so the "were they equal"
+  // question is asked of the SOURCE rather than of a half-updated copy.
+  const sourceTitle = proseOf(read(source, TITLE_FIELD));
+  const titleMirrorsName = sourceTitle !== '' && sourceTitle === proseOf(draft.name);
+
   for (const field of PROSE_FIELDS) {
-    const translated = translations.get(field);
+    const translated =
+      field === TITLE_FIELD && titleMirrorsName
+        ? translations.get(NAME_SEGMENT) ?? translations.get(field)
+        : translations.get(field);
     if (translated === undefined) continue;
     // Write to whichever spelling the source used, so the blob keeps one key.
     if (Object.prototype.hasOwnProperty.call(source, toCamelKey(field))) {
@@ -164,6 +256,7 @@ export function applyDraftTranslations(
   return {
     name: translations.get(NAME_SEGMENT) ?? draft.name,
     data,
+    externalId: translationExternalId(draft, targetLocale),
   };
 }
 
