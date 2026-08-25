@@ -77,6 +77,7 @@ import {
 import { readData, typeRoute } from '@/lib/board';
 import { declaredLangChoices, translatableTargets } from '@/lib/draft-translation';
 import { getRegisteredToken } from '@/infrastructure/auth';
+import { formatBearer } from '@/lib/bearer';
 import { CONTENT_TYPE_KEY, contentBoardHref, contentCategoryLabel } from '@/lib/content';
 import { draftStatusLabel } from '@/lib/draft-status';
 import {
@@ -259,13 +260,17 @@ function LanguageSwitcher({ draft }: { draft: EntityRecord }) {
   async function translateTo(target: string) {
     setTranslating(target);
     try {
+      // AWAITED. getRegisteredToken() is async, and interpolating it directly
+      // sent `Bearer [object Promise]` — Django rejected it and the detached job
+      // died on its first tenant call, while this button still reported success
+      // because the 202 comes back before the job runs.
       const res = await fetch('/actions/translate-draft', {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
           // The handler forwards THIS bearer to the tenant API, so the
           // translation is written with the clicker's own rights.
-          authorization: `Bearer ${getRegisteredToken() ?? ''}`,
+          authorization: formatBearer(await getRegisteredToken()),
         },
         body: JSON.stringify({ draftId: draft.id, targetLocale: target }),
       });
