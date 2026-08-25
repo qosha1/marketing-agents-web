@@ -109,3 +109,39 @@ describe('translationExternalId', () => {
     expect(() => translationExternalId(draft(), '   ')).toThrow();
   });
 });
+
+describe('translationExternalId reads the wire shape too', () => {
+  // MEASURED: the first live translation created after this feature shipped got
+  // `a7e009c3-...@zh` — the source's UUID — not the slug the docstring promises.
+  // The route fetches the draft with a raw JSON.parse over the tenant response,
+  // so the object carries `external_id`, and only the shared browser client
+  // camelCases it to `externalId`. Reading one spelling meant the fallback ran
+  // 100% of the time: a valid key, but never the intended one.
+  it('accepts the snake_case external_id the tenant actually sends', () => {
+    const wire = {
+      id: 'a7e009c3-b963-4229-bfb8-8709861acbb0',
+      external_id: 'uae-digital-licensing-tools-are-reshaping-market-entry',
+      name: 'UAE digital licensing tools',
+      data: {},
+    } as unknown as EntityRecord;
+    expect(translationExternalId(wire, 'zh')).toBe(
+      'uae-digital-licensing-tools-are-reshaping-market-entry@zh',
+    );
+  });
+
+  it('prefers the camelCase spelling when both are present', () => {
+    const both = {
+      id: 'x',
+      externalId: 'camel',
+      external_id: 'snake',
+      name: 'n',
+      data: {},
+    } as unknown as EntityRecord;
+    expect(translationExternalId(both, 'zh')).toBe('camel@zh');
+  });
+
+  it('still falls back to the id when neither spelling carries a value', () => {
+    const neither = { id: 'only-an-id', name: 'n', data: {} } as unknown as EntityRecord;
+    expect(translationExternalId(neither, 'zh')).toBe('only-an-id@zh');
+  });
+});

@@ -121,10 +121,16 @@ export function translationExternalId(source: EntityRecord, targetLocale: string
   if (!locale) {
     throw new Error('translationExternalId: a target locale is required');
   }
-  // The source's own key when it has one, else its id. Both live translations
-  // have a blank external_id themselves, so the fallback is a real case, not a
-  // defensive flourish.
-  const base = String(source.externalId ?? '').trim() || String(source.id);
+  // BOTH SPELLINGS. The shared browser client camelCases responses, but the
+  // translate route reads the draft with a raw JSON.parse, so it holds the wire
+  // shape — `external_id`. Reading only the camel form made the id fallback run
+  // 100% of the time in production: still a valid, unique, stable key, but never
+  // the readable one this function promises.
+  const record = source as unknown as Record<string, unknown>;
+  const declared = String(record.externalId ?? record.external_id ?? '').trim();
+  // Falling back to the id is a real case, not a defensive flourish: both live
+  // translations carry a blank external_id themselves.
+  const base = declared || String(source.id);
   const suffix = `${LOCALE_SEPARATOR}${locale}`;
   const room = EXTERNAL_ID_MAX - suffix.length;
   // Keep the TAIL of an over-long base: a slug's distinguishing part is at the
