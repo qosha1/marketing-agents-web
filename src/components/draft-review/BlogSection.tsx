@@ -19,6 +19,7 @@ import * as React from 'react';
 import { Columns2, Eye, Pencil, Loader2, Check, AlertCircle } from 'lucide-react';
 
 import { cn } from '@startsimpli/ui/utils';
+import { wordCount } from '@startsimpli/ui';
 import { MarkdownRenderer } from '@startsimpli/ui/blog';
 
 export type BlogViewMode = 'read' | 'edit' | 'split';
@@ -62,9 +63,13 @@ const HIGHLIGHT_NAME = 'draft-issue';
  */
 const HIGHLIGHT_STYLE = `::highlight(${HIGHLIGHT_NAME}){background-color:#fde68a;color:#78350f;}`;
 
+/**
+ * The SHARED counter (bd startsim-wn2p.28). This was a local `split(/\s+/)`,
+ * which reported an 855-character Chinese blog as 16 words while the validation
+ * rail on the same screen reported 524.
+ */
 function countWords(s: string): number {
-  const t = s.trim();
-  return t ? t.split(/\s+/).length : 0;
+  return wordCount(s);
 }
 
 /**
