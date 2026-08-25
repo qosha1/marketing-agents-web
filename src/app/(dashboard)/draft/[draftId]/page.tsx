@@ -77,6 +77,7 @@ import {
 import { readData, typeRoute } from '@/lib/board';
 import { declaredLangChoices, translatableTargets } from '@/lib/draft-translation';
 import { getRegisteredToken } from '@/infrastructure/auth';
+import { wordCount } from '@startsimpli/ui';
 import { formatBearer } from '@/lib/bearer';
 import { CONTENT_TYPE_KEY, contentBoardHref, contentCategoryLabel } from '@/lib/content';
 import { draftStatusLabel } from '@/lib/draft-status';
@@ -203,10 +204,16 @@ function readSourceMeta(data: EntityRecord['data'] | undefined): SourceMetaEntry
     : [];
 }
 
-/** Small word count for the channel-tab badges. */
+/**
+ * Small word count for the channel-tab badges — the SHARED counter, not a local
+ * one (bd startsim-wn2p.28).
+ *
+ * This was its own `split(/\s+/)`, so on the Chinese drafts the tab read
+ * "Brief 16w" while the validation rail beside it read 524 words. Whitespace
+ * counting sees only the Latin fragments embedded in Chinese prose.
+ */
 function words(s: string): number {
-  const t = s.trim();
-  return t ? t.split(/\s+/).length : 0;
+  return wordCount(s);
 }
 
 /** Stable "nothing to highlight" identity — keeps the paint effect from churning. */
