@@ -25,6 +25,8 @@ import {
   type RecordField,
 } from '@startsimpli/ui';
 
+import { resolveReviewConfig } from '@startsimpli/ui/collection';
+
 import { AttributeField } from './attribute-field';
 import { readData, toCamelKey } from '@/lib/board';
 import { CONTENT_TYPE_KEY } from '@/lib/content';
@@ -32,6 +34,7 @@ import { memberDisplayName, memberSub, normalizeMembers } from '@/lib/roster';
 import { findTag, GOOD_EXAMPLE_LABEL } from '@/lib/tags';
 import {
   buildStoryFromTopic,
+  canGenerateDrafts,
   draftCandidateIndex,
   draftJudgeVerdict,
   draftStatus,
@@ -366,7 +369,7 @@ function DrawerInner({
         {mode === 'read' ? (
           <div className="flex-1 overflow-y-auto px-5 py-4">
             <RecordDetail fields={fields} showEmpty emptyMessage="No details captured for this item yet." />
-            {type.key === CONTENT_TYPE_KEY ? <TopicDrafts topic={record} /> : null}
+            {type.key === CONTENT_TYPE_KEY ? <TopicDrafts topic={record} type={type} /> : null}
             {record.externalId ? (
               <p className="pt-4 text-xs text-neutral-400">external_id: {record.externalId}</p>
             ) : null}
@@ -403,10 +406,14 @@ const GENERATE_WINDOW_MS = 90_000;
  * rendered for the content-spine (topic) type; every other type's drawer is
  * untouched.
  */
-export function TopicDrafts({ topic }: { topic: EntityRecord }) {
+export function TopicDrafts({ topic, type }: { topic: EntityRecord; type: EntityTypeDef }) {
   const qc = useQueryClient();
   const topicId = topic.id;
   const [generating, setGenerating] = useState(false);
+  // The SAME resolved review map ReviewDrawer/InlineReviewActions derive their
+  // Approve button from, so the gate and the Approve action cannot drift apart
+  // (bd startsim-0e9ue). No literal approve status is declared here.
+  const review = useMemo(() => resolveReviewConfig(type), [type]);
 
   const draftsQuery = useQuery({
     queryKey: ['topic-drafts', topicId],
@@ -415,6 +422,10 @@ export function TopicDrafts({ topic }: { topic: EntityRecord }) {
     refetchInterval: generating ? GENERATE_POLL_MS : false,
   });
   const drafts = draftsQuery.data ?? [];
+  // Unapproved -> refused with a rendered reason; drafts already written ->
+  // refused and hidden, so a second run can't add a 4th candidate over a set
+  // someone has already reviewed (bd startsim-c8izw).
+  const gate = canGenerateDrafts(topic, review, drafts.length);
 
   // Stop the generating state once new drafts land, or after a hard time cap so a
   // silent writer failure doesn't spin forever.
@@ -430,6 +441,7 @@ export function TopicDrafts({ topic }: { topic: EntityRecord }) {
   }, [generating, drafts.length]);
 
   async function generate() {
+    if (!gate.allowed) return;
     baselineRef.current = drafts.length;
     setGenerating(true);
     try {
@@ -459,9 +471,13 @@ export function TopicDrafts({ topic }: { topic: EntityRecord }) {
           >
             Refresh
           </button>
-          <Button onClick={generate} disabled={generating} className="text-xs">
-            {generating ? 'Generating… (~1 min)' : 'Generate drafts'}
-          </Button>
+          {gate.allowed ? (
+            <Button onClick={generate} disabled={generating} className="text-xs">
+              {generating ? 'Generating… (~1 min)' : 'Generate drafts'}
+            </Button>
+          ) : gate.reason === 'not_approved' ? (
+            <span className="text-xs text-neutral-500">{gate.message}</span>
+          ) : null}
         </div>
       </div>
 
