@@ -17,6 +17,7 @@
  * titles. The matching itself is a pure function so it unit-tests without a
  * backend; `fetchTopicDrafts` just gathers the record sets and hands them to it.
  */
+import type { ResolvedReview } from '@startsimpli/ui/collection';
 import {
   listAllEntities,
   listRelationships,
@@ -173,6 +174,79 @@ export function buildStoryFromTopic(topic: EntityRecord): DraftStory {
     topic_ref: String(topic.id),
     topic_title: title,
   };
+}
+
+// ---- the "Generate drafts" gate (bd startsim-c8izw / startsim-0e9ue) ----
+//
+// A customer generated drafts from a topic nobody had approved, live, on
+// 2026-08-25 — and the control stayed live afterwards, so the writer could be
+// fired a second time over an already-reviewed candidate set.
+//
+// This does NOT define "approved". It consumes the review map the shared
+// resolveReviewConfig already produced for this type — the very same object
+// ReviewDrawer/InlineReviewActions derive their Approve button from — so the
+// gate and the Approve action can never drift apart. (For the topic pipeline
+// suggested → ready → written / rejected that derives approve = 'ready'. The
+// literal `approveStatus: 'acceptable'` in page.tsx is the news_item config
+// and is not in play here.)
+//
+// `status`, not `team_verdict`, is the signal: status is the pipeline gate the
+// writer keys off, and team_verdict is what the re-rank agent turns INTO
+// status. OR-ing the verdict in would loosen the gate; AND-ing it would block
+// agent-approved topics.
+
+/** The slice of a resolved review map the gate needs — structurally a ResolvedReview. */
+export type TopicReview = Pick<ResolvedReview, 'statusName' | 'transitions'>;
+
+/**
+ * Whether the writer may be fired for a topic, and when not, WHY. A
+ * discriminated result rather than a boolean because the drawer has to render
+ * the reason: a disabled control with no explanation is the same confusion in
+ * a different shape, and a boolean cannot carry one.
+ */
+export type GenerateDraftsGate =
+  | { allowed: true }
+  | { allowed: false; reason: 'not_approved'; message: string }
+  | { allowed: false; reason: 'drafts_exist'; message: string };
+
+/**
+ * Pure gate for "Generate drafts". Refused when the topic's drafts already
+ * exist (hide the control — a second run would silently add a fourth candidate
+ * over a set someone has already reviewed) and, failing that, when the topic
+ * has not reached its type's approve status.
+ *
+ * Drafts-exist is checked FIRST so a topic that is both unapproved and already
+ * written — the live Aug-25 case — reports the reason worth acting on rather
+ * than inviting an approval that would change nothing.
+ *
+ * A type with no derivable approve status (`transitions.approve` null) is
+ * refused, not allowed. Comparing coerced values would make ''===''  read as
+ * approved and hand back exactly the ungated button this replaces.
+ */
+export function canGenerateDrafts(
+  topic: EntityRecord,
+  review: TopicReview,
+  draftCount: number,
+): GenerateDraftsGate {
+  if (draftCount > 0) {
+    return {
+      allowed: false,
+      reason: 'drafts_exist',
+      message: 'Drafts have already been written for this topic.',
+    };
+  }
+  const approveStatus = review.transitions.approve;
+  const status = readData(topic.data, review.statusName);
+  const approved =
+    approveStatus != null && approveStatus !== '' && String(status ?? '') === String(approveStatus);
+  if (!approved) {
+    return {
+      allowed: false,
+      reason: 'not_approved',
+      message: 'Approve this topic to generate drafts.',
+    };
+  }
+  return { allowed: true };
 }
 
 export async function listAllRelationships(maxPages = 20): Promise<RelationshipRecord[]> {

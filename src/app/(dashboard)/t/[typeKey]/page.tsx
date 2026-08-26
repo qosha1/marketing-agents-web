@@ -397,7 +397,7 @@ export default function TypeRecordsPage() {
           renderExtra={(r) => (
             <>
               <GoodExampleToggle record={r} />
-              <TopicDrafts topic={r} />
+              <TopicDrafts topic={r} type={type} />
             </>
           )}
         />
