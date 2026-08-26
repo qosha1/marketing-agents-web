@@ -425,6 +425,14 @@ export function TopicDrafts({ topic, type }: { topic: EntityRecord; type: Entity
   // Unapproved -> refused with a rendered reason; drafts already written ->
   // refused and hidden, so a second run can't add a 4th candidate over a set
   // someone has already reviewed (bd startsim-c8izw).
+  //
+  // The gate is only MEANINGFUL once the draft count is known: until the query
+  // resolves, drafts.length is 0, which is indistinguishable from "no drafts"
+  // and would show an enabled button on a topic that already has three. That
+  // window is not small — fetchTopicDrafts pages every relationship plus every
+  // draft record. An errored query never learns the count at all, so it stays
+  // withheld rather than guessing.
+  const draftCountKnown = !draftsQuery.isLoading && !draftsQuery.isError;
   const gate = canGenerateDrafts(topic, review, drafts.length);
 
   // Stop the generating state once new drafts land, or after a hard time cap so a
@@ -441,7 +449,7 @@ export function TopicDrafts({ topic, type }: { topic: EntityRecord; type: Entity
   }, [generating, drafts.length]);
 
   async function generate() {
-    if (!gate.allowed) return;
+    if (!draftCountKnown || !gate.allowed) return;
     baselineRef.current = drafts.length;
     setGenerating(true);
     try {
@@ -471,7 +479,7 @@ export function TopicDrafts({ topic, type }: { topic: EntityRecord; type: Entity
           >
             Refresh
           </button>
-          {gate.allowed ? (
+          {!draftCountKnown ? null : gate.allowed ? (
             <Button onClick={generate} disabled={generating} className="text-xs">
               {generating ? 'Generating… (~1 min)' : 'Generate drafts'}
             </Button>
