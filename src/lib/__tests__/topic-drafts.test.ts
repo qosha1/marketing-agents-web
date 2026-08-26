@@ -11,6 +11,8 @@ import {
   matchDraftTranslations,
   originalOfTranslation,
   draftLanguageGroup,
+  canGenerateDrafts,
+  type GenerateDraftsGate,
   WRITTEN_FOR,
   TRANSLATION_OF,
 } from '../topic-drafts';
@@ -243,5 +245,80 @@ describe('matchDraftTranslations / originalOfTranslation / draftLanguageGroup', 
   });
   it('draftLanguageGroup: empty relationships -> every draft is its own group', () => {
     expect(draftLanguageGroup(en, [], [en, ar, unrelated]).map((d) => d.id)).toEqual([1]);
+  });
+});
+
+// ---- the "Generate drafts" gate (bd startsim-c8izw / startsim-0e9ue) ----
+//
+// A customer generated drafts from a topic nobody had approved, live, on
+// 2026-08-25 — and the button stayed live afterwards, so it could be fired
+// again over an already-reviewed candidate set.
+//
+// "Approved" is NOT re-defined here. The topic ReviewDrawer is mounted with no
+// `config` (page.tsx: NEWS_REVIEW_CONFIG's approveStatus: 'acceptable' is the
+// news_item gate, not the topic one), so a topic's approve status is DERIVED
+// from its status enum by the shared resolveReviewConfig — for
+// suggested → ready → written / rejected that derives approve = 'ready'. The
+// gate takes that already-resolved review as its input, so the Approve button
+// and this gate can never disagree.
+//
+// The gate is a pure predicate, so "no POST fires" is expressed as allowed:
+// false — the drawer wiring that honours it is the GREEN half.
+const TOPIC_REVIEW = {
+  statusName: 'status',
+  transitions: { approve: 'ready', reject: 'rejected' },
+};
+
+/** Narrow a gate result to its refusal branch (and fail loudly if it allowed). */
+function refusal(res: GenerateDraftsGate) {
+  if (res.allowed) throw new Error('expected the gate to refuse, but it allowed');
+  return res;
+}
+
+describe('canGenerateDrafts', () => {
+  it('refuses a topic nobody has approved yet — the Aug-25 hole', () => {
+    const res = canGenerateDrafts(topic(100, { status: 'suggested' }), TOPIC_REVIEW, 0);
+    expect(res.allowed).toBe(false);
+    expect(refusal(res).reason).toBe('not_approved');
+    // The refusal carries its own reason so the drawer renders an explanation,
+    // not a mystery-disabled control.
+    expect(refusal(res).message).toMatch(/approve/i);
+  });
+
+  it('refuses a rejected topic, and one with no status at all', () => {
+    expect(refusal(canGenerateDrafts(topic(101, { status: 'rejected' }), TOPIC_REVIEW, 0)).reason)
+      .toBe('not_approved');
+    expect(refusal(canGenerateDrafts(topic(102, {}), TOPIC_REVIEW, 0)).reason).toBe('not_approved');
+  });
+
+  it('allows an approved topic that has no drafts yet', () => {
+    expect(canGenerateDrafts(topic(103, { status: 'ready' }), TOPIC_REVIEW, 0)).toEqual({
+      allowed: true,
+    });
+  });
+
+  it('refuses an approved topic whose drafts already exist — no silent 4th candidate', () => {
+    const res = canGenerateDrafts(topic(104, { status: 'ready' }), TOPIC_REVIEW, 3);
+    expect(res.allowed).toBe(false);
+    expect(refusal(res).reason).toBe('drafts_exist');
+  });
+
+  it('reports drafts_exist, not not_approved, when a topic is BOTH unapproved and already written', () => {
+    // Jurga's actual topic. Both refusals are true; "Approve this topic to
+    // generate drafts" sitting above a list of three drafts is the same
+    // confusion in a new shape, so the already-written reason wins and the
+    // control is hidden outright.
+    const res = canGenerateDrafts(topic(105, { status: 'suggested' }), TOPIC_REVIEW, 3);
+    expect(refusal(res).reason).toBe('drafts_exist');
+  });
+
+  it('refuses rather than failing open when no approve status can be derived', () => {
+    // A type declaring no usable status pipeline resolves approve: null. A
+    // coerced '' === '' comparison would call that approved and hand back
+    // exactly today's ungated button, so the null case is refused explicitly.
+    const noPipeline = { statusName: 'status', transitions: { approve: null, reject: null } };
+    expect(refusal(canGenerateDrafts(topic(106, {}), noPipeline, 0)).reason).toBe('not_approved');
+    expect(refusal(canGenerateDrafts(topic(107, { status: 'ready' }), noPipeline, 0)).reason)
+      .toBe('not_approved');
   });
 });
