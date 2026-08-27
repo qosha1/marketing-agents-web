@@ -179,7 +179,7 @@ export default function TypeRecordsPage() {
   // Everything the BACKEND can narrow, in the verified `attr.<name>__<op>` shape.
   const serverFilters = useMemo<EntityFilters>(
     () => ({
-      ...(titleAttr ? searchFilters(search, titleAttr) : {}),
+      ...searchFilters(search, titleAttr),
       ...(isDraft && !gateBroken ? draftsViewFilters(viewParams, approvedIds) : {}),
     }),
     [titleAttr, search, isDraft, gateBroken, viewParams, approvedIds],
@@ -516,21 +516,22 @@ export default function TypeRecordsPage() {
         // The shared debounced search box (@startsimpli/ui UnifiedTable toolbar).
         // It is a CONTROLLED input and filters nothing itself, so the narrowing
         // is ours to do — and it is done server-side, in `serverFilters`.
-        search={
-          titleAttr
-            ? {
-                enabled: true,
-                placeholder: `Search ${type.label.toLowerCase()} titles…`,
-                value: search,
-                onChange: (v) => {
-                  setSearch(v);
-                  setPage(1);
-                },
-                debounceMs: 300,
-                preserveFocus: true,
-              }
-            : undefined
-        }
+        search={{
+          // Offered for EVERY type: a type with a declared title attribute is
+          // searched on that attribute, and one without (like `draft`) falls back
+          // to the backend's full-text `?search=` over the entity name. Gating the
+          // box on a declared attribute left /t/draft — the surface startsim-f4lac
+          // names — with no search at all.
+          enabled: true,
+          placeholder: `Search ${type.label.toLowerCase()} titles…`,
+          value: search,
+          onChange: (v) => {
+            setSearch(v);
+            setPage(1);
+          },
+          debounceMs: 300,
+          preserveFocus: true,
+        }}
         filters={filtersConfig}
         columnVisibility={columnVisibility}
         sorting={{
