@@ -57,6 +57,7 @@ import {
   APPROVED_TOPIC_STATUSES,
 } from '@/lib/drafts-view';
 import { CONTENT_CATEGORIES, CONTENT_TYPE_ATTR, CONTENT_TYPE_KEY, contentCategoryLabel } from '@/lib/content';
+import { NEWS_ACTIONS_HEADER, TOPIC_ACTIONS_HEADER } from '@/lib/review-vocabulary';
 
 const PAGE_SIZE = 20; // matches DRF PageNumberPagination's default page size
 const DRAFT_TYPE_KEY = 'draft';
@@ -250,6 +251,9 @@ export default function TypeRecordsPage() {
         subtitleAttrs: ['subtitle', 'angle'],
         hide: ['title', 'subtitle', 'angle'],
         // Per-row fast triage: ✕ reject · ✓ good · ✎ edit, act-in-place (no drawer).
+        // The header names WHAT is being decided — approving a topic and
+        // approving a draft are different kinds of decision (startsim-b313v).
+        actionsHeader: TOPIC_ACTIONS_HEADER,
         actionsCell: type
           ? (row) => (
               <div className="flex items-center justify-end gap-2">
@@ -269,6 +273,7 @@ export default function TypeRecordsPage() {
       // News curation: ✓ Accept (→acceptable) · ✕ Reject in place — the gate that
       // decides which articles are eligible for topic generation.
       return buildRecordColumns(attrs, {
+        actionsHeader: NEWS_ACTIONS_HEADER,
         actionsCell: type
           ? (row) => (
               <div className="flex items-center justify-end gap-2">

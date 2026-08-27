@@ -51,6 +51,7 @@ import {
 import { cn } from '@startsimpli/ui/utils';
 import type { EntityRecord } from '@/lib/foundry-api';
 import type { IssueStop } from '@/lib/issue-jump';
+import { DRAFT_DECISIONS, draftDecisionLabel } from '@/lib/review-vocabulary';
 import { CollapsiblePanel, FLATTEN_CARD } from './CollapsiblePanel';
 
 type Call = NonNullable<ReviewScore['verdict']>;
@@ -151,11 +152,18 @@ function aiScoreFor(dim: ReviewDimension, scores?: Record<string, unknown>): num
   return undefined;
 }
 
-const CALLS: { id: Call; label: string; sel: string }[] = [
-  { id: 'approve', label: 'Approve', sel: 'border-emerald-500 bg-emerald-50 text-emerald-700' },
-  { id: 'revise', label: 'Request changes', sel: 'border-amber-500 bg-amber-50 text-amber-700' },
-  { id: 'reject', label: 'Reject', sel: 'border-red-500 bg-red-50 text-red-700' },
-];
+// Labels come from lib/review-vocabulary.ts, which is where the topic/draft
+// distinction is stated and tested (bd startsim-b313v) — only the tone is local.
+const CALL_TONE: Record<string, string> = {
+  approve: 'border-emerald-500 bg-emerald-50 text-emerald-700',
+  revise: 'border-amber-500 bg-amber-50 text-amber-700',
+  reject: 'border-red-500 bg-red-50 text-red-700',
+};
+const CALLS: { id: Call; label: string; sel: string }[] = DRAFT_DECISIONS.map((d) => ({
+  id: d.id as Call,
+  label: d.label,
+  sel: CALL_TONE[d.id],
+}));
 
 export function QualityRail(props: QualityRailProps) {
   const {
@@ -242,15 +250,17 @@ export function QualityRail(props: QualityRailProps) {
       {/* THE one decision */}
       <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
         <div className="px-4 pt-3">
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-primary">Decision</div>
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-primary">
+            Decision on this draft
+          </div>
           <div className="mt-0.5 text-xs text-muted-foreground">
             {call === 'approve'
-              ? 'You approve — the button below becomes Accept.'
+              ? 'This piece is publishable — the button below becomes Approve draft.'
               : call === 'revise'
                 ? 'You want changes — describe them, then send to the AI.'
                 : call === 'reject'
                   ? 'You reject this candidate — sibling drafts stay.'
-                  : 'Read it, then decide — this drives the button below.'}
+                  : 'Read it, then decide whether this PIECE is publishable — the topic was approved separately.'}
           </div>
         </div>
         <div className="flex gap-2 px-4 pb-3 pt-2.5">
@@ -589,9 +599,9 @@ function ShortcutLegend() {
       </>,
       'Next / previous issue',
     ],
-    [<Key key="a">a</Key>, 'Approve'],
-    [<Key key="r">r</Key>, 'Request changes'],
-    [<Key key="x">x</Key>, 'Reject'],
+    [<Key key="a">a</Key>, draftDecisionLabel('approve')],
+    [<Key key="r">r</Key>, draftDecisionLabel('revise')],
+    [<Key key="x">x</Key>, draftDecisionLabel('reject')],
     [
       <>
         <Key>[</Key> / <Key>]</Key>

@@ -70,6 +70,12 @@ export interface RecordColumnsOptions {
   hide?: string[];
   /** Render a trailing, fixed-width, right-aligned "Actions" column (fast triage). */
   actionsCell?: (row: EntityRecord) => ReactNode;
+  /**
+   * Header over the inline decision cluster. Blank by default, which is what it
+   * used to always be — a row of tick/cross buttons under no heading, saying
+   * nothing about WHAT it decides (bd startsim-b313v).
+   */
+  actionsHeader?: string;
 }
 
 /** The stacked "Title over subtitle" cell for the primary column. */
@@ -165,7 +171,7 @@ export function buildRecordColumns(
   if (opts.actionsCell) {
     columns.push({
       id: '__actions',
-      header: '',
+      header: opts.actionsHeader ?? '',
       width: 132,
       sortable: false,
       cell: opts.actionsCell,
