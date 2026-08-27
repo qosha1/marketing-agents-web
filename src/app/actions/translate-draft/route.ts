@@ -30,8 +30,6 @@
  * /api/* request to Django before Next sees it, so a handler under /api is
  * unreachable in prod (see generate-drafts/route.ts for the same note).
  */
-import { request as httpRequest } from 'node:http';
-
 import { NextResponse } from 'next/server';
 
 import { createAnthropicProvider, createOpenAIProvider, type ILLMProvider } from '@startsimpli/llm';
@@ -46,95 +44,14 @@ import {
   draftSegments,
   existingTranslationQuery,
 } from '@/lib/draft-translation';
-import { tenantApiBase, tenantHost, translationEnv } from '@/lib/translation-config';
+import { tenantFetch } from '@/lib/tenant-fetch';
+import { translationEnv } from '@/lib/translation-config';
 import type { EntityRecord } from '@/lib/foundry-api';
 
 export const dynamic = 'force-dynamic';
 
 const DRAFT_TYPE = 'draft';
 const TRANSLATION_OF = 'translation_of';
-
-/**
- * Server-side base for the tenant backend. NOT `DJANGO_API_URL` — that is set
- * only locally, so in a deployed tenant this handler would have pointed at
- * itself. See `translation-config.ts`; the deployed answer is the Cloud Map
- * FQDN nginx already proxies to.
- */
-function tenantBase(): string {
-  return tenantApiBase(process.env as Record<string, string | undefined>);
-}
-
-/**
- * Direct server-side tenant call, over node:http rather than fetch.
- *
- * THE HOST HEADER IS THE WHOLE REASON. Django validates ALLOWED_HOSTS against
- * it, and a tenant allows only its public domain. nginx preserves it
- * (`proxy_set_header Host $http_host`); a call that skips nginx does not, so
- * Django answers 400 "Invalid HTTP_HOST header" before any view runs. Node's
- * fetch cannot help here — undici derives Host from the URL and silently drops
- * an explicit one — so this uses node:http, which honours it.
- *
- * Going direct rather than hairpinning through the public ALB also keeps the
- * draft's text inside the VPC, which is the posture a translation product
- * should hold even on the `open` route.
- *
- * Deliberately NOT the shared browser client: that one reads a token from the
- * browser and redirects to signin on 401, neither of which means anything here.
- * The trailing slash is mandatory — without it DRF 301s a POST into a GET and
- * the write silently vanishes (the recorded tenant-nginx failure).
- */
-async function tenantFetch<T>(
-  path: string,
-  auth: string,
-  init: { method: string; body?: unknown },
-): Promise<T> {
-  // The trailing slash goes on the PATH, never after a query string. DRF 301s a
-  // slash-less POST into a GET (the recorded tenant-nginx failure), and naively
-  // appending to the whole thing would have made `page_size=1` into `page_size=1/`.
-  const [rawPath, rawQuery] = path.split('?');
-  const url = new URL(`${tenantBase()}/api/v1/${rawPath}/${rawQuery ? `?${rawQuery}` : ''}`);
-  const payload = init.body === undefined ? undefined : JSON.stringify(init.body);
-  const host = tenantHost(process.env as Record<string, string | undefined>);
-
-  return new Promise<T>((resolve, reject) => {
-    const req = httpRequest(
-      {
-        protocol: url.protocol,
-        hostname: url.hostname,
-        port: url.port,
-        path: `${url.pathname}${url.search}`,
-        method: init.method,
-        headers: {
-          authorization: auth,
-          'content-type': 'application/json',
-          ...(host ? { host } : {}),
-          ...(payload ? { 'content-length': Buffer.byteLength(payload) } : {}),
-        },
-      },
-      (res) => {
-        const chunks: Buffer[] = [];
-        res.on('data', (c: Buffer) => chunks.push(c));
-        res.on('end', () => {
-          const status = res.statusCode ?? 0;
-          if (status < 200 || status >= 300) {
-            // Status, method and path only. The body can quote the draft, and a
-            // translation product that logs client material has no wall to sell.
-            reject(new Error(`tenant ${init.method} ${path} responded ${status}`));
-            return;
-          }
-          try {
-            resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')) as T);
-          } catch {
-            reject(new Error(`tenant ${init.method} ${path} returned unparseable JSON`));
-          }
-        });
-      },
-    );
-    req.on('error', () => reject(new Error(`tenant ${init.method} ${path} is unreachable`)));
-    if (payload) req.write(payload);
-    req.end();
-  });
-}
 
 /** The configured provider, by name. Returns null when the deployment has no key. */
 function providerFor(name: string): ILLMProvider | null {
