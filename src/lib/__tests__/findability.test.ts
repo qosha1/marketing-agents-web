@@ -24,6 +24,7 @@ import {
   readmitActed,
   noteActed,
   searchFilters,
+  pickTitleAttr,
   inFilters,
   MAX_IN_VALUES,
   applyAttrFilters,
@@ -170,5 +171,38 @@ describe('the comma-list cap the backend actually enforces', () => {
     expect(MAX_IN_VALUES).toBe(200);
     const tooMany = Array.from({ length: MAX_IN_VALUES + 1 }, (_, i) => String(i));
     expect(inFilters('topic_ref', tooMany)).toBeNull();
+  });
+});
+
+describe('WHICH attribute the title search actually searches', () => {
+  const typeWith = (...names: string[]) => ({
+    id: 't',
+    key: 'k',
+    label: 'K',
+    attributes: names.map((n) => ({
+      id: n,
+      name: n,
+      dataType: 'text' as const,
+      required: false,
+      config: {},
+    })),
+  });
+
+  it('searches `title` on the topic spine', () => {
+    expect(pickTitleAttr(typeWith('title', 'angle', 'status'))).toBe('title');
+  });
+
+  it('searches `story_title` on drafts — which do NOT declare `title`', () => {
+    // THE BUG THIS PINS. f4lac asks for title search on DRAFTS ("if you
+    // remember the title you can add a word in it"), and a draft's title is
+    // `story_title` (title-durability.ts: "a draft's title is `name` first and
+    // `data.story_title` second"). Gating the box on a declared `title` put the
+    // search on Topics and left it off the one surface the bead named.
+    expect(pickTitleAttr(typeWith('story_title', 'blog', 'status'))).toBe('story_title');
+  });
+
+  it('offers no search box for a type with no titley attribute at all', () => {
+    expect(pickTitleAttr(typeWith('domain', 'tier'))).toBeNull();
+    expect(pickTitleAttr(null)).toBeNull();
   });
 });

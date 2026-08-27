@@ -40,6 +40,7 @@ import {
   holdActedPositions,
   noteActed,
   pickStatusAttr,
+  pickTitleAttr,
   readData,
   readmitActed,
   searchFilters,
@@ -54,6 +55,7 @@ import {
   draftsViewChips,
   draftsViewFilters,
   topicGateActive,
+  TOPIC_GATE_PARAM,
   APPROVED_TOPIC_STATUSES,
 } from '@/lib/drafts-view';
 import { CONTENT_CATEGORIES, CONTENT_TYPE_ATTR, CONTENT_TYPE_KEY, contentCategoryLabel } from '@/lib/content';
@@ -152,21 +154,29 @@ export default function TypeRecordsPage() {
   );
   // Never fetch drafts under a gate whose id list has not arrived: that renders
   // an empty table (the `__none__` sentinel) and then flips.
-  const gateReady = !gateOn || approvedTopicsQuery.isSuccess;
-  const viewChips = useMemo(() => (isDraft ? draftsViewChips(viewParams) : []), [isDraft, viewParams]);
-
-  const titleAttr = useMemo(
-    () => ((type?.attributes ?? []).some((a) => a.name === 'title') ? 'title' : null),
-    [type?.attributes],
+  //
+  // A FAILED topic fetch is not the same as a pending one. Waiting on
+  // `isSuccess` alone would leave /t/draft loading forever under a chip
+  // claiming "Topic approved" — an invisible filter that has stopped being a
+  // filter, which is the exact failure this bead is about. So an error drops
+  // the gate (never showing FEWER drafts than exist) and says so out loud.
+  const gateBroken = gateOn && approvedTopicsQuery.isError;
+  const gateReady = !gateOn || approvedTopicsQuery.isSuccess || approvedTopicsQuery.isError;
+  const viewChips = useMemo(
+    () => (isDraft ? draftsViewChips(viewParams).filter((c) => !(gateBroken && c.param === TOPIC_GATE_PARAM)) : []),
+    [isDraft, viewParams, gateBroken],
   );
+
+  // `title` on the topic spine, `story_title` on drafts — see pickTitleAttr.
+  const titleAttr = useMemo(() => pickTitleAttr(type), [type]);
 
   // Everything the BACKEND can narrow, in the verified `attr.<name>__<op>` shape.
   const serverFilters = useMemo<EntityFilters>(
     () => ({
       ...(titleAttr ? searchFilters(search, titleAttr) : {}),
-      ...(isDraft ? draftsViewFilters(viewParams, approvedIds) : {}),
+      ...(isDraft && !gateBroken ? draftsViewFilters(viewParams, approvedIds) : {}),
     }),
-    [titleAttr, search, isDraft, viewParams, approvedIds],
+    [titleAttr, search, isDraft, gateBroken, viewParams, approvedIds],
   );
   const anyServerFilter = Object.keys(serverFilters).length > 0;
 
@@ -221,7 +231,9 @@ export default function TypeRecordsPage() {
     if (isDraft) {
       // Cap-exceeded fallback: more approved topics than the backend's comma
       // list takes, so the gate is applied here rather than silently dropped.
-      if (draftsGateNeedsClient(viewParams, approvedIds)) rows = applyTopicGate(rows, approvedIds);
+      if (!gateBroken && draftsGateNeedsClient(viewParams, approvedIds)) {
+        rows = applyTopicGate(rows, approvedIds);
+      }
       // Recency is client-side because the backend has no filter on created_at
       // (see draftsViewFilters). The topic gate above bounds what reaches it.
       rows = applyDraftsRecency(rows, viewParams);
@@ -231,7 +243,7 @@ export default function TypeRecordsPage() {
         ([k, v]) => String(readData(r.data, k) ?? '') === v,
       ),
     );
-  }, [allQuery.data, filterState, isDraft, viewParams, approvedIds]);
+  }, [allQuery.data, filterState, isDraft, gateBroken, viewParams, approvedIds]);
 
   // The content spine (topic) shows a stacked Title + subtitle (the split-off
   // `subtitle`, else `angle`) as its primary column and folds the now-redundant
@@ -469,6 +481,11 @@ export default function TypeRecordsPage() {
               </button>
             ))
           )}
+          {gateBroken ? (
+            <span className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800">
+              Could not check which topics are approved — showing drafts unfiltered
+            </span>
+          ) : null}
           {viewChips.length > 0 ? (
             <button
               type="button"

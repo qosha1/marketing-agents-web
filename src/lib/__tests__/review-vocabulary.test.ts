@@ -64,9 +64,17 @@ describe('the SHARED half, which this fork cannot fix yet', () => {
    *
    * `it.fails` on purpose: this passes while the shared label is still generic,
    * and turns RED the moment the published package can name its subject — which
-   * is the signal to supply OGMC's topic copy here.
+   * is the signal to supply OGMC's topic copy here (bd startsim-b313v.1).
+   *
+   * SCOPED TO approve + reject, which are the two b313v.1 will override. Asking
+   * this of every decision would include `needs_work`, whose label stays "Needs
+   * work" — so the marker would never fire, and a dead man's switch with the
+   * batteries out is worse than none.
    */
   it.fails('will name its subject once @startsimpli/ui takes label overrides', () => {
-    expect(topicLabels().every((l) => /topic/i.test(l))).toBe(true);
+    const byKey = Object.fromEntries(
+      reviewDecisions(resolveReviewConfig(TOPIC_TYPE)).map((d) => [d.key, d.label]),
+    );
+    expect(/topic/i.test(byKey.approve) && /topic/i.test(byKey.reject)).toBe(true);
   });
 });
