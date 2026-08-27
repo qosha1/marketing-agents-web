@@ -59,7 +59,7 @@ import {
   APPROVED_TOPIC_STATUSES,
 } from '@/lib/drafts-view';
 import { CONTENT_CATEGORIES, CONTENT_TYPE_ATTR, CONTENT_TYPE_KEY, contentCategoryLabel } from '@/lib/content';
-import { NEWS_ACTIONS_HEADER, TOPIC_ACTIONS_HEADER } from '@/lib/review-vocabulary';
+import { NEWS_ACTIONS_HEADER, TOPIC_ACTIONS_HEADER, TOPIC_DECISION_LABELS } from '@/lib/review-vocabulary';
 
 const PAGE_SIZE = 20; // matches DRF PageNumberPagination's default page size
 const DRAFT_TYPE_KEY = 'draft';
@@ -69,6 +69,12 @@ const STATUS_ATTR = 'status';
 // News curation: a binary Accept (→acceptable, the gate before topic generation)
 // / Reject (→rejected) — no verdict, no "needs work". Only `acceptable` news is
 // fed to the n8n topic strategist.
+// The TOPIC decision names its subject on the buttons, so "Approve" in a topic
+// drawer cannot be read as approving its drafts (bd startsim-b313v). Labels only
+// — the statuses this type transitions between are derived from its own enum and
+// stay startsim-wn2p.3's to rename.
+const TOPIC_REVIEW_CONFIG: ReviewConfig = { decisionLabels: TOPIC_DECISION_LABELS };
+
 const NEWS_REVIEW_CONFIG: ReviewConfig = {
   approveStatus: 'acceptable',
   rejectStatus: 'rejected',
@@ -274,6 +280,7 @@ export default function TypeRecordsPage() {
                   client={collectionClient}
                   type={type}
                   record={row}
+                  config={TOPIC_REVIEW_CONFIG}
                   onSaved={() => remember(row)}
                 />
               </div>
@@ -583,6 +590,9 @@ export default function TypeRecordsPage() {
         <ReviewDrawer
           client={collectionClient}
           type={type}
+          // Same vocabulary as the inline cluster on this table: the drawer's
+          // Approve is the same decision, so it must not say a different word.
+          config={isContent ? TOPIC_REVIEW_CONFIG : undefined}
           records={showRejected ? [...visibleRecords, ...rejectedRecords] : visibleRecords}
           record={selected}
           onClose={() => setSelected(null)}

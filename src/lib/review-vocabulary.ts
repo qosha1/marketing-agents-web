@@ -51,3 +51,23 @@ export function draftDecisionLabel(id: string): string {
  */
 export const TOPIC_ACTIONS_HEADER = 'Topic decision';
 export const NEWS_ACTIONS_HEADER = 'Curation';
+
+/**
+ * The TOPIC decision's button labels, supplied to `resolveReviewConfig` via
+ * `ReviewConfig.decisionLabels` (@startsimpli/ui 0.4.110, bd startsim-b313v).
+ *
+ * Until that field existed the three labels were string literals inside the
+ * shared `reviewDecisions()`, so every tenant's every reviewable type said
+ * "Approve" — which is the collision this module opens by describing. The header
+ * above was the half we could fix locally; this is the half that needed the
+ * package.
+ *
+ * `needs_work` is deliberately absent: it keeps the generic wording. It is
+ * already unambiguous, it has no counterpart on the draft side to be confused
+ * with, and naming a subject on it would be noise. An unnamed decision keeps its
+ * default rather than going blank — the shared resolver guarantees that.
+ */
+export const TOPIC_DECISION_LABELS: Record<string, string> = {
+  approve: 'Approve topic',
+  reject: 'Reject topic',
+};

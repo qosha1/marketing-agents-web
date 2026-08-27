@@ -8,7 +8,7 @@
 import { describe, it, expect } from 'vitest';
 import { resolveReviewConfig, reviewDecisions } from '@startsimpli/ui/collection';
 
-import { DRAFT_DECISIONS, draftDecisionLabel, TOPIC_ACTIONS_HEADER } from '@/lib/review-vocabulary';
+import { DRAFT_DECISIONS, draftDecisionLabel, TOPIC_ACTIONS_HEADER, TOPIC_DECISION_LABELS } from '@/lib/review-vocabulary';
 import type { EntityTypeDef } from '@/lib/foundry-api';
 
 /** The live topic schema's status enum, as `resolveReviewConfig` reads it. */
@@ -76,5 +76,28 @@ describe('the SHARED half, which this fork cannot fix yet', () => {
       reviewDecisions(resolveReviewConfig(TOPIC_TYPE)).map((d) => [d.key, d.label]),
     );
     expect(/topic/i.test(byKey.approve) && /topic/i.test(byKey.reject)).toBe(true);
+  });
+});
+
+describe('TOPIC_DECISION_LABELS', () => {
+  it('names the subject on both terminal decisions, matching the draft side', () => {
+    // The draft side says "Approve draft" / "Reject draft". If these two ever
+    // drift apart, the collision this module exists to fix is half-fixed, which
+    // reads as an inconsistency rather than a distinction.
+    expect(TOPIC_DECISION_LABELS.approve).toBe('Approve topic');
+    expect(TOPIC_DECISION_LABELS.reject).toBe('Reject topic');
+  });
+
+  it('leaves needs_work generic so the resolver keeps its default', () => {
+    expect(TOPIC_DECISION_LABELS.needs_work).toBeUndefined();
+  });
+
+  it('renames ACTIONS, never statuses — wn2p.3 owns the status vocabulary', () => {
+    // A status name in a button label is how the two vocabularies drift, and
+    // OGMC still owes us the combined column list.
+    const words = Object.values(TOPIC_DECISION_LABELS).join(' ').toLowerCase();
+    for (const status of ['suggested', 'ready', 'written', 'rejected']) {
+      expect(words).not.toContain(status);
+    }
   });
 });
