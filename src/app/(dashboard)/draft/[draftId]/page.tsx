@@ -115,6 +115,7 @@ import {
   type ChannelId,
   type StopKey,
 } from '@/lib/issue-jump';
+import { draftDecisionLabel } from '@/lib/review-vocabulary';
 import { shouldIgnoreShortcut } from '@/lib/keyboard';
 import {
   getEntity,
@@ -1216,7 +1217,7 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
     : !call
       ? 'Choose a decision'
       : call === 'approve'
-        ? acceptGateHint ?? 'Ready to accept'
+        ? acceptGateHint ?? 'Ready to approve this draft'
         : call === 'revise'
           ? feedbackReady
             ? 'Feedback ready'
@@ -1234,11 +1235,13 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
     if (call === 'revise') return requestRevision();
     if (call === 'reject') return reject();
   };
+  // The bar says exactly what the rail says. It used to say "Accept" while the
+  // rail said "Approve" — one screen, two words, for one decision (b313v).
   const primaryLabel =
     call === 'approve'
       ? accepting
-        ? 'Accepting…'
-        : 'Accept'
+        ? 'Approving…'
+        : draftDecisionLabel('approve')
       : call === 'revise'
         ? revising
           ? 'Revising… (~1 min)'
@@ -1246,7 +1249,7 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
         : call === 'reject'
           ? rejecting
             ? 'Rejecting…'
-            : 'Reject'
+            : draftDecisionLabel('reject')
           : 'Choose a decision';
   const primaryDisabled =
     !call ||
@@ -1278,7 +1281,7 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
           variant={primaryVariant}
           onClick={primaryAction}
           disabled={primaryDisabled}
-          title={call ? undefined : 'Pick Approve, Request changes, or Reject in the rail'}
+          title={call ? undefined : 'Pick a decision on this draft in the rail'}
         >
           {primaryLabel}
         </Button>

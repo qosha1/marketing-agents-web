@@ -10,14 +10,21 @@
  * The board is still one click away via the "Board view" toggle. Reusable across
  * tenants/types — nothing here is OGMC-specific beyond the shared content taxonomy.
  */
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useSearchParams, useRouter, usePathname } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, ChevronDown } from 'lucide-react';
+import { Plus, ChevronDown, X } from 'lucide-react';
 import { UnifiedTable, Button, BaseDialog, type FiltersConfig } from '@startsimpli/ui';
 import { ReviewDrawer, InlineReviewActions, type ReviewConfig } from '@startsimpli/ui/collection';
-import { listTypes, listEntities, listAllEntities, collectionClient, type EntityRecord } from '@/lib/foundry-api';
+import {
+  listTypes,
+  listEntities,
+  listAllEntities,
+  collectionClient,
+  type EntityFilters,
+  type EntityRecord,
+} from '@/lib/foundry-api';
 import { RecordForm } from '@/components/record-form';
 import { buildRecordColumns } from '@/components/record-columns';
 import {
@@ -26,8 +33,33 @@ import {
   RecordEditFields,
   TopicDrafts,
 } from '@/components/entity-detail-drawer';
-import { choicesOf, pickStatusAttr, readData } from '@/lib/board';
+import {
+  actedOn,
+  choicesOf,
+  defaultTopicOrder,
+  holdActedPositions,
+  noteActed,
+  pickStatusAttr,
+  pickTitleAttr,
+  readData,
+  readmitActed,
+  searchFilters,
+  type ActedRow,
+} from '@/lib/board';
+import {
+  applyDraftsRecency,
+  applyTopicGate,
+  approvedTopicIds,
+  clearedDraftsView,
+  draftsGateNeedsClient,
+  draftsViewChips,
+  draftsViewFilters,
+  topicGateActive,
+  TOPIC_GATE_PARAM,
+  APPROVED_TOPIC_STATUSES,
+} from '@/lib/drafts-view';
 import { CONTENT_CATEGORIES, CONTENT_TYPE_ATTR, CONTENT_TYPE_KEY, contentCategoryLabel } from '@/lib/content';
+import { NEWS_ACTIONS_HEADER, TOPIC_ACTIONS_HEADER } from '@/lib/review-vocabulary';
 
 const PAGE_SIZE = 20; // matches DRF PageNumberPagination's default page size
 const DRAFT_TYPE_KEY = 'draft';
@@ -44,16 +76,6 @@ const NEWS_REVIEW_CONFIG: ReviewConfig = {
   omitNeedsWork: true,
 };
 
-// Default topic order: by pipeline stage, newest first WITHIN a stage — so new
-// topics sit on top and rejected (and written) sink to the bottom, out of the way.
-const STATUS_RANK: Record<string, number> = { suggested: 0, ready: 1, written: 2, rejected: 3 };
-function defaultTopicOrder(a: EntityRecord, b: EntityRecord): number {
-  const ra = STATUS_RANK[String(readData(a.data, STATUS_ATTR) ?? '')] ?? 0;
-  const rb = STATUS_RANK[String(readData(b.data, STATUS_ATTR) ?? '')] ?? 0;
-  if (ra !== rb) return ra - rb;
-  return String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? ''));
-}
-
 export default function TypeRecordsPage() {
   const params = useParams<{ typeKey: string }>();
   const typeKey = params.typeKey;
@@ -64,6 +86,18 @@ export default function TypeRecordsPage() {
   const [page, setPage] = useState(1);
   const [addOpen, setAddOpen] = useState(false);
   const [selected, setSelected] = useState<EntityRecord | null>(null);
+  // Rows this session has acted on, and where they sat when it happened. The
+  // reviewer's own click must never move the row out from under them
+  // (startsim-azyag); the logic lives in lib/board.ts.
+  const [acted, setActed] = useState<ActedRow[]>([]);
+  // Title search. Deliberately LOCAL rather than in the URL: the facet value is
+  // folded into the table's remount `key` below, and doing that to a
+  // per-keystroke value would tear focus out of the box mid-word.
+  const [search, setSearch] = useState('');
+  // The ids in the order they are currently rendered. A ref, not state: it is
+  // read only at the moment of a click, and making it state would re-render the
+  // table on every reorder it is trying to describe.
+  const rowOrderRef = useRef<EntityRecord['id'][]>([]);
 
   const typesQuery = useQuery({
     queryKey: ['schema-types'],
@@ -93,6 +127,58 @@ export default function TypeRecordsPage() {
   const anyFilter = Object.keys(filterState).length > 0;
   const isContent = typeKey === CONTENT_TYPE_KEY;
   const isNews = typeKey === NEWS_TYPE_KEY;
+  const isDraft = typeKey === DRAFT_TYPE_KEY;
+
+  // ---- the Drafts default view (startsim-f4lac) ----
+  // ONE home for drafts, narrowed by a default the user can SEE and CLEAR — not
+  // a second tab per state. lib/drafts-view.ts carries the whole rationale.
+  const viewParams = useMemo(
+    () => Object.fromEntries(searchParams.entries()) as Record<string, string>,
+    [searchParams],
+  );
+  const gateOn = isDraft && topicGateActive(viewParams);
+  // The approved topics, narrowed SERVER-side; the ids are then re-derived from
+  // the rows that came back rather than trusted from the envelope — the same
+  // defence topic-gate.ts documents.
+  const approvedTopicsQuery = useQuery({
+    queryKey: ['entities', CONTENT_TYPE_KEY, 'approved'],
+    queryFn: () =>
+      listAllEntities(CONTENT_TYPE_KEY, {
+        filters: { 'attr.status__in': APPROVED_TOPIC_STATUSES.join(',') },
+      }),
+    enabled: gateOn,
+  });
+  const approvedIds = useMemo(
+    () => approvedTopicIds(approvedTopicsQuery.data ?? []),
+    [approvedTopicsQuery.data],
+  );
+  // Never fetch drafts under a gate whose id list has not arrived: that renders
+  // an empty table (the `__none__` sentinel) and then flips.
+  //
+  // A FAILED topic fetch is not the same as a pending one. Waiting on
+  // `isSuccess` alone would leave /t/draft loading forever under a chip
+  // claiming "Topic approved" — an invisible filter that has stopped being a
+  // filter, which is the exact failure this bead is about. So an error drops
+  // the gate (never showing FEWER drafts than exist) and says so out loud.
+  const gateBroken = gateOn && approvedTopicsQuery.isError;
+  const gateReady = !gateOn || approvedTopicsQuery.isSuccess || approvedTopicsQuery.isError;
+  const viewChips = useMemo(
+    () => (isDraft ? draftsViewChips(viewParams).filter((c) => !(gateBroken && c.param === TOPIC_GATE_PARAM)) : []),
+    [isDraft, viewParams, gateBroken],
+  );
+
+  // `title` on the topic spine, `story_title` on drafts — see pickTitleAttr.
+  const titleAttr = useMemo(() => pickTitleAttr(type), [type]);
+
+  // Everything the BACKEND can narrow, in the verified `attr.<name>__<op>` shape.
+  const serverFilters = useMemo<EntityFilters>(
+    () => ({
+      ...(titleAttr ? searchFilters(search, titleAttr) : {}),
+      ...(isDraft && !gateBroken ? draftsViewFilters(viewParams, approvedIds) : {}),
+    }),
+    [titleAttr, search, isDraft, gateBroken, viewParams, approvedIds],
+  );
+  const anyServerFilter = Object.keys(serverFilters).length > 0;
 
   // Sort is client-side over the full (bounded) set — the backend can't ORDER BY a
   // data-blob field. So a sort, like a filter, switches the table to fetch-all.
@@ -100,7 +186,20 @@ export default function TypeRecordsPage() {
   const anySort = !!sort.sortBy;
   // The content spine ALWAYS fetches the full (bounded) set so its default order —
   // active on top, rejected sunk to the bottom — spans every row, not just a page.
-  const needAll = anyFilter || anySort || isContent;
+  // A server-narrowed view ALWAYS fetches its whole (bounded) result set, so the
+  // "N total" below counts what MATCHED rather than the length of a page.
+  // Mixing a server filter with server pagination is what makes a filtered
+  // table's total lie.
+  const needAll = anyFilter || anySort || isContent || isDraft || anyServerFilter;
+
+  /** Set (or clear) view params — the default-filter chips' ✕ and "Show everything". */
+  function applyViewParams(next: Record<string, string>) {
+    const sp = new URLSearchParams(searchParams.toString());
+    for (const [k, v] of Object.entries(next)) sp.set(k, v);
+    setPage(1);
+    const qs = sp.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname);
+  }
 
   function applyFilters(next: Record<string, unknown>) {
     const sp = new URLSearchParams(searchParams.toString());
@@ -122,19 +221,29 @@ export default function TypeRecordsPage() {
     enabled: !!type && !needAll,
   });
   const allQuery = useQuery({
-    queryKey: ['entities', typeKey, 'all'],
-    queryFn: () => listAllEntities(typeKey),
-    enabled: !!type && needAll,
+    queryKey: ['entities', typeKey, 'all', serverFilters],
+    queryFn: () => listAllEntities(typeKey, { filters: serverFilters }),
+    enabled: !!type && needAll && gateReady,
   });
 
   const filteredRecords = useMemo(() => {
-    const rows = allQuery.data ?? [];
+    let rows = allQuery.data ?? [];
+    if (isDraft) {
+      // Cap-exceeded fallback: more approved topics than the backend's comma
+      // list takes, so the gate is applied here rather than silently dropped.
+      if (!gateBroken && draftsGateNeedsClient(viewParams, approvedIds)) {
+        rows = applyTopicGate(rows, approvedIds);
+      }
+      // Recency is client-side because the backend has no filter on created_at
+      // (see draftsViewFilters). The topic gate above bounds what reaches it.
+      rows = applyDraftsRecency(rows, viewParams);
+    }
     return rows.filter((r) =>
       Object.entries(filterState).every(
         ([k, v]) => String(readData(r.data, k) ?? '') === v,
       ),
     );
-  }, [allQuery.data, filterState]);
+  }, [allQuery.data, filterState, isDraft, gateBroken, viewParams, approvedIds]);
 
   // The content spine (topic) shows a stacked Title + subtitle (the split-off
   // `subtitle`, else `angle`) as its primary column and folds the now-redundant
@@ -142,14 +251,32 @@ export default function TypeRecordsPage() {
   const columns = useMemo(() => {
     const attrs = type?.attributes ?? [];
     const invalidate = () => void qc.invalidateQueries({ queryKey: ['entities', typeKey] });
+    // Remember WHICH row was acted on and WHERE it sat, so the refetch cannot
+    // move it. `onSaved` takes no arguments, so the row is closed over here.
+    const remember = (row: EntityRecord) => {
+      const index = Math.max(rowOrderRef.current.indexOf(row.id), 0);
+      setActed((prev) => noteActed(prev, { id: row.id, index, decision: 'decided' }));
+      invalidate();
+    };
     if (isContent) {
       return buildRecordColumns(attrs, {
         subtitleAttrs: ['subtitle', 'angle'],
         hide: ['title', 'subtitle', 'angle'],
         // Per-row fast triage: ✕ reject · ✓ good · ✎ edit, act-in-place (no drawer).
+        // The header names WHAT is being decided — approving a topic and
+        // approving a draft are different kinds of decision (startsim-b313v).
+        actionsHeader: TOPIC_ACTIONS_HEADER,
         actionsCell: type
           ? (row) => (
-              <InlineReviewActions client={collectionClient} type={type} record={row} onSaved={invalidate} />
+              <div className="flex items-center justify-end gap-2">
+                <JustActed acted={acted} id={row.id} />
+                <InlineReviewActions
+                  client={collectionClient}
+                  type={type}
+                  record={row}
+                  onSaved={() => remember(row)}
+                />
+              </div>
             )
           : undefined,
       });
@@ -158,21 +285,25 @@ export default function TypeRecordsPage() {
       // News curation: ✓ Accept (→acceptable) · ✕ Reject in place — the gate that
       // decides which articles are eligible for topic generation.
       return buildRecordColumns(attrs, {
+        actionsHeader: NEWS_ACTIONS_HEADER,
         actionsCell: type
           ? (row) => (
-              <InlineReviewActions
-                client={collectionClient}
-                type={type}
-                record={row}
-                config={NEWS_REVIEW_CONFIG}
-                onSaved={invalidate}
-              />
+              <div className="flex items-center justify-end gap-2">
+                <JustActed acted={acted} id={row.id} />
+                <InlineReviewActions
+                  client={collectionClient}
+                  type={type}
+                  record={row}
+                  config={NEWS_REVIEW_CONFIG}
+                  onSaved={() => remember(row)}
+                />
+              </div>
             )
           : undefined,
       });
     }
     return buildRecordColumns(attrs);
-  }, [type, isContent, isNews, typeKey, qc]);
+  }, [type, isContent, isNews, typeKey, qc, acted]);
 
   const hasStatusBoard = !!statusAttr;
 
@@ -254,11 +385,18 @@ export default function TypeRecordsPage() {
 
   const records = useMemo(() => {
     const base = needAll ? filteredRecords : (pagedQuery.data?.results ?? []);
+    const all = needAll ? (allQuery.data ?? base) : base;
+    // A row the reviewer just acted on is put back even when the active facet
+    // has stopped matching it — approving under State=suggested must not make
+    // the row VANISH, which reads as data loss rather than as a filter working.
+    const kept = readmitActed(all, base, acted);
     // Default topic order: active on top (newest first), rejected/written sunk to
-    // the bottom — so rejected topics stop reappearing. An explicit column sort wins.
-    if (isContent && !anySort) return [...base].sort(defaultTopicOrder);
-    return base;
-  }, [needAll, filteredRecords, pagedQuery.data, isContent, anySort]);
+    // the bottom — so rejected topics stop reappearing. An explicit column sort
+    // wins. Just-acted rows are then held at the position they were acted on, so
+    // the status re-rank never moves a row out from under the person who moved it.
+    if (isContent && !anySort) return holdActedPositions(kept, acted, defaultTopicOrder);
+    return kept;
+  }, [needAll, filteredRecords, allQuery.data, pagedQuery.data, isContent, anySort, acted]);
   const totalCount = needAll ? filteredRecords.length : (pagedQuery.data?.count ?? 0);
   const recordsLoading = needAll ? allQuery.isLoading : pagedQuery.isLoading;
   const activeKind = filterState[CONTENT_TYPE_ATTR];
@@ -273,10 +411,17 @@ export default function TypeRecordsPage() {
     const vis: EntityRecord[] = [];
     const rej: EntityRecord[] = [];
     for (const r of records) {
-      (String(readData(r.data, STATUS_ATTR) ?? '') === 'rejected' ? rej : vis).push(r);
+      const isRejected = String(readData(r.data, STATUS_ATTR) ?? '') === 'rejected';
+      // A row you JUST rejected stays in the list, marked — collapsing it away
+      // in the same breath is the disappearance this lane exists to stop.
+      (isRejected && !actedOn(acted, r.id) ? rej : vis).push(r);
     }
     return { visibleRecords: vis, rejectedRecords: rej };
-  }, [records, collapseRejected]);
+  }, [records, collapseRejected, acted]);
+
+  // Read at click time by `remember` above, so an action records the position the
+  // row actually held on screen.
+  rowOrderRef.current = visibleRecords.map((r) => r.id);
 
   if (typesQuery.isLoading) {
     return <p className="text-sm text-gray-500">Loading…</p>;
@@ -317,6 +462,42 @@ export default function TypeRecordsPage() {
         </div>
       </div>
 
+      {viewChips.length > 0 || isDraft ? (
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <span className="text-gray-500">Showing:</span>
+          {viewChips.length === 0 ? (
+            <span className="text-gray-500">everything in the pipeline</span>
+          ) : (
+            viewChips.map((c) => (
+              <button
+                key={c.param}
+                type="button"
+                onClick={() => applyViewParams({ [c.param]: c.value })}
+                className="inline-flex items-center gap-1 rounded-full border border-primary-200 bg-primary-50 px-2.5 py-1 text-xs font-medium text-primary-700 hover:bg-primary-100"
+                title={`Remove the "${c.label}" filter`}
+              >
+                {c.label}
+                <X className="h-3 w-3" />
+              </button>
+            ))
+          )}
+          {gateBroken ? (
+            <span className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800">
+              Could not check which topics are approved — showing drafts unfiltered
+            </span>
+          ) : null}
+          {viewChips.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => applyViewParams(clearedDraftsView())}
+              className="text-xs font-medium text-primary-700 underline underline-offset-2 hover:text-primary-800"
+            >
+              Show everything
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
       <UnifiedTable<EntityRecord>
         key={`records-${typeKey}-${JSON.stringify(filterState)}`}
         tableId={`records-${typeKey}`}
@@ -325,6 +506,24 @@ export default function TypeRecordsPage() {
         getRowId={(row) => String(row.id)}
         loading={recordsLoading}
         onRowClick={handleRowClick}
+        // The shared debounced search box (@startsimpli/ui UnifiedTable toolbar).
+        // It is a CONTROLLED input and filters nothing itself, so the narrowing
+        // is ours to do — and it is done server-side, in `serverFilters`.
+        search={
+          titleAttr
+            ? {
+                enabled: true,
+                placeholder: `Search ${type.label.toLowerCase()} titles…`,
+                value: search,
+                onChange: (v) => {
+                  setSearch(v);
+                  setPage(1);
+                },
+                debounceMs: 300,
+                preserveFocus: true,
+              }
+            : undefined
+        }
         filters={filtersConfig}
         columnVisibility={columnVisibility}
         sorting={{
@@ -389,6 +588,19 @@ export default function TypeRecordsPage() {
           onClose={() => setSelected(null)}
           onNavigate={setSelected}
           onSaved={() => {
+            // Same memory as the inline actions — a decision made in the drawer
+            // must not move the row either. `onSaved` takes no arguments, so the
+            // record comes from `selected`.
+            const row = selected;
+            if (row) {
+              setActed((prev) =>
+                noteActed(prev, {
+                  id: row.id,
+                  index: Math.max(rowOrderRef.current.indexOf(row.id), 0),
+                  decision: 'decided',
+                }),
+              );
+            }
             void qc.invalidateQueries({ queryKey: ['entities', typeKey] });
           }}
           renderEditFields={({ record: r, type: t, back, saved }) => (
@@ -420,5 +632,21 @@ export default function TypeRecordsPage() {
         />
       </BaseDialog>
     </div>
+  );
+}
+
+/**
+ * The "you just did this" marker (bd startsim-azyag).
+ *
+ * Holding the row in place answers "where did it go"; this answers "which one
+ * was it". Session-scoped, like the memory behind it — it marks what YOU just
+ * did, not what the row's status is (the State column already says that).
+ */
+function JustActed({ acted, id }: { acted: ActedRow[]; id: EntityRecord['id'] }) {
+  if (!actedOn(acted, id)) return null;
+  return (
+    <span className="whitespace-nowrap rounded-full bg-primary-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary-700">
+      just updated
+    </span>
   );
 }

@@ -506,3 +506,195 @@ export function facetFilters(
   }
   return out;
 }
+
+// ---- default table order for a status-carrying spine (bd startsim-azyag) ----
+// MOVED here verbatim from app/(dashboard)/t/[typeKey]/page.tsx: it was a pure
+// comparator trapped inside a client component, so nothing could test it. The
+// behaviour is unchanged by the move — the pin logic below is what changes it.
+
+const STATUS_RANK: Record<string, number> = { suggested: 0, ready: 1, written: 2, rejected: 3 };
+
+/**
+ * Default topic order: by pipeline stage, newest first WITHIN a stage — so new
+ * topics sit on top and rejected (and written) sink to the bottom, out of the way.
+ */
+export function defaultTopicOrder(a: EntityRecord, b: EntityRecord): number {
+  const ra = STATUS_RANK[String(readData(a.data, 'status') ?? '')] ?? 0;
+  const rb = STATUS_RANK[String(readData(b.data, 'status') ?? '')] ?? 0;
+  if (ra !== rb) return ra - rb;
+  return String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? ''));
+}
+
+// ---- "where did the thing I just did go?" (bd startsim-azyag) ----
+//
+// THE DEFECT, in the customer's words: "you go in, you approve the topic, and
+// then what you approved ends up down at the list, where you have to scroll to
+// find a checkmark." Approving a topic moves it `suggested` -> `ready`, and
+// BOTH of this module's list rules then act on the new value:
+//
+//   1. `defaultTopicOrder` ranks by status, so the row travels below every
+//      remaining suggested one — off-page on a 59-topic table;
+//   2. an active State=suggested facet stops matching it, so the row leaves
+//      the list altogether.
+//
+// A DebuggAI browser agent hit the same wall independently, spending its entire
+// 20-step budget hunting the row it had just acted on.
+//
+// THE FIX IS NOT A NEW PLACE TO LOOK. Quinn ruled that out on the call —
+// "moving it into different places makes it harder for people to find it
+// later." So the list REMEMBERS the rows this session acted on and holds each
+// one where it was: the reviewer's own action never moves anything under them.
+// Memory is per-session and deliberately not persisted — it answers "what did I
+// just do", not "what happened last week", and the facets answer the latter.
+
+/** A row the user has just acted on, and where it sat when they did. */
+export interface ActedRow {
+  id: EntityRecord['id'];
+  /** Position the row held in the visible list at the moment of the action. */
+  index: number;
+  /**
+   * What was decided.
+   *
+   * TODAY THIS IS ALWAYS 'decided' (bd startsim-b313v.1 tracks the rest). The
+   * shared `onSaved` callbacks report no arguments, so the fork cannot tell an
+   * approve from a reject without re-reading the row — and the PIN, not the
+   * word, is the fix this lane owes. The field is kept because the marker will
+   * want it as soon as the decision is knowable.
+   */
+  decision: string;
+}
+
+/**
+ * Record an action, keeping the position from the FIRST time this row was
+ * touched. Re-deciding must not move the row: a reviewer who approves and then
+ * changes their mind to reject is looking at the same place on the page, and
+ * re-pinning to the row's post-approval index would move it out from under them
+ * on the second click — the exact defect, reintroduced one action later.
+ */
+export function noteActed(acted: ActedRow[], row: ActedRow): ActedRow[] {
+  const prior = acted.find((a) => a.id === row.id);
+  const next = prior ? { ...row, index: prior.index } : row;
+  return [next, ...acted.filter((a) => a.id !== row.id)];
+}
+
+/** The remembered action for a record, or undefined. */
+export function actedOn(acted: ActedRow[], id: EntityRecord['id']): ActedRow | undefined {
+  return acted.find((a) => a.id === id);
+}
+
+/**
+ * Records the active facet dropped, put back because the user just acted on
+ * them. Without this, approving a topic while State=suggested is filtered makes
+ * the row VANISH — the strongest form of "where did it go", and the one that
+ * reads as data loss rather than as a filter working.
+ *
+ * Re-admitted rows are appended; {@link holdActedPositions} then puts them back
+ * at their remembered index, so this never changes the visible order by itself.
+ */
+export function readmitActed(
+  all: EntityRecord[],
+  kept: EntityRecord[],
+  acted: ActedRow[],
+): EntityRecord[] {
+  if (acted.length === 0) return kept;
+  const keptIds = new Set(kept.map((r) => r.id));
+  const extra = all.filter((r) => !keptIds.has(r.id) && actedOn(acted, r.id));
+  return extra.length === 0 ? kept : [...kept, ...extra];
+}
+
+/**
+ * Order by `compare`, then put every just-acted row back at the index it held
+ * when it was acted on. An empty memory is exactly `[...records].sort(compare)`,
+ * so a list nobody has touched behaves precisely as before.
+ *
+ * Pins are placed lowest-index first and clamped to the list length, so two
+ * pinned rows cannot claim the same slot and a pin from a longer list (the user
+ * cleared a filter since acting) lands at the end rather than out of bounds.
+ */
+export function holdActedPositions(
+  records: EntityRecord[],
+  acted: ActedRow[],
+  compare: (a: EntityRecord, b: EntityRecord) => number,
+): EntityRecord[] {
+  if (acted.length === 0) return [...records].sort(compare);
+  const pinned: { record: EntityRecord; index: number }[] = [];
+  const rest: EntityRecord[] = [];
+  for (const r of records) {
+    const hit = actedOn(acted, r.id);
+    if (hit) pinned.push({ record: r, index: hit.index });
+    else rest.push(r);
+  }
+  if (pinned.length === 0) return [...records].sort(compare);
+  const out = rest.sort(compare);
+  for (const p of pinned.sort((a, b) => a.index - b.index)) {
+    out.splice(Math.min(Math.max(p.index, 0), out.length), 0, p.record);
+  }
+  return out;
+}
+
+// ---- server-side narrowing for a record table (bd startsim-f4lac) ----
+// Rule 8: the tenant holds thousands of records, and filtering a page you have
+// already fetched is a search that silently only searches what you can see.
+// Both helpers emit the `attr.<name>__<op>` shape `EntityFilters` documents and
+// `entity-filters.test.ts` guards on the wire.
+
+/**
+ * Substring search over a declared text attribute.
+ *
+ * VERIFIED against the deployed tenant: `?type=topic&attr.title__icontains=qatar`
+ * -> count 4, `applied ['attr.title__icontains','type']`. A blank box is `{}`,
+ * never `attr.title__icontains=` — the backend reports an empty term as ignored,
+ * and "0 results" would then look like a working search over an empty corpus.
+ */
+export function searchFilters(term: string, attrName: string): Record<string, string> {
+  const t = term.trim();
+  return t ? { [`attr.${attrName}__icontains`]: t } : {};
+}
+
+/**
+ * Declared title-ish attributes, in preference order — WHICH attribute a title
+ * search actually searches.
+ *
+ * A NAME convention, and the distinction matters: `title` is the TOPIC spine's
+ * attribute, and `draft` does not declare it. A draft's title is `name` first
+ * and `data.story_title` second (see lib/title-durability.ts), so gating the
+ * search box on a declared `title` puts it on Topics and leaves it off Drafts —
+ * the one surface startsim-f4lac actually names.
+ *
+ * ONE LIMIT, worth stating: only DECLARED attributes are filterable server-side,
+ * and `name` is a column on core_entity, not an attribute. So a draft whose
+ * `story_title` is blank (the case `candidateTitle` covers by falling back to
+ * `name`) is not reachable by this search. Returning null — no box at all — is
+ * the honest answer for a type with no titley attribute; an empty search box
+ * that can never match is worse than none.
+ */
+const TITLE_ATTR_NAMES = ['title', 'story_title', 'headline'];
+
+/** The attribute a title search should target, or null to offer no search box. */
+export function pickTitleAttr(type: EntityTypeDef | undefined | null): string | null {
+  const attrs = type?.attributes ?? [];
+  for (const name of TITLE_ATTR_NAMES) {
+    if (attrs.some((a) => a.name === name)) return name;
+  }
+  return null;
+}
+
+/**
+ * Backend cap on a comma list — `MAX_ID_LIST` in tenant-starter
+ * `apps/api/filters.py`, which refuses a longer one with a 400 ("at most 200
+ * values") rather than truncating it.
+ */
+export const MAX_IN_VALUES = 200;
+
+/**
+ * `attr.<name>__in=a,b,c` — comma-separated, as `_coerce` splits it.
+ *
+ * `null` means "the server cannot narrow this", for an empty list or one past
+ * the cap. A caller MUST treat null as "narrow on the client and say so", never
+ * as "no filter": dropping a narrowing filter silently is how a cleanup loop was
+ * handed page 1 of the corpus and deleted nine production rows.
+ */
+export function inFilters(attrName: string, values: string[]): Record<string, string> | null {
+  if (values.length === 0 || values.length > MAX_IN_VALUES) return null;
+  return { [`attr.${attrName}__in`]: values.join(',') };
+}
