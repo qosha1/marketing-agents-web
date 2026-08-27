@@ -206,3 +206,36 @@ describe('WHICH attribute the title search actually searches', () => {
     expect(pickTitleAttr(null)).toBeNull();
   });
 });
+
+describe('a type that declares no title attribute is still searchable (bd startsim-f4lac)', () => {
+  // MEASURED against the live tenant 2026-08-27, which is what makes this a bug
+  // and not a design choice: `draft` declares FOURTEEN attributes and not one of
+  // them is titley —
+  //   content_type, candidate_index, blog, linkedin, seo, sources, judge_verdict,
+  //   auto_checks, chosen, sent_at, assignee_sub, assignee_name, lang, status
+  // so pickTitleAttr(draft) is null, and gating the box on it left /t/draft — the
+  // one surface f4lac names — with no search box at all. Confirmed in the browser
+  // after deploy: filter chips rendered, search box absent.
+  //
+  // A draft's title lives in the entity's `name` column, and the backend DOES
+  // search it: ?type=draft&search=qatar -> count 19 of 99,
+  // applied_filters ['search','type'].
+
+  it('falls back to the backend full-text search over the entity name', () => {
+    expect(searchFilters('qatar', null)).toEqual({ search: 'qatar' });
+  });
+
+  it('trims, and a blank term is no filter at all — never search=', () => {
+    // Same rule as the attribute path: the backend reports an empty term as
+    // ignored, and an ignored filter is a filter that silently did nothing.
+    expect(searchFilters('  gas  ', null)).toEqual({ search: 'gas' });
+    expect(searchFilters('   ', null)).toEqual({});
+    expect(searchFilters('', null)).toEqual({});
+  });
+
+  it('still prefers the declared attribute when there is one', () => {
+    // Topics declare `title`, and attr.title__icontains is narrower than a
+    // full-text sweep across every field — so the fallback must not take over.
+    expect(searchFilters('qatar', 'title')).toEqual({ 'attr.title__icontains': 'qatar' });
+  });
+});

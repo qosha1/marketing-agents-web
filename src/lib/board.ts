@@ -646,9 +646,22 @@ export function holdActedPositions(
  * never `attr.title__icontains=` — the backend reports an empty term as ignored,
  * and "0 results" would then look like a working search over an empty corpus.
  */
-export function searchFilters(term: string, attrName: string): Record<string, string> {
+export function searchFilters(term: string, attrName: string | null): Record<string, string> {
   const t = term.trim();
-  return t ? { [`attr.${attrName}__icontains`]: t } : {};
+  if (!t) return {};
+  // No declared title attribute -> the backend's full-text `?search=`, which
+  // covers the entity's `name` column. That is where a draft's title actually
+  // lives: `draft` declares fourteen attributes and not one is titley, so the
+  // attribute path has nothing to aim at and `attr.null__icontains` is what a
+  // naive interpolation would send — a key the backend now refuses with a 400.
+  // VERIFIED live 2026-08-27: ?type=draft&search=qatar -> count 19 of 99,
+  // applied ['search','type'].
+  //
+  // The declared attribute stays PREFERRED where one exists: on `topic`,
+  // attr.title__icontains searches the title, while ?search= sweeps every
+  // indexed field and would match a topic whose ANGLE mentions the term. Narrower
+  // is better when we can be narrow.
+  return attrName ? { [`attr.${attrName}__icontains`]: t } : { search: t };
 }
 
 /**
