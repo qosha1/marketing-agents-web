@@ -18,12 +18,15 @@
  * backend; `fetchTopicDrafts` just gathers the record sets and hands them to it.
  */
 import type { ResolvedReview } from '@startsimpli/ui/collection';
-import {
-  listAllEntities,
-  listRelationships,
-  type EntityRecord,
-  type RelationshipRecord,
-} from '@/lib/foundry-api';
+// TYPE-ONLY, and the three functions below load the client lazily instead.
+// `@/lib/foundry-api` reaches `@/lib/api`, which calls `createStartSimpliApi()`
+// at MODULE SCOPE, which constructs a `FeatureFlagsApi` out of a `'use client'`
+// module. A static value import therefore poisons this file for any server
+// graph — and `canGenerateDrafts` now has a server caller (`topic-gate.ts`,
+// bd startsim-ozpjw.2). Without this, `next build` dies with "Attempted to call
+// FeatureFlagsApi() from the server"; nothing in tsc or vitest sees it, because
+// both happily evaluate the same module in one runtime.
+import type { EntityRecord, RelationshipRecord } from '@/lib/foundry-api';
 import { readData, relatedByEdge } from '@/lib/board';
 
 /** The edge key linking a draft (source) to the topic it was written for (target). */
@@ -250,6 +253,7 @@ export function canGenerateDrafts(
 }
 
 export async function listAllRelationships(maxPages = 20): Promise<RelationshipRecord[]> {
+  const { listRelationships } = await import('@/lib/foundry-api');
   const all: RelationshipRecord[] = [];
   for (let page = 1; page <= maxPages; page++) {
     const res = await listRelationships(page);
@@ -269,6 +273,7 @@ export async function listAllRelationships(maxPages = 20): Promise<RelationshipR
 export async function fetchTopicDrafts(
   topic: Pick<EntityRecord, 'id' | 'externalId'>,
 ): Promise<EntityRecord[]> {
+  const { listAllEntities } = await import('@/lib/foundry-api');
   const [relationships, drafts] = await Promise.all([
     listAllRelationships(),
     listAllEntities(DRAFT_TYPE),
@@ -340,6 +345,7 @@ export function draftLanguageGroup(
  * throws) so "no translations yet" is a clean, expected empty state.
  */
 export async function fetchDraftTranslations(draft: EntityRecord): Promise<EntityRecord[]> {
+  const { listAllEntities } = await import('@/lib/foundry-api');
   const [relationships, drafts] = await Promise.all([
     listAllRelationships(),
     listAllEntities(DRAFT_TYPE),

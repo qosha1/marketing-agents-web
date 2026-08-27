@@ -28,6 +28,8 @@ import {
 import { resolveReviewConfig } from '@startsimpli/ui/collection';
 
 import { AttributeField } from './attribute-field';
+import { getRegisteredToken } from '@/infrastructure/auth';
+import { formatBearer } from '@/lib/bearer';
 import { readData, toCamelKey } from '@/lib/board';
 import { CONTENT_TYPE_KEY } from '@/lib/content';
 import { memberDisplayName, memberSub, normalizeMembers } from '@/lib/roster';
@@ -455,10 +457,27 @@ export function TopicDrafts({ topic, type }: { topic: EntityRecord; type: Entity
     try {
       const res = await fetch('/actions/generate-drafts', {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: {
+          'content-type': 'application/json',
+          // The handler re-checks the gate against the tenant with THIS bearer
+          // (bd startsim-ozpjw.2) — it can only start a writer the person who
+          // clicked could have started. AWAITED: interpolating the promise sent
+          // `Bearer [object Promise]` in the translate action and Django
+          // rejected it (see draft/[draftId]/page.tsx).
+          authorization: formatBearer(await getRegisteredToken()),
+        },
         body: JSON.stringify({ story: buildStoryFromTopic(topic) }),
       });
-      if (!res.ok) throw new Error(`Writer request failed (${res.status}).`);
+      if (!res.ok) {
+        // The server's refusal carries its own reason ('Approve this topic to
+        // generate drafts'). Showing a bare status code instead would make a
+        // correct, explainable refusal look like a broken button.
+        const detail = await res
+          .json()
+          .then((b: { error?: string }) => b?.error)
+          .catch(() => undefined);
+        throw new Error(detail || `Writer request failed (${res.status}).`);
+      }
       notify.success('Generating drafts… new candidates appear in ~1 min.');
     } catch (err) {
       setGenerating(false);
