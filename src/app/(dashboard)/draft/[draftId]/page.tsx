@@ -62,6 +62,7 @@ import {
   Button,
   notify,
   runContentChecks,
+  resolveCheckPolicy,
   overallStatus,
   type JudgeVerdict,
   type ValidationOverride,
@@ -98,6 +99,7 @@ import { SourcesTool } from '@/components/draft-review/SourcesTool';
 import {
   approvedSourceBasis,
   approvedSourceCheckConfig,
+  OGMC_CHECK_POLICY,
   approvedSourceGap,
   approvedSourceStandIn,
   contentFieldsFromSections,
@@ -541,15 +543,27 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
     };
     const computed = runContentChecks(
       contentFieldsFromSections([...sections, sourcesSection], draft.name),
-      // NOT `{ approvedHosts: [] }` — the checker runs the check whenever the key
-      // is present, so an empty array would fail every host. Absent = skipped.
-      approvedSourceCheckConfig(basis),
+      {
+        // Standing policy first: which checks run and their bands, resolved for
+        // THIS draft's content_type and language (bd startsim-wncr6). A weekly
+        // brief and a long-form evergreen guide are no longer judged against one
+        // band, and a Chinese draft is no longer judged against English ones.
+        ...resolveCheckPolicy(OGMC_CHECK_POLICY, {
+          contentType,
+          language: draftLang(draft),
+        }),
+        // Then per-draft evidence, which is NOT policy — the tenant's live source
+        // records, resolved per render. Spread last so it wins.
+        // NOT `{ approvedHosts: [] }` — the checker runs the check whenever the key
+        // is present, so an empty array would fail every host. Absent = skipped.
+        ...approvedSourceCheckConfig(basis),
+      },
     );
     // Hold the approved-sources slot with a `warn` stand-in when it was skipped,
     // so a check that could not run never reads as a check that passed.
     const standIn = approvedSourceStandIn(basis);
     return standIn ? [...computed, standIn] : computed;
-  }, [sections, sourceItems, draft.name, basis]);
+  }, [sections, sourceItems, draft, draft.name, contentType, basis]);
 
   // --- Jump-to-issue (bd 768w.16.15.3) ---
   // Every place a non-passing check can send the reviewer, rebuilt with the checks.
