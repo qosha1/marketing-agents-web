@@ -14,7 +14,7 @@
  * {@link approvedSourceBasis} (bd startsim-4ipm).
  */
 import type { DocSection } from '@startsimpli/ui/document-editor';
-import type { ContentCheck, ContentFields } from '@startsimpli/ui';
+import type { CheckPolicySet, ContentCheck, ContentFields } from '@startsimpli/ui';
 
 /** The current value of a section by key, or undefined when absent. */
 function sectionValue(sections: DocSection[], key: string): unknown {
@@ -302,3 +302,36 @@ function normalizeHost(value: unknown): string {
   host = host.replace(/^www\./, '');
   return host;
 }
+
+/**
+ * OGMC's standing check policy: which checks run and against what thresholds,
+ * per `content_type` and per language (bd startsim-wncr6).
+ *
+ * THIS IS THE ONLY PLACE OGMC'S EDITORIAL NUMBERS BELONG. `@startsimpli/ui`
+ * ships to every tenant and deliberately contains no content-type value, locale
+ * or band of ours — `resolveCheckPolicy` is the mechanism, this is the policy.
+ *
+ * WHY `weekly_brief` RESTATES THE PACKAGE DEFAULT rather than inheriting it:
+ * 400–500 is OGMC's number, given by the team on 2026-08-25 ("we defined with
+ * four to five hundred words"). That it currently coincides with
+ * `DEFAULTS.blogWords` is a coincidence, and one a future package release is
+ * free to break. Declaring it here means our band changes when OGMC changes it,
+ * not when the package does.
+ *
+ * WHY THE OTHER TWO TYPES ARE ABSENT: we do not have their numbers. Jurga
+ * described Evergreen as "much more in-depth, much bigger scope" and General as
+ * "not urgent, not recent, but also not in-depth… much simpler" — real
+ * distinctions, but not word counts, and inventing them would put a band in
+ * front of reviewers that no one agreed to. Absent means they inherit the
+ * package defaults, which is honest and never means "no check". The ask is bd
+ * startsim-ozpjw.3, which carries the Chinese bands (bd startsim-wn2p.29) in the
+ * same conversation because it is one editorial question, not two.
+ *
+ * ⚠️ EVERGREEN'S STORED VALUE IS `lead_magnet`, NOT `evergreen` — see
+ * src/lib/content.ts for why it must stay that way. A rule keyed on 'evergreen'
+ * matches nothing, silently, and drops every evergreen draft back to the brief
+ * band: exactly the bug this policy exists to fix.
+ */
+export const OGMC_CHECK_POLICY: CheckPolicySet = [
+  { contentType: 'weekly_brief', policy: { blogWords: [400, 500] } },
+];
