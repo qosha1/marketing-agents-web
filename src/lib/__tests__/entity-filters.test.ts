@@ -73,6 +73,31 @@ describe('listEntities filters reach the wire intact', () => {
   });
 });
 
+describe('the findability filters reach the wire intact (bd startsim-f4lac)', () => {
+  it('sends attr.<name>__icontains — the title search, not a client-side scan', () => {
+    return listEntities('draft', 1, { 'attr.title__icontains': 'qatar' }).then(() => {
+      // The dot and the double underscore both survive the shared client's
+      // camel/snake rewriting, or the search silently searches nothing.
+      expect(lastQuery()).toContain('attr.title__icontains=qatar');
+    });
+  });
+
+  it('sends attr.<name>__in as a COMMA list — the approved-topic gate', () => {
+    return listEntities('draft', 1, { 'attr.topic_ref__in': '10,11,12' }).then(() => {
+      // `_coerce` in tenant-starter apps/api/filters.py splits on commas.
+      expect(lastQuery()).toContain('attr.topic_ref__in=10,11,12');
+    });
+  });
+
+  it('sends the match-nothing sentinel rather than dropping an empty gate', async () => {
+    // A gate that matches nothing must NARROW to nothing. Dropping the filter
+    // would widen to the whole corpus under an active filter chip — the failure
+    // that handed a cleanup loop page 1 and cost nine production rows.
+    await listEntities('draft', 1, { 'attr.topic_ref__in': '__none__' });
+    expect(lastQuery()).toContain('attr.topic_ref__in=__none__');
+  });
+});
+
 describe('listAllEntities', () => {
   it('carries the filter onto every page request, and asks for 200 at a time', async () => {
     await listAllEntities('news_item', { filters: { 'attr.published_at__gte': '2026-08-10' } });
