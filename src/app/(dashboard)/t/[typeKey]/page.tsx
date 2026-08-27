@@ -26,7 +26,7 @@ import {
   RecordEditFields,
   TopicDrafts,
 } from '@/components/entity-detail-drawer';
-import { choicesOf, pickStatusAttr, readData } from '@/lib/board';
+import { choicesOf, defaultTopicOrder, pickStatusAttr, readData } from '@/lib/board';
 import { CONTENT_CATEGORIES, CONTENT_TYPE_ATTR, CONTENT_TYPE_KEY, contentCategoryLabel } from '@/lib/content';
 
 const PAGE_SIZE = 20; // matches DRF PageNumberPagination's default page size
@@ -43,16 +43,6 @@ const NEWS_REVIEW_CONFIG: ReviewConfig = {
   verdicts: [],
   omitNeedsWork: true,
 };
-
-// Default topic order: by pipeline stage, newest first WITHIN a stage — so new
-// topics sit on top and rejected (and written) sink to the bottom, out of the way.
-const STATUS_RANK: Record<string, number> = { suggested: 0, ready: 1, written: 2, rejected: 3 };
-function defaultTopicOrder(a: EntityRecord, b: EntityRecord): number {
-  const ra = STATUS_RANK[String(readData(a.data, STATUS_ATTR) ?? '')] ?? 0;
-  const rb = STATUS_RANK[String(readData(b.data, STATUS_ATTR) ?? '')] ?? 0;
-  if (ra !== rb) return ra - rb;
-  return String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? ''));
-}
 
 export default function TypeRecordsPage() {
   const params = useParams<{ typeKey: string }>();

@@ -506,3 +506,66 @@ export function facetFilters(
   }
   return out;
 }
+
+// ---- default table order for a status-carrying spine (bd startsim-azyag) ----
+// MOVED here verbatim from app/(dashboard)/t/[typeKey]/page.tsx: it was a pure
+// comparator trapped inside a client component, so nothing could test it. The
+// behaviour is unchanged by the move — the pin logic below is what changes it.
+
+const STATUS_RANK: Record<string, number> = { suggested: 0, ready: 1, written: 2, rejected: 3 };
+
+/**
+ * Default topic order: by pipeline stage, newest first WITHIN a stage — so new
+ * topics sit on top and rejected (and written) sink to the bottom, out of the way.
+ */
+export function defaultTopicOrder(a: EntityRecord, b: EntityRecord): number {
+  const ra = STATUS_RANK[String(readData(a.data, 'status') ?? '')] ?? 0;
+  const rb = STATUS_RANK[String(readData(b.data, 'status') ?? '')] ?? 0;
+  if (ra !== rb) return ra - rb;
+  return String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? ''));
+}
+
+// ---- RED STUBS (bd startsim-d0j7d) ----
+// These encode WHAT THE TABLE DOES TODAY, so `findability.test.ts` fails on
+// values rather than on an unresolvable import: a module-not-found error proves
+// nothing about behaviour. startsim-azyag / startsim-f4lac replace the bodies.
+
+/** A row the user has just acted on, and where it sat when they did. */
+export interface ActedRow {
+  id: EntityRecord['id'];
+  /** Position the row held in the visible list at the moment of the action. */
+  index: number;
+  /** Decision key ('approve' | 'reject' | 'needs_work') — drives the marker. */
+  decision: string;
+}
+
+/** Backend cap on a comma list — `MAX_ID_LIST` in tenant-starter apps/api/filters.py. */
+export const MAX_IN_VALUES = 200;
+
+export function noteActed(acted: ActedRow[], row: ActedRow): ActedRow[] {
+  return [...acted, row]; // today: nothing is remembered at all
+}
+
+export function holdActedPositions(
+  records: EntityRecord[],
+  _acted: ActedRow[],
+  compare: (a: EntityRecord, b: EntityRecord) => number,
+): EntityRecord[] {
+  return [...records].sort(compare); // today: the sort wins, the row sinks
+}
+
+export function readmitActed(
+  _all: EntityRecord[],
+  kept: EntityRecord[],
+  _acted: ActedRow[],
+): EntityRecord[] {
+  return kept; // today: an approved row simply leaves a State=suggested view
+}
+
+export function searchFilters(_term: string, _attrName: string): Record<string, string> {
+  return {}; // today: there is no search box on the records table
+}
+
+export function inFilters(_attrName: string, _values: string[]): Record<string, string> | null {
+  return null; // today: nothing builds an __in list
+}
