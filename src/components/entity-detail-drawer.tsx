@@ -35,6 +35,15 @@ import { CONTENT_TYPE_KEY } from '@/lib/content';
 import { memberDisplayName, memberSub, normalizeMembers } from '@/lib/roster';
 import { findTag, GOOD_EXAMPLE_LABEL } from '@/lib/tags';
 import {
+  GENERATE_POLL_MS,
+  GENERATE_TICK_MS,
+  generatePollDecision,
+  generatePollMessage,
+  isGeneratePollFailure,
+  type GeneratePollDecision,
+  type GeneratePollReason,
+} from '@/lib/generate-poll';
+import {
   buildStoryFromTopic,
   canGenerateDrafts,
   draftCandidateIndex,
@@ -394,15 +403,13 @@ function DrawerInner({
   );
 }
 
-/** How long we keep polling for new drafts after firing the writer (~1 min run). */
-const GENERATE_POLL_MS = 8_000;
-const GENERATE_WINDOW_MS = 90_000;
 
 /**
  * A topic's candidate drafts + the write→review→edit→confirm loop (bd 768w.16.9.4/.5).
  *
  * Fires the n8n writer ("Generate drafts" → /actions/generate-drafts — NOT /api,
- * which the tenant nginx routes to Django), lists the
+ * which the tenant nginx routes to Django), polls for the candidates it produces
+ * (the when-to-stop-looking rules live in `@/lib/generate-poll`), lists the
  * candidates linked to this topic (via `written_for` OR `topic_ref`), and links
  * each one to the full-page draft editor (/draft/<id>) to edit + mark ready. Only
  * rendered for the content-spine (topic) type; every other type's drawer is
@@ -412,6 +419,11 @@ export function TopicDrafts({ topic, type }: { topic: EntityRecord; type: Entity
   const qc = useQueryClient();
   const topicId = topic.id;
   const [generating, setGenerating] = useState(false);
+  // WHY the wait ended, once it has. This is the half of startsim-tkz9d that was
+  // missing: the old code stopped polling at 90s and said nothing, so a writer
+  // still running read as "this topic has no drafts" and the only cure was a
+  // browser reload. A terminal state that isn't rendered is the bug.
+  const [stopped, setStopped] = useState<GeneratePollReason>('idle');
   // The SAME resolved review map ReviewDrawer/InlineReviewActions derive their
   // Approve button from, so the gate and the Approve action cannot drift apart
   // (bd startsim-0e9ue). No literal approve status is declared here.
@@ -420,7 +432,7 @@ export function TopicDrafts({ topic, type }: { topic: EntityRecord; type: Entity
   const draftsQuery = useQuery({
     queryKey: ['topic-drafts', topicId],
     queryFn: () => fetchTopicDrafts(topic),
-    // While the writer runs (~1 min, async), poll so the new candidates appear.
+    // While the writer runs (~2 min, measured), poll so the new candidates appear.
     refetchInterval: generating ? GENERATE_POLL_MS : false,
   });
   const drafts = draftsQuery.data ?? [];
@@ -437,22 +449,78 @@ export function TopicDrafts({ topic, type }: { topic: EntityRecord; type: Entity
   const draftCountKnown = !draftsQuery.isLoading && !draftsQuery.isError;
   const gate = canGenerateDrafts(topic, review, drafts.length);
 
-  // Stop the generating state once new drafts land, or after a hard time cap so a
-  // silent writer failure doesn't spin forever.
-  const baselineRef = useRef(0);
+  // The poll clock. ALL REFS on purpose, so the ticker below can read the live
+  // numbers without taking any of them as dependencies. Taking the draft count as
+  // a dep was the old bug: the 90s timeout was cleared and re-armed on every
+  // change, measuring "time since something last moved" rather than capping.
+  const pollRef = useRef({ startedAt: 0, baseline: 0, count: 0, countChangedAt: 0, polledAt: 0 });
+  const { dataUpdatedAt } = draftsQuery;
+
+  function decideNow(): GeneratePollDecision {
+    const p = pollRef.current;
+    const now = Date.now();
+    return generatePollDecision({
+      generating: true,
+      elapsedMs: now - p.startedAt,
+      draftCount: p.count,
+      baselineCount: p.baseline,
+      sinceCountChangeMs: now - p.countChangedAt,
+      sinceSuccessfulPollMs: now - (p.polledAt || p.startedAt),
+    });
+  }
+
+  // (1) Keep the poll clock current. Writes REFS ONLY, never state, so it stays
+  // plain bookkeeping and the single decision below owns every transition.
+  useEffect(() => {
+    const p = pollRef.current;
+    if (drafts.length !== p.count) {
+      p.count = drafts.length;
+      p.countChangedAt = Date.now();
+    }
+    if (dataUpdatedAt) p.polledAt = dataUpdatedAt;
+  }, [drafts.length, dataUpdatedAt]);
+
+  // (2) ONE ticker owns "are we still waiting?", armed once per run.
+  //
+  // Deps are [generating] alone, so a cap is a cap: nothing that happens during
+  // the run can push the window back. The old timeout took the draft count as a
+  // dep, so it cleared and re-armed itself on every change and measured "time
+  // since something last moved" instead of capping the run.
+  //
+  // And it TICKS rather than reacting to poll results, so the window is
+  // guaranteed to be evaluated when it expires — reacting to refetches would
+  // leave the decision to whenever a fetch happened to resolve, which is
+  // incidental. The predicate is pure arithmetic over refs; the tick is free.
   useEffect(() => {
     if (!generating) return;
-    if (drafts.length > baselineRef.current) {
+    const id = setInterval(() => {
+      const decision = decideNow();
+      if (!decision.terminal) return;
       setGenerating(false);
-      return;
-    }
-    const t = setTimeout(() => setGenerating(false), GENERATE_WINDOW_MS);
-    return () => clearTimeout(t);
-  }, [generating, drafts.length]);
+      setStopped(decision.reason);
+    }, GENERATE_TICK_MS);
+    return () => clearInterval(id);
+  }, [generating]);
+
+  // What the empty list says. A run that ended with nothing MUST say so — falling
+  // back to "No drafts written for this topic yet." is the lie that made a slow
+  // writer look like a broken button.
+  const emptyMessage =
+    (generating ? generatePollMessage('waiting') : generatePollMessage(stopped)) ??
+    'No drafts written for this topic yet.';
+  const emptyIsFailure = !generating && isGeneratePollFailure(stopped);
 
   async function generate() {
     if (!draftCountKnown || !gate.allowed) return;
-    baselineRef.current = drafts.length;
+    const now = Date.now();
+    pollRef.current = {
+      startedAt: now,
+      baseline: drafts.length,
+      count: drafts.length,
+      countChangedAt: now,
+      polledAt: now,
+    };
+    setStopped('idle');
     setGenerating(true);
     try {
       const res = await fetch('/actions/generate-drafts', {
@@ -478,9 +546,12 @@ export function TopicDrafts({ topic, type }: { topic: EntityRecord; type: Entity
           .catch(() => undefined);
         throw new Error(detail || `Writer request failed (${res.status}).`);
       }
-      notify.success('Generating drafts… new candidates appear in ~1 min.');
+      notify.success('Generating drafts… new candidates appear in ~2 min.');
     } catch (err) {
+      // The writer never started, so there is nothing to have waited for: clear
+      // the terminal copy and let the toast carry the refusal.
       setGenerating(false);
+      setStopped('idle');
       notify.error(err instanceof Error ? err.message : 'Could not start the writer.');
     }
   }
@@ -500,7 +571,7 @@ export function TopicDrafts({ topic, type }: { topic: EntityRecord; type: Entity
           </button>
           {!draftCountKnown ? null : gate.allowed ? (
             <Button onClick={generate} disabled={generating} className="text-xs">
-              {generating ? 'Generating… (~1 min)' : 'Generate drafts'}
+              {generating ? 'Generating… (~2 min)' : 'Generate drafts'}
             </Button>
           ) : gate.reason === 'not_approved' ? (
             <span className="text-xs text-neutral-500">{gate.message}</span>
@@ -513,8 +584,8 @@ export function TopicDrafts({ topic, type }: { topic: EntityRecord; type: Entity
       ) : draftsQuery.isError ? (
         <p className="mt-2 text-sm text-neutral-400">Couldn’t load drafts for this topic.</p>
       ) : drafts.length === 0 ? (
-        <p className="mt-2 text-sm text-neutral-400">
-          {generating ? 'Waiting for the writer to return candidates…' : 'No drafts written for this topic yet.'}
+        <p className={`mt-2 text-sm ${emptyIsFailure ? 'text-amber-700' : 'text-neutral-400'}`}>
+          {emptyMessage}
         </p>
       ) : (
         <ul className="mt-2 space-y-1.5">
