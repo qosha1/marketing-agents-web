@@ -1,122 +1,185 @@
 /**
- * FIRST CUT (bd startsim-ozpjw.9) — hoist the `generating` state out of the
- * component so navigating the queue doesn't cancel the writer.
+ * The writer run, held where it can outlive the drawer that started it
+ * (bd startsim-ozpjw.9).
  *
- * `TopicDrafts` holds `generating` in its own `useState` and binds the poll to it
- * (`refetchInterval: generating ? GENERATE_POLL_MS : false`), so every teardown
- * of the drawer stops the poll dead. This lifts that boolean into a module-level
- * store keyed by topic id, which a remounting component rejoins.
+ * WHY THIS IS A MODULE-LEVEL STORE AND NOT COMPONENT STATE. "Generate drafts"
+ * starts an n8n run that takes ~2 minutes (measured: p50 113s, max 130s — see
+ * `./generate-poll`). `TopicDrafts` renders inside a drawer that is torn down
+ * constantly, and NONE of those teardowns mean "stop watching":
  *
- * The CLOCK stays where it is today: `useRef({ startedAt: 0, baseline: 0, ... })`
- * inside the component, re-created zeroed on every mount.
+ *   - ReviewDrawer keys its inner drawer on the record id, so j/k, the arrow
+ *     keys, the prev/next chevrons and the auto-advance after a decision each
+ *     destroy and rebuild the whole thing;
+ *   - "Edit fields" (e) swaps the body out and drops `renderExtra` with it;
+ *   - closing the drawer (X / Escape / backdrop) unmounts it outright.
+ *
+ * With `generating` in the component's own `useState`, every one of those killed
+ * the poll — and it did not heal on the way back, because QueryProvider sets
+ * `staleTime: 5 * 60 * 1000` and `refetchOnWindowFocus: false`, so a remount
+ * inside five minutes serves the CACHED EMPTY LIST without refetching and with
+ * nothing polling. Only a full page reload recovered. That is the "I refreshed
+ * and oh, there they are" report from 2026-08-25.
+ *
+ * SO THE RUN IS KEYED BY TOPIC ID, NOT BY COMPONENT INSTANCE. A component that
+ * mounts for a topic rejoins whatever is already in flight for it.
+ *
+ * WHAT HAD TO MOVE, AND WHY THE OBVIOUS CUT ISN'T ENOUGH. Hoisting the boolean
+ * alone leaves the clock in a `useRef` that is re-created ZEROED on every mount,
+ * so a rejoined run computes `elapsedMs = now - 0` and goes terminal on its first
+ * tick — polling resumes for one second and then announces that the writer never
+ * reported back. All five clock inputs have to survive together.
+ *
+ * The decision itself is not duplicated here: `generatePollDecision` in
+ * `./generate-poll` still owns when to stop looking. This owns only what is left
+ * to decide over.
  */
 import { generatePollDecision, type GeneratePollDecision, type GeneratePollReason } from './generate-poll';
 
-/** How long a finished run's terminal copy is worth keeping. */
+/**
+ * How long a finished run is remembered. Its terminal copy ("The writer hasn't
+ * reported back yet…") is worth keeping while the reader might still come back
+ * to that topic; it is not worth keeping for the rest of the session, and an
+ * unbounded module-level map in a long-lived SPA is a leak. Measured from the
+ * START of the run, which is within one `GENERATE_WINDOW_MS` of its end.
+ */
 export const GENERATE_RUN_MEMORY_MS = 30 * 60_000;
 
-interface RunClock {
-  startedAt: number;
-  baseline: number;
-  count: number;
-  countChangedAt: number;
-  polledAt: number;
-}
-
 interface Run {
+  /** Milliseconds since epoch at the CLICK. The cap is measured from here. */
+  startedAt: number;
+  /** Drafts visible when the writer was started. */
+  baseline: number;
+  /** Drafts visible at the last poll. */
+  count: number;
+  /** When `count` last changed. */
+  countChangedAt: number;
+  /** When we could last SEE — see `mountGenerateRun`. */
+  polledAt: number;
+  /** False from a terminal decision onward. */
   running: boolean;
+  /** Why it stopped, once it has. Rendered as the empty-list copy. */
   stopped: GeneratePollReason;
-  endedAt: number;
-  clock: RunClock;
+  /** Whether a mounted component is currently watching this run. */
+  watched: boolean;
 }
 
-/** A freshly-created `useRef` — what every new mount starts with. */
-function zeroClock(): RunClock {
-  return { startedAt: 0, baseline: 0, count: 0, countChangedAt: 0, polledAt: 0 };
-}
+/**
+ * A topic's id. `EntityRecord['id']` is a number; tests and any future
+ * string-keyed caller are normalized to the same entry by `key()` below, so 42
+ * and '42' can never become two separate runs. Typed locally rather than
+ * imported so this module stays free of the API layer.
+ */
+export type TopicId = string | number;
 
 const runs = new Map<string, Run>();
 
-/** Drop finished runs nobody is coming back to. */
+const key = (topicId: TopicId) => String(topicId);
+
+/** Forget finished runs nobody is coming back to. */
 function sweep(now: number) {
   for (const [id, run] of runs) {
-    if (!run.running && run.endedAt && now - run.endedAt > GENERATE_RUN_MEMORY_MS) runs.delete(id);
+    if (!run.running && now - run.startedAt > GENERATE_RUN_MEMORY_MS) runs.delete(id);
   }
 }
 
-export function startGenerateRun(topicId: string, { at, baseline }: { at: number; baseline: number }) {
+/** The writer was just started for this topic. */
+export function startGenerateRun(topicId: TopicId, { at, baseline }: { at: number; baseline: number }) {
   sweep(at);
-  runs.set(topicId, {
+  runs.set(key(topicId), {
+    startedAt: at,
+    baseline,
+    count: baseline,
+    countChangedAt: at,
+    polledAt: at,
     running: true,
     stopped: 'idle',
-    endedAt: 0,
-    clock: { startedAt: at, baseline, count: baseline, countChangedAt: at, polledAt: at },
+    watched: true,
   });
 }
 
-/** The component instance watching this topic is going away. */
-export function unmountGenerateRun(topicId: string) {
-  const run = runs.get(topicId);
-  // The boolean is hoisted and survives; the clock lived in the component's
-  // refs, so it goes down with the component.
-  if (run) run.clock = zeroClock();
-}
-
-/** A component instance for this topic mounted. Returns whether a run is live. */
-export function mountGenerateRun(topicId: string, now: number): boolean {
+/**
+ * A component instance for this topic mounted — possibly the first, possibly one
+ * rejoining a run started before the reader navigated away.
+ *
+ * REJOINING REFRESHES THE CONTACT POINT. `lost_contact` means "our polls stopped
+ * succeeding", which is a real and different story from a slow writer. But a
+ * drawer that was closed was not polling and failing — it was not looking. Left
+ * alone, a run rejoined more than `GENERATE_STALL_MS` after the last poll would
+ * report lost contact the instant it came back, which is both wrong and alarming.
+ * The stall clock only runs while somebody is watching.
+ *
+ * Returns whether a run is live for this topic.
+ */
+export function mountGenerateRun(topicId: TopicId, now: number): boolean {
   sweep(now);
-  return isGenerateRunning(topicId);
+  const run = runs.get(key(topicId));
+  if (!run) return false;
+  if (!run.watched) {
+    run.watched = true;
+    if (run.running) run.polledAt = now;
+  }
+  return run.running;
 }
 
-export function isGenerateRunning(topicId: string): boolean {
-  return runs.get(topicId)?.running ?? false;
+/** The component instance watching this topic is going away. The run is not. */
+export function unmountGenerateRun(topicId: TopicId) {
+  const run = runs.get(key(topicId));
+  if (run) run.watched = false;
 }
 
-export function generateRunStopped(topicId: string): GeneratePollReason {
-  return runs.get(topicId)?.stopped ?? 'idle';
+export function isGenerateRunning(topicId: TopicId): boolean {
+  return runs.get(key(topicId))?.running ?? false;
 }
 
-export function noteGenerateCount(topicId: string, count: number, at: number) {
-  const run = runs.get(topicId);
-  if (!run || run.clock.count === count) return;
-  run.clock.count = count;
-  run.clock.countChangedAt = at;
+export function generateRunStopped(topicId: TopicId): GeneratePollReason {
+  return runs.get(key(topicId))?.stopped ?? 'idle';
 }
 
-export function noteGeneratePoll(topicId: string, at: number) {
-  const run = runs.get(topicId);
-  if (run) run.clock.polledAt = at;
+/** A poll came back with this many drafts for the topic. */
+export function noteGenerateCount(topicId: TopicId, count: number, at: number) {
+  const run = runs.get(key(topicId));
+  if (!run || run.count === count) return;
+  run.count = count;
+  run.countChangedAt = at;
 }
 
-export function endGenerateRun(topicId: string, reason: GeneratePollReason) {
-  const run = runs.get(topicId);
+/**
+ * A poll came back successfully at `at`.
+ *
+ * MONOTONIC ON PURPOSE. On remount react-query hands over the CACHED list first,
+ * and its `dataUpdatedAt` is from before the drawer closed. Writing that in would
+ * re-stale the contact point `mountGenerateRun` just refreshed and trip
+ * `lost_contact` a tick later. Contact only ever moves forward.
+ */
+export function noteGeneratePoll(topicId: TopicId, at: number) {
+  const run = runs.get(key(topicId));
+  if (run && at > run.polledAt) run.polledAt = at;
+}
+
+/** The wait is over, one way or another. */
+export function endGenerateRun(topicId: TopicId, reason: GeneratePollReason) {
+  const run = runs.get(key(topicId));
   if (!run) return;
   run.running = false;
   run.stopped = reason;
-  run.endedAt = Date.now();
 }
 
-/** Should this topic still be polled, and if not, why did it stop? */
-export function generateRunDecision(topicId: string, now: number): GeneratePollDecision {
-  const run = runs.get(topicId);
-  if (!run || !run.running) {
-    return generatePollDecision({
-      generating: false,
-      elapsedMs: 0,
-      draftCount: 0,
-      baselineCount: 0,
-      sinceCountChangeMs: 0,
-      sinceSuccessfulPollMs: 0,
-    });
-  }
-  const c = run.clock;
+const NOT_RUNNING: GeneratePollDecision = { keepPolling: false, terminal: false, reason: 'idle' };
+
+/**
+ * Should this topic still be polled, and if not, why did it stop? Delegates to
+ * `generatePollDecision` — the clock inputs are the only thing this adds.
+ */
+export function generateRunDecision(topicId: TopicId, now: number): GeneratePollDecision {
+  const run = runs.get(key(topicId));
+  if (!run || !run.running) return NOT_RUNNING;
   return generatePollDecision({
     generating: true,
-    elapsedMs: now - c.startedAt,
-    draftCount: c.count,
-    baselineCount: c.baseline,
-    sinceCountChangeMs: now - c.countChangedAt,
-    sinceSuccessfulPollMs: now - (c.polledAt || c.startedAt),
+    elapsedMs: now - run.startedAt,
+    draftCount: run.count,
+    baselineCount: run.baseline,
+    sinceCountChangeMs: now - run.countChangedAt,
+    sinceSuccessfulPollMs: now - run.polledAt,
   });
 }
 
