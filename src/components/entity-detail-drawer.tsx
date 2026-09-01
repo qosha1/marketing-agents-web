@@ -8,7 +8,7 @@
  * (AttributeField widgets) + Save. Preserves non-declared data keys and canonicalizes to
  * the client's camelCase blob so a PATCH (which REPLACES data) never drops fields.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -37,12 +37,20 @@ import { findTag, GOOD_EXAMPLE_LABEL } from '@/lib/tags';
 import {
   GENERATE_POLL_MS,
   GENERATE_TICK_MS,
-  generatePollDecision,
   generatePollMessage,
   isGeneratePollFailure,
-  type GeneratePollDecision,
-  type GeneratePollReason,
 } from '@/lib/generate-poll';
+import {
+  endGenerateRun,
+  generateRunDecision,
+  generateRunStopped,
+  isGenerateRunning,
+  mountGenerateRun,
+  noteGenerateCount,
+  noteGeneratePoll,
+  startGenerateRun,
+  unmountGenerateRun,
+} from '@/lib/generate-run';
 import {
   buildStoryFromTopic,
   canGenerateDrafts,
@@ -418,12 +426,28 @@ function DrawerInner({
 export function TopicDrafts({ topic, type }: { topic: EntityRecord; type: EntityTypeDef }) {
   const qc = useQueryClient();
   const topicId = topic.id;
-  const [generating, setGenerating] = useState(false);
+  // SEEDED FROM THE RUN STORE, not from `false` (bd startsim-ozpjw.9). This
+  // component is destroyed and rebuilt by j/k, the arrow keys, the chevrons, the
+  // auto-advance after a decision, "Edit fields" and Close — none of which mean
+  // "stop watching a writer that is still running". The run lives in
+  // `@/lib/generate-run`, keyed by topic id; a fresh instance rejoins it. These
+  // two pieces of state are the render mirror of the store, driven by the ticker.
+  //
+  // DELIBERATELY `isGenerateRunning` AND NOT `generateRunDecision(...).keepPolling`.
+  // Seeding from the decision looks tighter — it would skip one poll interval for a
+  // run that expired while the drawer was shut — but a `useState` initializer runs
+  // during RENDER, before the mount effect below has refreshed the contact point.
+  // It would therefore read a `polledAt` from before the drawer closed, and any
+  // absence longer than GENERATE_STALL_MS would evaluate as `lost_contact`, seed
+  // `generating` false, and never resume the poll. That is this very bug in a new
+  // costume. Whether a run EXISTS is order-independent; what to do about it is not,
+  // so the ticker (which runs after the rejoin) owns every decision.
+  const [generating, setGenerating] = useState(() => isGenerateRunning(topicId));
   // WHY the wait ended, once it has. This is the half of startsim-tkz9d that was
   // missing: the old code stopped polling at 90s and said nothing, so a writer
   // still running read as "this topic has no drafts" and the only cure was a
   // browser reload. A terminal state that isn't rendered is the bug.
-  const [stopped, setStopped] = useState<GeneratePollReason>('idle');
+  const [stopped, setStopped] = useState(() => generateRunStopped(topicId));
   // The SAME resolved review map ReviewDrawer/InlineReviewActions derive their
   // Approve button from, so the gate and the Approve action cannot drift apart
   // (bd startsim-0e9ue). No literal approve status is declared here.
@@ -434,6 +458,18 @@ export function TopicDrafts({ topic, type }: { topic: EntityRecord; type: Entity
     queryFn: () => fetchTopicDrafts(topic),
     // While the writer runs (~2 min, measured), poll so the new candidates appear.
     refetchInterval: generating ? GENERATE_POLL_MS : false,
+    // AND, while it runs, never trust the cache on a remount (bd startsim-ozpjw.9).
+    // QueryProvider's default is `staleTime: 5 * 60 * 1000` with
+    // `refetchOnWindowFocus: false`, so navigating away and back mid-run re-served
+    // the CACHED EMPTY LIST without asking — the drafts existed, the drawer just
+    // never looked. Resuming the poll alone would still show that stale list for a
+    // full interval. Overridden on THIS query only, and only for a live run:
+    // `fetchTopicDrafts` pages every relationship plus every draft record, so the
+    // 5-minute default is the right one to fall back to when nothing is running.
+    // `generating` is already correct on the first render (it is seeded from the
+    // store), which is what `refetchOnMount` is read on.
+    staleTime: generating ? 0 : undefined,
+    refetchOnMount: generating ? 'always' : undefined,
   });
   const drafts = draftsQuery.data ?? [];
   // Unapproved -> refused with a rendered reason; drafts already written ->
@@ -449,58 +485,59 @@ export function TopicDrafts({ topic, type }: { topic: EntityRecord; type: Entity
   const draftCountKnown = !draftsQuery.isLoading && !draftsQuery.isError;
   const gate = canGenerateDrafts(topic, review, drafts.length);
 
-  // The poll clock. ALL REFS on purpose, so the ticker below can read the live
-  // numbers without taking any of them as dependencies. Taking the draft count as
-  // a dep was the old bug: the 90s timeout was cleared and re-armed on every
-  // change, measuring "time since something last moved" rather than capping.
-  const pollRef = useRef({ startedAt: 0, baseline: 0, count: 0, countChangedAt: 0, polledAt: 0 });
   const { dataUpdatedAt } = draftsQuery;
 
-  function decideNow(): GeneratePollDecision {
-    const p = pollRef.current;
-    const now = Date.now();
-    return generatePollDecision({
-      generating: true,
-      elapsedMs: now - p.startedAt,
-      draftCount: p.count,
-      baselineCount: p.baseline,
-      sinceCountChangeMs: now - p.countChangedAt,
-      sinceSuccessfulPollMs: now - (p.polledAt || p.startedAt),
-    });
-  }
-
-  // (1) Keep the poll clock current. Writes REFS ONLY, never state, so it stays
-  // plain bookkeeping and the single decision below owns every transition.
+  // (0) Join this topic's run, and let go of it without ending it. The clock
+  // used to be a `useRef` here, which is exactly why the run died on every
+  // remount: a fresh instance re-created it zeroed, so `elapsedMs` came out as
+  // "since the epoch" and the very first tick declared the writer silent. It
+  // lives in the store now, so all five clock inputs survive the teardown
+  // together. Rejoining also refreshes the contact point — a closed drawer was
+  // not polling and failing, it was not looking (see `mountGenerateRun`).
   useEffect(() => {
-    const p = pollRef.current;
-    if (drafts.length !== p.count) {
-      p.count = drafts.length;
-      p.countChangedAt = Date.now();
-    }
-    if (dataUpdatedAt) p.polledAt = dataUpdatedAt;
-  }, [drafts.length, dataUpdatedAt]);
+    mountGenerateRun(topicId, Date.now());
+    return () => unmountGenerateRun(topicId);
+  }, [topicId]);
+
+  // (1) Keep the poll clock current. Writes the STORE only, never state, so it
+  // stays plain bookkeeping and the single decision below owns every transition.
+  // Both notes are no-ops when no run is in flight for this topic.
+  useEffect(() => {
+    noteGenerateCount(topicId, drafts.length, Date.now());
+    // `dataUpdatedAt` on a remount is the CACHED result's timestamp, from before
+    // the drawer closed. `noteGeneratePoll` only ever moves contact forward, so
+    // that cannot re-stale the point the rejoin above just refreshed.
+    if (dataUpdatedAt) noteGeneratePoll(topicId, dataUpdatedAt);
+  }, [topicId, drafts.length, dataUpdatedAt]);
 
   // (2) ONE ticker owns "are we still waiting?", armed once per run.
   //
-  // Deps are [generating] alone, so a cap is a cap: nothing that happens during
-  // the run can push the window back. The old timeout took the draft count as a
-  // dep, so it cleared and re-armed itself on every change and measured "time
-  // since something last moved" instead of capping the run.
+  // Deps are [generating, topicId] — neither of which moves during a run — so a
+  // cap is still a cap: nothing that happens while the writer works can push the
+  // window back. The old timeout took the draft count as a dep, so it cleared and
+  // re-armed itself on every change and measured "time since something last
+  // moved" instead of capping the run. The window now lives on the run itself, so
+  // even re-arming the ticker on a remount cannot extend it.
   //
   // And it TICKS rather than reacting to poll results, so the window is
   // guaranteed to be evaluated when it expires — reacting to refetches would
   // leave the decision to whenever a fetch happened to resolve, which is
-  // incidental. The predicate is pure arithmetic over refs; the tick is free.
+  // incidental. The predicate is pure arithmetic over the store; the tick is free.
+  //
+  // The terminal transition is written to the STORE first and mirrored into state
+  // second, so a run that ends is ended for the topic, not merely for whichever
+  // instance happened to be watching when the window expired.
   useEffect(() => {
     if (!generating) return;
     const id = setInterval(() => {
-      const decision = decideNow();
+      const decision = generateRunDecision(topicId, Date.now());
       if (!decision.terminal) return;
+      endGenerateRun(topicId, decision.reason);
       setGenerating(false);
       setStopped(decision.reason);
     }, GENERATE_TICK_MS);
     return () => clearInterval(id);
-  }, [generating]);
+  }, [generating, topicId]);
 
   // What the empty list says. A run that ended with nothing MUST say so — falling
   // back to "No drafts written for this topic yet." is the lie that made a slow
@@ -512,14 +549,7 @@ export function TopicDrafts({ topic, type }: { topic: EntityRecord; type: Entity
 
   async function generate() {
     if (!draftCountKnown || !gate.allowed) return;
-    const now = Date.now();
-    pollRef.current = {
-      startedAt: now,
-      baseline: drafts.length,
-      count: drafts.length,
-      countChangedAt: now,
-      polledAt: now,
-    };
+    startGenerateRun(topicId, { at: Date.now(), baseline: drafts.length });
     setStopped('idle');
     setGenerating(true);
     try {
@@ -549,7 +579,9 @@ export function TopicDrafts({ topic, type }: { topic: EntityRecord; type: Entity
       notify.success('Generating drafts… new candidates appear in ~2 min.');
     } catch (err) {
       // The writer never started, so there is nothing to have waited for: clear
-      // the terminal copy and let the toast carry the refusal.
+      // the terminal copy and let the toast carry the refusal. Ended in the store
+      // too, so navigating away and back doesn't rejoin a run that never began.
+      endGenerateRun(topicId, 'idle');
       setGenerating(false);
       setStopped('idle');
       notify.error(err instanceof Error ? err.message : 'Could not start the writer.');
