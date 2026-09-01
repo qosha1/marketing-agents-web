@@ -432,6 +432,16 @@ export function TopicDrafts({ topic, type }: { topic: EntityRecord; type: Entity
   // "stop watching a writer that is still running". The run lives in
   // `@/lib/generate-run`, keyed by topic id; a fresh instance rejoins it. These
   // two pieces of state are the render mirror of the store, driven by the ticker.
+  //
+  // DELIBERATELY `isGenerateRunning` AND NOT `generateRunDecision(...).keepPolling`.
+  // Seeding from the decision looks tighter — it would skip one poll interval for a
+  // run that expired while the drawer was shut — but a `useState` initializer runs
+  // during RENDER, before the mount effect below has refreshed the contact point.
+  // It would therefore read a `polledAt` from before the drawer closed, and any
+  // absence longer than GENERATE_STALL_MS would evaluate as `lost_contact`, seed
+  // `generating` false, and never resume the poll. That is this very bug in a new
+  // costume. Whether a run EXISTS is order-independent; what to do about it is not,
+  // so the ticker (which runs after the rejoin) owns every decision.
   const [generating, setGenerating] = useState(() => isGenerateRunning(topicId));
   // WHY the wait ended, once it has. This is the half of startsim-tkz9d that was
   // missing: the old code stopped polling at 90s and said nothing, so a writer

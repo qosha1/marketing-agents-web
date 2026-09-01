@@ -41,6 +41,13 @@ import { generatePollDecision, type GeneratePollDecision, type GeneratePollReaso
  * to that topic; it is not worth keeping for the rest of the session, and an
  * unbounded module-level map in a long-lived SPA is a leak. Measured from the
  * START of the run, which is within one `GENERATE_WINDOW_MS` of its end.
+ *
+ * THE TRADE, NAMED. Once a finished run is swept, `generateRunStopped` goes back
+ * to 'idle' and that topic's empty list reads "No drafts written for this topic
+ * yet." again rather than the terminal copy startsim-tkz9d added. That is
+ * deliberate: half an hour after a writer went silent, the ordinary empty copy is
+ * the honest one — the reader is no longer mid-wait, and the run they are being
+ * told about is not one they were watching.
  */
 export const GENERATE_RUN_MEMORY_MS = 30 * 60_000;
 
