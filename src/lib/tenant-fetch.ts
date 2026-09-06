@@ -8,13 +8,14 @@
  *
  * THE HOST HEADER IS THE WHOLE REASON THIS IS NOT `fetch`. Django validates
  * ALLOWED_HOSTS against it, and a tenant allows only its public domain. nginx
- * preserves it (`proxy_set_header Host $http_host`); a call that skips nginx
- * does not, so Django answers 400 "Invalid HTTP_HOST header" before any view
- * runs. Node's fetch cannot help here — undici derives Host from the URL and
- * silently drops an explicit one — so this uses node:http, which honours it.
+ * FORWARDS what it is given (`proxy_set_header Host $http_host`) rather than
+ * inventing one, so a call that sends nothing gets `localhost` forwarded on its
+ * behalf and Django answers 400 "Invalid HTTP_HOST header" before any view runs.
+ * Node's fetch cannot help here — undici derives Host from the URL and silently
+ * drops an explicit one — so this uses node:http, which honours it.
  *
- * Going direct rather than hairpinning through the public ALB also keeps tenant
- * material inside the VPC.
+ * Staying inside the task rather than hairpinning through the public ALB also
+ * keeps tenant material inside the VPC.
  *
  * Deliberately NOT the shared browser client (`@/lib/api`): that one reads a
  * token from the browser and redirects to signin on 401, neither of which means
@@ -34,8 +35,11 @@ import { tenantApiBase, tenantHost } from '@/lib/translation-config';
 /**
  * Server-side base for the tenant backend. NOT `DJANGO_API_URL` — that is set
  * only locally, so in a deployed tenant a handler using it would point at
- * itself. See `translation-config.ts`; the deployed answer is the Cloud Map
- * FQDN nginx already proxies to.
+ * itself. And NOT `django.<namespace>` any more: that Cloud Map service was
+ * retired when grouping collapsed django into the nginx task, which is what
+ * made every call here unreachable for two weeks (startsim-mpijc). See
+ * `translation-config.ts` — the deployed answer is the tenant's own nginx on
+ * loopback, the same proxy the browser goes through.
  */
 function tenantBase(): string {
   return tenantApiBase(process.env as Record<string, string | undefined>);
