@@ -26,6 +26,8 @@
  * but the board page's bare interpolation was an inconsistency, not an
  * intention, and it is not worth preserving.
  */
+
+import { CONTENT_TYPE_ATTR } from './content';
 export type ToggleParams = Record<string, string | undefined | null>;
 
 /**
@@ -58,7 +60,7 @@ export type ToggleParams = Record<string, string | undefined | null>;
  * The board-only params (`since`, `assignee_sub`) do not travel out of the
  * board either: the table has no control to render them into.
  */
-const TRAVELLING_PARAMS: readonly string[] = [];
+const TRAVELLING_PARAMS: readonly string[] = [CONTENT_TYPE_ATTR];
 
 function siblingHref(base: string, typeKey: string, params: ToggleParams): string {
   const carried = new URLSearchParams();
