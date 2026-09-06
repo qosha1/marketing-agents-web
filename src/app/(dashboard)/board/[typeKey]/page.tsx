@@ -64,6 +64,7 @@ import {
   contentBoardHref,
   contentCategoryLabel,
 } from '@/lib/content';
+import { tableViewHref } from '@/lib/view-toggle';
 import { DRAFT_TYPE, listAllRelationships, topicIdForDraft } from '@/lib/topic-drafts';
 import {
   countEntities,
@@ -376,8 +377,11 @@ export default function BoardPage() {
               ) : null}
             </div>
           ) : null}
+          {/* The mirror of the table's "Board view" toggle — the same decision
+              about which filters travel with you, so the same owner
+              (lib/view-toggle.ts, bd startsim-flv2x). */}
           <Link
-            href={`/t/${typeKey}`}
+            href={tableViewHref(typeKey, Object.fromEntries(searchParams.entries()))}
             className="rounded border px-3 py-1.5 text-sm hover:bg-neutral-50"
           >
             Table view

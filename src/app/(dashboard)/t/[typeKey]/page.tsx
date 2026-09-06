@@ -59,6 +59,7 @@ import {
   APPROVED_TOPIC_STATUSES,
 } from '@/lib/drafts-view';
 import { CONTENT_CATEGORIES, CONTENT_TYPE_ATTR, CONTENT_TYPE_KEY, contentCategoryLabel } from '@/lib/content';
+import { boardViewHref } from '@/lib/view-toggle';
 import { NEWS_ACTIONS_HEADER, TOPIC_ACTIONS_HEADER, TOPIC_DECISION_LABELS } from '@/lib/review-vocabulary';
 
 const PAGE_SIZE = 20; // matches DRF PageNumberPagination's default page size
@@ -456,7 +457,10 @@ export default function TypeRecordsPage() {
         <div className="flex items-center gap-3">
           <span className="text-sm text-gray-500">{totalCount} total</span>
           {hasStatusBoard ? (
-            <Link href={`/board/${encodeURIComponent(typeKey)}`}>
+            // Where this goes is a decision, not a string — which of the
+            // filters you are looking through describe WHICH RECORDS, and so
+            // come with you (bd startsim-flv2x). lib/view-toggle.ts owns it.
+            <Link href={boardViewHref(typeKey, viewParams)}>
               <Button variant="outline" size="sm">
                 Board view
               </Button>
