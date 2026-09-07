@@ -32,6 +32,14 @@
  * The decision itself is not duplicated here: `generatePollDecision` in
  * `./generate-poll` still owns when to stop looking. This owns only what is left
  * to decide over.
+ *
+ * NOT THE ONLY STORE, and the other one is not a duplicate of this (bd
+ * startsim-8hgmq.8). `startGenerateRunOnce` below makes "one run per topic" a
+ * property of THIS map, which lives in the TAB: a reload or a second tab has no
+ * memory of a run in flight, and the webhook's ~100s latency is long enough for
+ * a reader to do exactly that. `./generate-claim` holds the same statement
+ * server-side for that case. Neither replaces the other — this one stops the
+ * double-click, that one stops the second tab.
  */
 import { generatePollDecision, type GeneratePollDecision, type GeneratePollReason } from './generate-poll';
 
@@ -127,6 +135,10 @@ export function startGenerateRun(topicId: TopicId, { at, baseline }: { at: numbe
  * so every caller races against the same entry rather than against its own copy
  * of a boolean. Returns false when a run is already in flight; the caller must
  * not start one.
+ *
+ * IT IS STILL PER TAB, which is why `./generate-claim` exists: this map is
+ * module-level in the BROWSER, so a reload or a second tab starts with an empty
+ * one and this function has nothing to refuse.
  */
 export function startGenerateRunOnce(
   topicId: TopicId,

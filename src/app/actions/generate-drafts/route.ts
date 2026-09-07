@@ -31,6 +31,41 @@
  * (poll)` selects `status === 'ready'` topics with no draft carrying their
  * `topic_ref`, which is both arms of this same gate.
  *
+ * WHO PRESSED IT (bd startsim-8hgmq.7). The relay names its caller. The webhook
+ * forwards `trigger` (defaulting to `generate_button`) and `triggered_by`
+ * verbatim into the writer, which stamps them as `data._trigger` /
+ * `data._triggered_by` — the fields `lib/draft-origin.ts` renders in the
+ * "Created by" column, and the difference between a draft that says "AI writer"
+ * and one that says who asked for it.
+ *
+ * THE IDENTITY IS THE CALLER'S EMAIL, and the reason is not really a preference.
+ * `whoami` returns `{sub, email, companyId, orgId, role}` — there is no display
+ * name to choose, so the choice is email or `sub`, and `sub`
+ * (`1c44a170-eee3-…`) answers "who pressed this?" with a string no reader can
+ * resolve, which is the whole question the column exists for. The email stays
+ * inside the tenant that produced it, shown to signed-in members of the same
+ * company who already see each other's addresses in the roster. n8n is
+ * format-agnostic (it forwards whatever string it is given), so this is one
+ * line to change if the customer ever wants it shortened.
+ *
+ * RESOLVING THE CALLER IS NEVER A REASON TO REFUSE. Unlike the gate — where
+ * "could not check" is deliberately a 502, because failing open reinstates the
+ * hole — an unknown presser is a missing nicety. The whoami read has its OWN
+ * try/catch for exactly that reason: inside the gate's, a whoami blip would
+ * surface as "Could not verify the topic" and cost the customer their button
+ * over a label. An unresolved caller omits the key, matching the writer, which
+ * omits `_triggered_by` when it is empty so absence reads as "not known" rather
+ * than as a person with a blank name.
+ *
+ * ONE WRITER PER TOPIC AT A TIME (bd startsim-8hgmq.8). The gate above cannot
+ * refuse a second press inside the writer's ~100s latency, because the drafts it
+ * counts do not exist yet. `lib/generate-claim.ts` holds the in-flight claim —
+ * read its header for why a TTL lock is safe here and what it deliberately does
+ * not promise. A press that loses the claim is answered 202 `deduped: true`
+ * rather than a 4xx: a run for that topic IS under way and its drafts are on the
+ * way, so the honest answer is "accepted", and a refusal would make the drawer
+ * throw, end its own run and stop polling for drafts that are about to land.
+ *
  * PATH NOTE: this handler lives at /actions/* NOT /api/* on purpose. In a deployed
  * tenant, nginx routes every /api/* request to the Django backend (which has no
  * such route → 404) before Next ever sees it; only non-/api paths reach the Next
@@ -39,6 +74,7 @@
  */
 import { NextResponse } from 'next/server';
 
+import { claimGenerateRun, releaseGenerateClaim } from '@/lib/generate-claim';
 import { tenantFetch } from '@/lib/tenant-fetch';
 import { resolveTopicGate } from '@/lib/topic-gate';
 
@@ -46,6 +82,29 @@ export const dynamic = 'force-dynamic';
 
 const DEFAULT_WEBHOOK_URL =
   'https://debugg.app.n8n.cloud/webhook/ogmc-generate-drafts-7h3k9x2q';
+
+/**
+ * Name the person behind this bearer, or nobody.
+ *
+ * NEVER THROWS, by construction: every caller of this is one line away from the
+ * relay, and a label is not worth a refusal. `tenantFetch` returns Django's raw
+ * JSON (no snake→camel transform server-side), but `email` is casing-neutral —
+ * the field that would have needed care, `company_id`, is not read here.
+ */
+async function resolveCaller(auth: string): Promise<string | undefined> {
+  try {
+    const me = await tenantFetch<{ email?: unknown }>('whoami', auth, { method: 'GET' });
+    const email = typeof me?.email === 'string' ? me.email.trim() : '';
+    return email || undefined;
+  } catch (error) {
+    // Logged, not raised: the draft is still worth writing unattributed, and a
+    // silent omission would look identical to a caller who has no email.
+    console.warn('[generate-drafts] could not resolve the caller', {
+      detail: (error as Error).message,
+    });
+    return undefined;
+  }
+}
 
 export async function POST(request: Request) {
   const webhookUrl = process.env.N8N_WRITER_WEBHOOK_URL || DEFAULT_WEBHOOK_URL;
@@ -102,20 +161,48 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: gate.message, reason: gate.reason }, { status: 403 });
   }
 
+  // AFTER the gate, never before: once the drafts have landed, "this topic
+  // already has drafts" is the truer answer and must not be masked by "a run is
+  // in flight". Claimed BEFORE the relay, so two presses race the same entry
+  // rather than each other's copy of a boolean.
+  const claim = claimGenerateRun(topicRef, Date.now());
+  if (!claim.claimed) {
+    // Logged so the mechanism is measurable — an invisible dedupe cannot be told
+    // apart from a button that quietly did nothing.
+    console.warn('[generate-drafts] a writer is already in flight for this topic', {
+      topicRef,
+      heldForMs: claim.heldForMs,
+      expiresInMs: claim.expiresInMs,
+    });
+    return NextResponse.json({ ok: true, deduped: true }, { status: 202 });
+  }
+
+  const triggeredBy = await resolveCaller(auth);
+
   try {
     const res = await fetch(webhookUrl, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(story),
+      body: JSON.stringify({
+        ...story,
+        // Explicit, though the webhook defaults to it: the caller that knows it
+        // is a button press should say so, and a default is a place a future
+        // caller can be silently wrong about.
+        trigger: 'generate_button',
+        ...(triggeredBy ? { triggered_by: triggeredBy } : {}),
+      }),
     });
     if (!res.ok) {
+      // The writer never started, so nothing is in flight to protect.
+      releaseGenerateClaim(topicRef);
       return NextResponse.json(
         { error: `Writer webhook responded ${res.status}.` },
         { status: 502 },
       );
     }
-    return NextResponse.json({ ok: true }, { status: 202 });
+    return NextResponse.json({ ok: true, deduped: false }, { status: 202 });
   } catch {
+    releaseGenerateClaim(topicRef);
     return NextResponse.json(
       { error: 'Could not reach the writer webhook.' },
       { status: 502 },
