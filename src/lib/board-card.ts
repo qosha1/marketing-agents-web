@@ -19,10 +19,12 @@
  *       heading in its place: that is the line that tells a reviewer what the
  *       topic actually covers.
  *
- *   (b) THE LANE. `statusName` is excluded here; {@link moveChoices} is the other
- *       half — the per-card control keeps its control (it is the only way to
- *       reach `written` without dragging; the ✕/✓/✎ cluster only covers
- *       approve/reject/needs-work) and loses only its echoed value.
+ *   (b) THE LANE. `statusName` is excluded here — the lanes ARE the status, and a
+ *       card sitting in Suggested does not need a row saying so. The card carries
+ *       no status control at all any more (bd startsim-8hgmq.12): dragging is how
+ *       a card moves, every declared status has a lane, so a dropdown reached
+ *       nothing a drag does not. The ✕/✓/✎ cluster stays, because a decision is
+ *       not a move — approve writes status AND team_verdict together.
  *
  *   (c) AN ATTRIBUTE THE ACTIVE FACET HAS PINNED to a single value. Derived from
  *       the filters the board is actually scoped by (lib/board's `AttrFilter`),
@@ -165,18 +167,3 @@ export function cardBody(
   return { heading, subtitle, rows };
 }
 
-/**
- * The lanes a card can be MOVED to — every declared choice except the one it is
- * already in. The card's status control shows an action, not a state: leaving
- * the current lane in the menu offers a selection that `applyStatus` discards
- * anyway (`if (current === newStatus) return`), which is a menu entry that
- * cannot do anything.
- *
- * A record whose status is blank or is not a declared choice — the Unset lane —
- * matches nothing and is therefore offered every lane, which is right: those are
- * exactly the records that need moving somewhere.
- */
-export function moveChoices(choices: readonly string[], current: unknown): string[] {
-  const cur = String(current ?? '');
-  return choices.filter((c) => c !== cur);
-}

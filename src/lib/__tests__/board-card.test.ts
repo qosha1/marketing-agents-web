@@ -20,8 +20,8 @@
  * name is special-cased, because the next tenant's board will not be `topic`:
  *
  *   (a) a value that IS the heading earns no meta row, on any type;
- *   (b) the status control keeps its control and loses its echoed value —
- *       {@link moveChoices} offers the lanes you are NOT in;
+ *   (b) the lane is not repeated on the card, and the card carries NO status
+ *       control at all (bd startsim-8hgmq.12) — dragging is how a card moves;
  *   (c) an attribute the active facet has already pinned to one value is
  *       suppressed, derived from that filter and never from a hardcoded name.
  *
@@ -31,7 +31,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { cardBody, cardHeading, moveChoices } from '@/lib/board-card';
+import { cardBody, cardHeading } from '@/lib/board-card';
 import type { AttrFilter } from '@/lib/board';
 import type { EntityRecord, EntityTypeDef } from '@/lib/foundry-api';
 
@@ -159,27 +159,6 @@ describe('(a) an attribute that IS the heading earns no meta row', () => {
   });
 });
 
-describe('(b) the status control offers a MOVE, not the lane the card is already in', () => {
-  it('leaves out the current status — a menu entry that cannot do anything is not a choice', () => {
-    expect(moveChoices(['suggested', 'ready', 'written', 'rejected'], 'suggested')).toEqual([
-      'ready',
-      'written',
-      'rejected',
-    ]);
-  });
-
-  it('offers every lane to a record whose status is blank or unrecognised (the Unset lane)', () => {
-    expect(moveChoices(['suggested', 'ready'], null)).toEqual(['suggested', 'ready']);
-    expect(moveChoices(['suggested', 'ready'], 'archived_2019')).toEqual(['suggested', 'ready']);
-  });
-
-  it('still reaches `written`, which the ✕/✓/✎ cluster cannot', () => {
-    // The decision cluster covers approve→ready, reject→rejected, needs_work→
-    // suggested. `written` is only reachable by this control or by a drag, which
-    // is why the control keeps its control and loses only its echoed value.
-    expect(moveChoices(['suggested', 'ready', 'written', 'rejected'], 'ready')).toContain('written');
-  });
-});
 
 describe('(c) an attribute the active facet has pinned to one value', () => {
   it('is suppressed while the board is scoped to it', () => {
