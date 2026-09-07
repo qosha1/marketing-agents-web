@@ -41,6 +41,42 @@ export const TRANSLATION_OF = 'translation_of';
 export const DRAFT_TYPE = 'draft';
 
 /**
+ * The attribute on a draft naming the topic it was written for — the primary
+ * link above, and the one the n8n writer stamps.
+ *
+ * IT LIVES HERE, next to the priority order it belongs to, because two other
+ * modules now have to ask the SCHEMA about it rather than just read it off a
+ * record: `drafts-view.ts` and `topic-gate.ts` both narrow server-side only when
+ * the draft type DECLARES it (bd startsim-8hgmq.11). Spelling the name twice is
+ * how the two halves drift.
+ */
+export const TOPIC_REF_ATTR = 'topic_ref';
+
+/**
+ * Whether a draft type DECLARES `topic_ref`, and therefore whether the tenant
+ * can narrow on it.
+ *
+ * THE THIRD ANSWER IS WHY THIS EXISTS. The tenant backend has three answers to
+ * a filter, not two: honoured; unrecognised-and-ignored (which returns
+ * EVERYTHING — the mirror failure `foundry-api.ts` defends against); and
+ * ACCEPTED-AND-MATCHED-NOTHING, which is what `attr.<name>` does when the type
+ * does not declare `<name>`. That last one comes back `count: 0`, with the
+ * parameter in `applied_filters` and NOT in `ignored_filters` — a plausible
+ * answer no caller thinks to distrust, and it cost this tenant three production
+ * defects in one day. `topic_ref` was written on 147 of 150 live drafts and
+ * declared on none of them.
+ *
+ * Structural argument (`{ name: string }[]`), so a caller can pass Django's raw
+ * schema JSON or the camelCased `AttributeDef[]` the browser client produces
+ * without a normalisation step that could itself be the bug. An empty list —
+ * a type still loading, a type that does not exist — reads as "cannot narrow",
+ * which is the safe answer and never "narrow by nothing".
+ */
+export function declaresTopicRef(attributes: readonly { name: string }[]): boolean {
+  return attributes.some((a) => a.name === TOPIC_REF_ATTR);
+}
+
+/**
  * The drafts written for a topic — see the priority order documented above.
  * `topicExternalId` is optional (most callers don't have/need it — the primary
  * `topic_ref === topic.id` signal covers live data); pass it to also catch the
@@ -59,7 +95,7 @@ export function matchTopicDrafts(
     relatedByEdge(topicId, WRITTEN_FOR, relationships, drafts).map((d) => d.id),
   );
   return drafts.filter((d) => {
-    const ref = readData(d.data, 'topic_ref');
+    const ref = readData(d.data, TOPIC_REF_ATTR);
     if (ref != null && String(ref) === topicRefId) return true; // primary
     if (viaEdgeIds.has(d.id)) return true; // fallback 1
     if (ref != null && topicRefExternal != null && String(ref) === topicRefExternal) return true; // fallback 2
@@ -81,7 +117,7 @@ export function topicIdForDraft(
   relationships: RelationshipRecord[],
   topics: EntityRecord[],
 ): EntityRecord['id'] | null {
-  const ref = readData(draft.data, 'topic_ref');
+  const ref = readData(draft.data, TOPIC_REF_ATTR);
   const refStr = ref == null ? null : String(ref);
   if (refStr != null) {
     const byId = topics.find((t) => String(t.id) === refStr);

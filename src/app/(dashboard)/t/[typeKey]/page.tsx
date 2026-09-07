@@ -202,9 +202,11 @@ export default function TypeRecordsPage() {
   const serverFilters = useMemo<EntityFilters>(
     () => ({
       ...searchFilters(search, titleAttr),
-      ...(isDraft && !gateBroken ? draftsViewFilters(viewParams, approvedIds) : {}),
+      ...(isDraft && !gateBroken
+        ? draftsViewFilters(viewParams, approvedIds, type?.attributes ?? [])
+        : {}),
     }),
-    [titleAttr, search, isDraft, gateBroken, viewParams, approvedIds],
+    [titleAttr, search, isDraft, gateBroken, viewParams, approvedIds, type?.attributes],
   );
   const anyServerFilter = Object.keys(serverFilters).length > 0;
 

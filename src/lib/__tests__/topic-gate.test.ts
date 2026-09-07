@@ -81,25 +81,46 @@ describe('entityFromWire', () => {
   });
 });
 
+/** The draft type as the live tenant declares it SINCE 2026-09-07 — with
+ *  `topic_ref` (bd startsim-8hgmq.11). */
+const DRAFT_TYPE_WIRE = {
+  id: 'type-2',
+  key: 'draft',
+  label: 'Draft',
+  attributes: [
+    { id: 'b1', name: 'status', data_type: 'enum', required: false, config: { choices: ['ready_for_review'] } },
+    { id: 'b2', name: 'topic_ref', data_type: 'text', required: false, config: {} },
+  ],
+};
+
+/** The same type as it stood for the two weeks it was firing the writer twice. */
+const DRAFT_TYPE_WIRE_UNDECLARED = {
+  ...DRAFT_TYPE_WIRE,
+  attributes: DRAFT_TYPE_WIRE.attributes.filter((a) => a.name !== 'topic_ref'),
+};
+
 /**
  * A reader that answers from fixed pages, and records what it was asked for.
  *
- * `attrFilter` selects which of the tenant's TWO documented silences to model,
- * because the gate has to be right under both and only one was ever fixtured:
+ * IT MODELS THE TENANT'S THIRD ANSWER FROM THE SCHEMA IT WAS GIVEN, which is
+ * the only way this fixture can be trusted. A filter on `attr.<name>` is:
  *
- *  - 'undeclared' (the DEFAULT, and what the live backend does): a filter on an
- *    attribute the type does not DECLARE is accepted and matches NOTHING — the
- *    envelope comes back `count: 0`, with the parameter listed in
- *    `applied_filters` and NOT in `ignored_filters`, indistinguishable from a
- *    filter that legitimately found nothing. `topic_ref` is exactly such an
- *    attribute on the draft type; verified on the live tenant in
- *    bd startsim-8hgmq.4, which cost the Drafts tab its entire contents.
- *  - 'ignored': an UNRECOGNISED parameter is dropped and every row comes back.
- *    The mirror case, already warned about in `foundry-api.ts`.
+ *  - HONOURED, and the rows really are narrowed, when `<name>` is DECLARED on
+ *    the type named by `?type=` in `pages.types`;
+ *  - ACCEPTED AND MATCHED NOTHING when it is not — `count: 0`, the parameter
+ *    listed in `applied_filters` and NOT in `ignored_filters`, indistinguishable
+ *    from a filter that legitimately found nothing. That is what `topic_ref` did
+ *    on the live tenant until it was declared (bd startsim-8hgmq.4), and it cost
+ *    the Drafts tab its entire contents and the drafts-exist gate its whole
+ *    purpose.
  *
- * A reader that answers every `entities?` path with the fixture rows models
- * NEITHER — it quietly assumes the filter worked. That is the fixture this file
- * used to ship, and it is why the gate read as covered while the writer was
+ * `attrFilter: 'ignored'` overrides both to model the MIRROR silence already
+ * warned about in `foundry-api.ts`: an UNRECOGNISED parameter is dropped and
+ * every row comes back.
+ *
+ * A reader that answered every `entities?` path with the fixture rows would
+ * model NEITHER — it quietly assumes the filter worked. That is the fixture this
+ * file used to ship, and it is why the gate read as covered while the writer was
  * being fired twice over the same topic on the live tenant.
  */
 function reader(
@@ -108,17 +129,32 @@ function reader(
     types?: unknown[];
     drafts?: unknown[];
   },
-  attrFilter: 'undeclared' | 'ignored' = 'undeclared',
+  attrFilter: 'schema' | 'ignored' = 'schema',
 ): { read: <T>(p: string) => Promise<T>; paths: string[] } {
   const paths: string[] = [];
+  const types = pages.types ?? [TOPIC_TYPE_WIRE, DRAFT_TYPE_WIRE];
+  const declaredOn = (typeKey: string, attr: string) =>
+    (types as { key?: string; attributes?: { name: string }[] }[])
+      .find((t) => t.key === typeKey)
+      ?.attributes?.some((a) => a.name === attr) ?? false;
+
   const read = async <T,>(path: string): Promise<T> => {
     paths.push(path);
     if (path.startsWith('schema/types')) {
-      return { count: 1, next: null, previous: null, results: pages.types ?? [TOPIC_TYPE_WIRE] } as T;
+      return { count: types.length, next: null, previous: null, results: types } as T;
     }
     if (path.startsWith('entities?')) {
-      const askedForAnUndeclaredAttr = path.includes('attr.') && attrFilter === 'undeclared';
-      const rows = askedForAnUndeclaredAttr ? [] : (pages.drafts ?? []);
+      const query = new URLSearchParams(path.slice(path.indexOf('?') + 1));
+      const typeKey = query.get('type') ?? '';
+      let rows = pages.drafts ?? [];
+      for (const [key, value] of query.entries()) {
+        if (!key.startsWith('attr.')) continue;
+        if (attrFilter === 'ignored') continue; // dropped; the whole list comes back
+        const name = key.slice('attr.'.length).split('__')[0];
+        rows = declaredOn(typeKey, name)
+          ? rows.filter((d) => String((d as { data?: Record<string, unknown> }).data?.[name] ?? '') === value)
+          : [];
+      }
       return { count: rows.length, next: null, previous: null, results: rows } as T;
     }
     return pages.topic as T;
@@ -146,33 +182,60 @@ describe('resolveTopicGate', () => {
     expect(await resolveTopicGate(yes.read, '55')).toEqual({ allowed: true });
   });
 
-  // This used to assert the OPPOSITE — that the request carried
-  // `attr.topic_ref=55`. That filter WAS the defect (bd startsim-8hgmq.3):
-  // `topic_ref` is not a declared attribute on the draft type, so the tenant
-  // answered it with nothing and the count this gate stands on was always 0.
-  // What the assertion was protecting — that the read is narrowed and not a
-  // scan of every entity in the tenant — still holds, over `type` alone.
-  it('narrows by type, and asks for no filter the backend answers with nothing', async () => {
+  // This assertion has now been written three ways, and the history is the
+  // point. It first pinned `attr.topic_ref=55` on the request — and that filter
+  // WAS the defect (bd startsim-8hgmq.3): `topic_ref` was not a declared
+  // attribute on the draft type, so the tenant accepted it, matched nothing, and
+  // the count this gate stands on was 0 for every topic in the tenant, always.
+  // It was then rewritten to pin the OPPOSITE, that no `attr.` filter is sent at
+  // all. `topic_ref` is declared now (bd startsim-8hgmq.11), so the narrowing is
+  // back — behind a check of the schema this function already fetches, never
+  // behind an assumption about it.
+  it('narrows by attr.topic_ref once the draft type declares it', async () => {
     const r = reader({ topic: topicWire('ready') });
     await resolveTopicGate(r.read, '55');
     const listings = r.paths.filter((p) => p.startsWith('entities?'));
     expect(listings.length).toBeGreaterThan(0);
     expect(listings.every((p) => p.includes('type=draft'))).toBe(true);
-    expect(listings.some((p) => p.includes('attr.'))).toBe(false);
+    expect(listings.every((p) => p.includes('attr.topic_ref=55'))).toBe(true);
   });
 
-  it('refuses a written topic even though the backend answers attr.topic_ref with nothing', async () => {
-    // THE 2026-09-07 DEFECT, at the seam that was supposed to stop it
-    // (bd startsim-8hgmq.3). Three drafts for topic 55 are sitting in the
-    // tenant. The gate asked for them behind `attr.topic_ref=55`; the backend
-    // accepted that filter, matched nothing because `topic_ref` is undeclared,
-    // and returned `count: 0`. The JS re-count then ran over an EMPTY array,
-    // `draftCount` came out 0, and the writer was relayed a second time — six
-    // near-duplicate Saudi WHT drafts in the review queue, executions 12848 and
-    // 12853, the second fired 79 seconds AFTER the first three had landed.
+  it('asks for NO attr filter when the draft type does not declare topic_ref', async () => {
+    // THE GUARANTEE THIS BEAD BUYS. Undeclare the attribute — by hand, by a
+    // rebuilt tenant, by a foundry that never had it — and the request stops
+    // carrying a filter the backend would answer with `count: 0`. The gate falls
+    // back to listing by `type` and matching in JS: slower, and correct. The
+    // failure mode is a page of extra rows, never a silent zero.
+    const r = reader({
+      topic: topicWire('ready'),
+      types: [TOPIC_TYPE_WIRE, DRAFT_TYPE_WIRE_UNDECLARED],
+      drafts: [
+        { id: 1, data: { topic_ref: '55' } },
+        { id: 2, data: { topic_ref: '55' } },
+        { id: 3, data: { topic_ref: '55' } },
+      ],
+    });
+    const gate = await resolveTopicGate(r.read, '55');
+    const listings = r.paths.filter((p) => p.startsWith('entities?'));
+    expect(listings.some((p) => p.includes('attr.'))).toBe(false);
+    // …and it still refuses, which is the whole reason the fallback exists.
+    expect(gate).toMatchObject({ allowed: false, reason: 'drafts_exist' });
+  });
+
+  it('refuses a written topic — the 2026-09-07 double-relay, both ways round', async () => {
+    // THE DEFECT, at the seam that was supposed to stop it (bd startsim-8hgmq.3).
+    // Three drafts for topic 55 are sitting in the tenant. The gate asked for
+    // them behind `attr.topic_ref=55`; the backend accepted that filter, matched
+    // nothing because `topic_ref` was undeclared, and returned `count: 0`. The JS
+    // re-count then ran over an EMPTY array, `draftCount` came out 0, and the
+    // writer was relayed a second time — six near-duplicate Saudi WHT drafts in
+    // the review queue, n8n executions 12848 and 12853, the second fired 79
+    // seconds AFTER the first three had landed.
     //
-    // The default reader models that backend, so this fails until the request
-    // stops carrying a filter the tenant cannot answer.
+    // The reader models the tenant from its own schema, so this is now asserted
+    // under BOTH postures: with topic_ref declared (the filter narrows for real)
+    // and with it undeclared (the request must not carry it at all). The test
+    // above pins the undeclared half; this pins the declared one.
     const r = reader({
       topic: topicWire('ready'),
       drafts: [
