@@ -333,3 +333,23 @@ export function translatableTargets(
   const taken = new Set(presentLangs.filter(Boolean));
   return declared.filter((choice) => choice && !taken.has(choice));
 }
+
+/**
+ * The language a reviewer is still waiting on, or null once it has arrived.
+ *
+ * The translate action answers 202 and finishes DETACHED — a 400-500 word brief
+ * does not fit in a request (startsim-jb1z measured 19.6s for one document) — so
+ * the only honest way to know a translation is done is to look for a draft
+ * carrying that language. Expressed as a predicate over the languages present so
+ * "still translating" can be DERIVED on every render instead of remembered in
+ * state that an effect has to clear (bd startsim-mcoza): what the reviewer
+ * clicked is remembered, what the server has produced is observed, and the two
+ * are compared rather than synchronised.
+ */
+export function pendingTranslation(
+  requested: string | null | undefined,
+  presentLangs: readonly string[],
+): string | null {
+  if (!requested) return null;
+  return presentLangs.includes(requested) ? null : requested;
+}
