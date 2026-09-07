@@ -27,12 +27,14 @@
  */
 import {
   applyRecencyWindow,
+  inFilters,
   pickRecencyWindow,
   readData,
   RECENCY_ALL,
   RECENCY_PARAM,
 } from '@/lib/board';
-import type { EntityRecord } from '@/lib/foundry-api';
+import type { AttributeDef, EntityRecord } from '@/lib/foundry-api';
+import { declaresTopicRef, TOPIC_REF_ATTR } from '@/lib/topic-drafts';
 
 /** URL param carrying the "only drafts whose topic was approved" half. */
 export const TOPIC_GATE_PARAM = 'topic';
@@ -58,7 +60,7 @@ export const DRAFTS_DEFAULT_DAYS = 7;
 export const APPROVED_TOPIC_STATUSES = ['ready', 'written'];
 
 /** The attribute on a draft that names the topic it was written for. */
-export const TOPIC_REF_ATTR = 'topic_ref';
+export { TOPIC_REF_ATTR };
 
 /** A default-filter chip: what it narrows, and the URL value that clears it. */
 export interface ViewChip {
@@ -100,50 +102,67 @@ export function clearedDraftsView(): Record<string, string> {
 }
 
 /**
- * The request filters for the drafts default view — and there are none.
+ * The request filters for the drafts default view — narrowed server-side, and
+ * ONLY where the schema says the server can narrow.
  *
- * THE TOPIC GATE CANNOT BE A REQUEST FILTER, and finding out why cost the
- * Drafts tab (bd startsim-8hgmq.4). This used to narrow server-side with
- * `attr.topic_ref__in` (rule 8 — narrow before fetching, not after). But
- * `topic_ref` is not a DECLARED attribute on the draft type, and the tenant
- * backend answers a filter on an undeclared attribute with `count: 0` while
- * reporting it in `applied_filters` and NOT in `ignored_filters`. So the tab
- * rendered "0 total / No results found" for every user, on every load, under a
- * chip that said "Topic approved" — with 153 drafts in the tenant and 84 of them
- * written for an approved topic.
+ * FINDING OUT WHY THIS CANNOT BE UNCONDITIONAL COST THE DRAFTS TAB
+ * (bd startsim-8hgmq.4). It used to narrow with `attr.topic_ref__in` outright
+ * (rule 8 — narrow before fetching, not after). But `topic_ref` was not a
+ * DECLARED attribute on the draft type, and the tenant backend answers a filter
+ * on an undeclared attribute with `count: 0` while reporting it in
+ * `applied_filters` and NOT in `ignored_filters`. So the tab rendered
+ * "0 total / No results found" for every user, on every load, under a chip that
+ * said "Topic approved" — with 150 drafts in the tenant and 81 of them written
+ * for an approved topic.
  *
  * `foundry-api.ts` already warns about the MIRROR of this: an UNRECOGNISED
  * parameter is silently IGNORED and the request returns EVERYTHING. Same
  * silence, opposite direction. Only one of the two had been defended against.
  *
- * The gate itself is not in doubt, only where it runs. {@link applyTopicGate}
- * already existed for the case where there are more approved topics than the
- * backend's comma-list cap; it is now the only path, so no request can carry a
- * filter the server answers with nothing. Declaring `topic_ref` as a real
- * AttributeDef (plus `redenormalize_attributes`) would let the server half work
- * as written and is the better long-run answer — it is a schema change, and this
- * is not the hour for one.
+ * `topic_ref` IS DECLARED NOW (bd startsim-8hgmq.11, applied 2026-09-07 via
+ * `scripts/schemas/ogmc.json` + `redenormalize_attributes`; measured live,
+ * `?attr.topic_ref__in=<26 approved ids>` answers 81 having answered 0 the hour
+ * before). So the narrowing is back. What is NOT back is the assumption: this
+ * reads `attributes` — the draft type the page has already fetched to build its
+ * columns — and builds the filter only when `topic_ref` is among them. There is
+ * no comment here asserting the attribute is declared, because a comment is
+ * exactly what was wrong last time.
  *
- * The recency half was never a request parameter either: a draft's age is
- * `core_entity.created_at`, a column, and the tenant's EntityQuery recognises no
- * filter on it (`occurred_after` aliases the `occurred_at` ATTRIBUTE, not the
+ * UNDECLARE IT AND NOTHING BREAKS, WHICH IS THE WHOLE GUARANTEE. The request
+ * quietly stops carrying the filter, {@link applyTopicGate} narrows the rows
+ * instead, and the tab is correct-but-slower rather than silently empty. The
+ * same holds while the schema query is still in flight, when `attributes` is [].
+ *
+ * The recency half was never a request parameter and still is not: a draft's age
+ * is `core_entity.created_at`, a column, and the tenant's EntityQuery recognises
+ * no filter on it (`occurred_after` aliases the `occurred_at` ATTRIBUTE, not the
  * row's own timestamp). See {@link applyDraftsRecency}.
  */
-export function draftsViewFilters(params: Params, approvedTopicIds: string[]): Record<string, string> {
-  // Both arguments are kept: the signature is the seam the page calls through,
-  // and declaring `topic_ref` server-side is still the better long-run fix.
-  void params;
-  void approvedTopicIds;
-  return {};
+export function draftsViewFilters(
+  params: Params,
+  approvedTopicIds: string[],
+  attributes: Pick<AttributeDef, 'name'>[],
+): Record<string, string> {
+  if (!topicGateActive(params)) return {};
+  if (!declaresTopicRef(attributes)) return {};
+  // `inFilters` returns null for an empty list and for one past the backend's
+  // comma-list cap — both mean "the server cannot narrow this", never "no
+  // filter". {@link draftsGateNeedsClient} is unconditional, so either way the
+  // client gate still runs and the answer is the same, only wider on the wire.
+  return inFilters(TOPIC_REF_ATTR, approvedTopicIds) ?? {};
 }
 
 /**
- * True whenever the gate is on — the server cannot express it at all, so the
- * client always narrows (see {@link draftsViewFilters}). This used to be true
- * only past the backend's comma-list cap; below the cap the request filter was
- * trusted, and it silently returned nothing.
+ * True whenever the gate is on — ALWAYS, even when the request above narrowed.
  *
- * Note the empty-approved case is now `true` as well, and must be: the old code
+ * The server filter is an optimisation, not the gate. This costs one Set lookup
+ * over rows already in memory, and it is the standing defence against the MIRROR
+ * silence: a parameter the backend does not recognise is dropped and the whole
+ * corpus comes back under an active chip. Making this conditional on the server
+ * filter would trade a cheap re-check for a class of failure that has already
+ * happened here twice.
+ *
+ * Note the empty-approved case is `true` as well, and must be: the original code
  * sent an `__none__` sentinel so an active chip could never widen to the whole
  * corpus. {@link applyTopicGate} over an empty id list gives the same empty
  * result without a request that lies about what it filtered.

@@ -130,6 +130,9 @@ describe('d0j7d (b) — Drafts can be searched by title, SERVER-side', () => {
 
 describe('d0j7d (c) — the Drafts default filter is VISIBLE and CLEARABLE', () => {
   const now = new Date('2026-08-26T12:00:00Z');
+  /** The draft type's attributes, as the live tenant declares them since
+   *  2026-09-07 — `topic_ref` among them (bd startsim-8hgmq.11). */
+  const DECLARED = [{ name: 'status' }, { name: 'topic_ref' }];
 
   it('opens on "topic approved" + a 5-7 day window, and SAYS SO in two chips', () => {
     const chips = draftsViewChips({}, now);
@@ -145,7 +148,7 @@ describe('d0j7d (c) — the Drafts default filter is VISIBLE and CLEARABLE', () 
   it('clears to a view with NO chips and NO narrowing — the whole pipeline', () => {
     const cleared = clearedDraftsView();
     expect(draftsViewChips(cleared, now)).toEqual([]);
-    expect(draftsViewFilters(cleared, ['10', '11'])).toEqual({});
+    expect(draftsViewFilters(cleared, ['10', '11'], DECLARED)).toEqual({});
   });
 
   it('each half clears on its own', () => {
@@ -153,17 +156,28 @@ describe('d0j7d (c) — the Drafts default filter is VISIBLE and CLEARABLE', () 
     expect(draftsViewChips({ since: 'all' }, now).map((c) => c.param)).toEqual([TOPIC_GATE_PARAM]);
   });
 
-  // These two used to assert the OPPOSITE — that the gate narrowed SERVER-side
-  // with `attr.topic_ref__in`, and that an empty approved set sent an `__none__`
-  // sentinel rather than widening. Both were the defect (bd startsim-8hgmq.4):
-  // `topic_ref` is not a declared attribute, so the backend answered every one
-  // of those requests with count:0 and the tab opened empty for everyone. The
-  // gate now runs on the client; `drafts-gate.test.ts` pins the new contract and
-  // records why. What they were protecting — a gate must never widen to the whole
-  // corpus — still holds, and is asserted below over the client-side form.
-  it('sends no request filter for the gate, because the backend cannot express it', () => {
-    expect(draftsViewFilters({}, ['10', '11'])).toEqual({});
-    expect(draftsViewFilters({}, [])).toEqual({});
+  // These have now been written three ways, and the history is worth keeping.
+  // They first pinned a SERVER-side `attr.topic_ref__in` narrowing, plus an
+  // `__none__` sentinel so an empty approved set could not widen to everything.
+  // That was the defect (bd startsim-8hgmq.4): `topic_ref` was not a DECLARED
+  // attribute, so the backend answered every one of those requests with count:0
+  // and the tab opened empty for every user on every load. They were then
+  // rewritten to pin the opposite — no request filter at all, ever.
+  //
+  // `topic_ref` is declared now (bd startsim-8hgmq.11), so the narrowing is back
+  // behind a check of the schema the page already holds. `drafts-gate.test.ts`
+  // pins that contract in full, both branches. What all three versions were
+  // protecting — a gate must never widen to the whole corpus — still holds, and
+  // is asserted below over the client-side form, which runs in every case.
+  it('narrows server-side where declared, and never on an assumption', () => {
+    expect(draftsViewFilters({}, ['10', '11'], DECLARED)).toEqual({
+      'attr.topic_ref__in': '10,11',
+    });
+    // Undeclared, still loading, or nothing approved: no filter, and the client
+    // gate below is what narrows.
+    expect(draftsViewFilters({}, ['10', '11'], [{ name: 'status' }])).toEqual({});
+    expect(draftsViewFilters({}, ['10', '11'], [])).toEqual({});
+    expect(draftsViewFilters({}, [], DECLARED)).toEqual({});
   });
 
   it('does not silently return everything when no topic is approved', () => {

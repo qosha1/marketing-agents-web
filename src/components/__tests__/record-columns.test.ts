@@ -342,3 +342,59 @@ describe('the Drafts table drops columns nothing has filled in (startsim-8hgmq.1
     expect(topic).toContain('assignee_name');
   });
 });
+
+/**
+ * The column half of declaring `topic_ref` (bd startsim-8hgmq.11).
+ *
+ * `topic_ref` is the edge from a draft back to its topic and is written on 147
+ * of the 150 live drafts, but it was never a declared AttributeDef — so a
+ * server-side filter on it was accepted, matched nothing, and answered
+ * `count: 0` while reporting itself in `applied_filters`. Declaring it is the
+ * fix; declaring it ALSO turns it into a generated column, and the Drafts table
+ * had just come down from nine columns to seven with 0px of overflow at 1440,
+ * 1366 and 1280.
+ *
+ * A raw uuid is the worst possible ninth column: 36 characters of machine key
+ * that no reviewer reads, sitting at the same width as a real one. So the
+ * declaration and the exclusion land together.
+ */
+const DRAFT_ATTRS_WITH_TOPIC_REF = defs([
+  'content_type', 'candidate_index', 'blog', 'linkedin', 'seo', 'sources',
+  'judge_verdict', 'auto_checks', 'chosen', 'sent_at', 'assignee_sub',
+  'assignee_name', 'lang', 'status', 'scope_path', 'topic_ref',
+]);
+
+describe('a declared topic_ref never becomes a default column (startsim-8hgmq.11)', () => {
+  it('leaves the Drafts table on exactly the same seven columns', () => {
+    expect(defaultVisibleColumns(DRAFT_ATTRS_WITH_TOPIC_REF, {
+      afterCreated: ['__origin'],
+      sparse: DRAFT_SPARSE,
+    })).toEqual([
+      'name', 'createdAt', '__origin', 'content_type', 'status',
+      'judge_verdict', 'candidate_index',
+    ]);
+  });
+
+  it('stays out of a leaner type whose preferred attributes leave a free slot', () => {
+    // The draft type as it stands cannot show this, and that is worth saying
+    // out loud: its six PREFERRED attributes exactly fill the cap of six, so
+    // `topic_ref` lands in `rest` and never gets a slot no matter where the
+    // DB-natural attribute order puts it. The guarantee is therefore ACCIDENTAL
+    // today — one attribute leaving PREFERRED_ATTRS, or one dropping off the
+    // type, frees a slot and a 36-character uuid takes it.
+    //
+    // So the exclusion is pinned against a type that HAS a free slot. Any type
+    // declaring the draft->topic edge gets the same answer.
+    const lean = defs(['topic_ref', 'content_type', 'status']);
+    const visible = defaultVisibleColumns(lean);
+    expect(visible).not.toContain('topic_ref');
+    // …and dropping it must NARROW the row, never hand its slot to the next
+    // attribute in line — the cap is a width ceiling, not a quota to fill.
+    expect(visible).toEqual(['name', 'createdAt', 'content_type', 'status']);
+  });
+
+  it('still OFFERS it in the Columns menu, like every other dropped default', () => {
+    const ids = buildRecordColumns(DRAFT_ATTRS_WITH_TOPIC_REF).map((c) => c.id);
+    expect(ids).toContain('topic_ref');
+  });
+});

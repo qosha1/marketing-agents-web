@@ -107,6 +107,27 @@ const WIDE_FIELDS: readonly string[] = [
  */
 const NAME_DUPLICATE_ATTRS: readonly string[] = ['title'];
 
+/**
+ * Attributes that are a MACHINE JOIN KEY — an opaque id whose only reader is
+ * code. A column of 36-character uuids tells a reviewer nothing, at the same
+ * width as a column that would have.
+ *
+ * `topic_ref` IS HERE BECAUSE IT WAS DECLARED, NOT DESPITE IT (bd
+ * startsim-8hgmq.11). It is the edge from a draft back to its topic, written on
+ * 147 of 150 live drafts — and it was never a declared AttributeDef, so a
+ * server-side filter on it was ACCEPTED, matched nothing, and answered
+ * `count: 0` while naming itself in `applied_filters`. That silence emptied the
+ * Drafts tab for every user and left the "already has drafts" guard structurally
+ * unable to fire. Declaring it fixes both AND makes it a generated column here,
+ * so the two halves ship together.
+ *
+ * On the draft type as it stands the exclusion changes nothing: six PREFERRED
+ * attributes exactly fill DEFAULT_ATTR_CAP, so `topic_ref` sits in `rest` and
+ * never reaches a slot. That guarantee is ACCIDENTAL — one attribute leaving
+ * PREFERRED_ATTRS frees the slot — and this list is what makes it deliberate.
+ */
+const JOIN_KEY_ATTRS: readonly string[] = ['topic_ref'];
+
 /** The content-defining fields, shown first when the type declares them. */
 const PREFERRED_ATTRS: readonly string[] = [
   'content_type', 'status', 'judge_verdict', 'candidate_index', 'story_title', 'sent_at',
@@ -176,6 +197,7 @@ export function defaultVisibleColumns(
     ...NEVER_DEFAULT_ATTRS,
     ...WIDE_FIELDS,
     ...NAME_DUPLICATE_ATTRS,
+    ...JOIN_KEY_ATTRS,
     ...(opts.sparse ?? []),
   ]);
   const visibleAttrs = [...preferred, ...rest]
