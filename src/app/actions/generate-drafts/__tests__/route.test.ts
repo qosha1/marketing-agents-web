@@ -26,16 +26,30 @@
  * and refuses EVERY topic, approved ones included. A camelCase fixture would
  * pass here while production quietly lost the button, so the wire shape is the
  * thing under test.
+ *
+ * `stubTenant` ANSWERS `whoami` FOR THE SAME REASON (bd startsim-8hgmq.7). The
+ * route now resolves the caller from the bearer it already holds, and that read
+ * is deliberately non-fatal — a whoami blip omits the label rather than
+ * refusing the generate. So a stub that threw `unexpected tenant path` on
+ * `whoami` would be SWALLOWED: every test here would stay green while
+ * `triggered_by` was silently dropped in production, which is the exact class
+ * of bug the paragraph above describes. The happy path therefore asserts the
+ * relayed body CARRIES the caller, positively, and a separate test breaks only
+ * the whoami read to prove the relay still happens without it.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/lib/tenant-fetch', () => ({ tenantFetch: vi.fn() }));
 
+import { resetGenerateClaims } from '@/lib/generate-claim';
 import { tenantFetch } from '@/lib/tenant-fetch';
 import { POST } from '../route';
 
 const TOPIC_ID = 4242;
 const AUTH = 'Bearer test.token.value';
+/** The reviewer whose bearer this is, as the tenant's own whoami reports her. */
+const CALLER_EMAIL = 'qa-marketing-agents@startsimpli.com';
+const CALLER_SUB = '1c44a170-eee3-4922-b38b-36dbe76e7ee5';
 
 /** The topic type as DJANGO sends it — snake_case, not the client's camelCase. */
 const TOPIC_TYPE_WIRE = {
@@ -93,8 +107,16 @@ function stubTenant(opts: {
   draftsNext?: string | null;
   fail?: boolean;
   attrFilter?: 'undeclared' | 'ignored';
+  /** Django's raw whoami shape, or `null` to make ONLY that read fail. */
+  whoami?: unknown;
 }) {
   vi.mocked(tenantFetch).mockImplementation(async (path: string) => {
+    if (path.startsWith('whoami')) {
+      if (opts.whoami === null) throw new Error(`tenant GET ${path} responded 401`);
+      // snake_case, like every other fixture here: `tenantFetch` returns
+      // Django's JSON untouched, so `company_id` does NOT arrive camelised.
+      return opts.whoami ?? { sub: CALLER_SUB, email: CALLER_EMAIL, company_id: 'c1', role: 'admin' };
+    }
     if (opts.fail) throw new Error(`tenant GET ${path} is unreachable`);
     if (path.startsWith('schema/types')) {
       return { count: 1, next: null, previous: null, results: opts.types ?? [TOPIC_TYPE_WIRE] };
@@ -144,6 +166,9 @@ function post(body: unknown, auth: string | null = AUTH): Request {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // The in-flight claim store is module-level and outlives a single test, which
+  // is the whole point of it (bd startsim-8hgmq.8) — so a test must clear it.
+  resetGenerateClaims();
   // See the file header: without this the route POSTs the LIVE writer webhook.
   global.fetch = vi.fn(async () => new Response('ok', { status: 200 })) as unknown as typeof fetch;
 });
@@ -277,5 +302,141 @@ describe('POST /actions/generate-drafts', () => {
     stubTenant({ topic: topicWire('ready') });
     expect((await POST(post({}))).status).toBe(400);
     expect(global.fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe('who pressed it (bd startsim-8hgmq.7)', () => {
+  it("relays the caller's EMAIL as triggered_by, resolved from the same bearer", async () => {
+    // The route already holds the reviewer's bearer and already spends it on
+    // the gate; one more read names her. Email and not `sub` because the column
+    // this lands in is read by a person: whoami returns
+    // {sub, email, companyId, orgId, role} and has no display name at all, so
+    // the only legible choice is the email.
+    stubTenant({ topic: topicWire('ready'), drafts: [] });
+
+    const res = await POST(post({ story: story() }));
+
+    expect(res.status).toBe(202);
+    const [, init] = vi.mocked(global.fetch).mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      topic_ref: String(TOPIC_ID),
+      trigger: 'generate_button',
+      triggered_by: CALLER_EMAIL,
+    });
+  });
+
+  it('relays ANYWAY when the caller cannot be resolved, and omits the key', async () => {
+    // An unknown presser is a missing nicety, not a missing guard. Refusing the
+    // generate over a whoami blip would be a far worse bug than an unattributed
+    // draft — and an EMPTY triggered_by would be worse still, because the writer
+    // omits the key when empty precisely so absence reads as "not known".
+    stubTenant({ topic: topicWire('ready'), drafts: [], whoami: null });
+
+    const res = await POST(post({ story: story() }));
+
+    expect(res.status).toBe(202);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    const [, init] = vi.mocked(global.fetch).mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+    expect(body.trigger).toBe('generate_button');
+    expect('triggered_by' in body).toBe(false);
+  });
+
+  it('omits the key rather than sending a blank or non-string identity', async () => {
+    stubTenant({ topic: topicWire('ready'), drafts: [], whoami: { sub: CALLER_SUB, email: '  ' } });
+
+    const res = await POST(post({ story: story() }));
+
+    expect(res.status).toBe(202);
+    const [, init] = vi.mocked(global.fetch).mock.calls[0] as [string, RequestInit];
+    expect('triggered_by' in (JSON.parse(String(init.body)) as Record<string, unknown>)).toBe(false);
+  });
+});
+
+describe('the in-flight claim (bd startsim-8hgmq.8)', () => {
+  it('does not fire a SECOND writer for a topic whose first run is still in flight', async () => {
+    // THE DEFECT. The webhook answers "Workflow got started" immediately and the
+    // drafts take ~100s to appear, so the drafts_exist gate — which counts
+    // drafts that DO NOT EXIST YET — reads zero for both presses and relays
+    // both. On 2026-09-07 that left six near-duplicate drafts in the reviewer's
+    // queue and three had to be deleted by hand.
+    stubTenant({ topic: topicWire('ready'), drafts: [] });
+
+    const first = await POST(post({ story: story() }));
+    const second = await POST(post({ story: story() }));
+
+    expect(first.status).toBe(202);
+    expect(second.status).toBe(202);
+    // ONE writer, not two. The status is the same on purpose: the second press
+    // is not an error to show the reader — a run for that topic IS under way and
+    // its drafts are on the way — so the body says `deduped` and the drawer
+    // keeps waiting instead of tearing its own run down over a 4xx.
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(await second.json()).toMatchObject({ ok: true, deduped: true });
+    expect(await first.json()).toMatchObject({ ok: true, deduped: false });
+  });
+
+  it('claims per TOPIC, so a run for one topic never blocks another', async () => {
+    stubTenant({ topic: topicWire('ready'), drafts: [] });
+
+    await POST(post({ story: story(TOPIC_ID) }));
+    vi.mocked(tenantFetch).mockImplementation(async (path: string) => {
+      if (path.startsWith('whoami')) return { sub: CALLER_SUB, email: CALLER_EMAIL };
+      if (path.startsWith('schema/types')) {
+        return { count: 1, next: null, previous: null, results: [TOPIC_TYPE_WIRE] };
+      }
+      if (path.startsWith('entities?')) return { count: 0, next: null, previous: null, results: [] };
+      return topicWire('ready', 777);
+    });
+    const other = await POST(post({ story: story(777) }));
+
+    expect(other.status).toBe(202);
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('RELEASES the claim when the relay fails, so a retry is not locked out', async () => {
+    // The lockout risk is the reason a lock was not shipped with the gate fix.
+    // The writer that never started must not hold the topic: every failure this
+    // route can see gives the claim straight back.
+    stubTenant({ topic: topicWire('ready'), drafts: [] });
+    global.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(new Response('nope', { status: 500 }))
+      .mockResolvedValueOnce(new Response('ok', { status: 200 })) as unknown as typeof fetch;
+
+    const failed = await POST(post({ story: story() }));
+    const retry = await POST(post({ story: story() }));
+
+    expect(failed.status).toBe(502);
+    expect(retry.status).toBe(202);
+    expect(await retry.json()).toMatchObject({ deduped: false });
+  });
+
+  it('releases the claim when the webhook is unreachable', async () => {
+    stubTenant({ topic: topicWire('ready'), drafts: [] });
+    global.fetch = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('ECONNREFUSED'))
+      .mockResolvedValueOnce(new Response('ok', { status: 200 })) as unknown as typeof fetch;
+
+    expect((await POST(post({ story: story() }))).status).toBe(502);
+    expect((await POST(post({ story: story() }))).status).toBe(202);
+  });
+
+  it('lets drafts_exist answer first — the better refusal wins over the claim', async () => {
+    // Once the drafts have landed, "this topic already has drafts" is a truer
+    // and more useful answer than "a run is in flight", so the gate is resolved
+    // before the claim is consulted and the claim never masks it.
+    stubTenant({ topic: topicWire('ready'), drafts: [] });
+    await POST(post({ story: story() }));
+
+    stubTenant({
+      topic: topicWire('ready'),
+      drafts: [draftWire(1, TOPIC_ID), draftWire(2, TOPIC_ID), draftWire(3, TOPIC_ID)],
+    });
+    const res = await POST(post({ story: story() }));
+
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { reason?: string }).reason).toBe('drafts_exist');
   });
 });

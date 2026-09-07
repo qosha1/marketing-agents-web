@@ -1,16 +1,24 @@
 /**
- * The "Created by" column (bd startsim-4gw21).
+ * The "Created by" column (bd startsim-4gw21, widened by startsim-8hgmq.6).
  *
  * A reviewer should never have to ask who wrote a row. This renders the answer
- * lib/draft-origin.ts derives — AI writer / Automation / Person — as one compact
- * pill, with the full reasoning in the cell's tooltip.
+ * lib/draft-origin.ts derives as one compact pill — Scheduled / Generated /
+ * AI writer / Automation / Person — with the person who pressed the button
+ * beside it when the record names one, and the full reasoning (plus the writer
+ * run id) in the cell's tooltip.
+ *
+ * THE PILL IS THE CALLER, NOT A NEW KIND. "Scheduled" and "Generated" are both
+ * `kind: 'automation'` and both wear the automation colour: a draft nobody typed
+ * is a draft nobody typed, and splitting the palette would suggest the two are
+ * different sorts of thing when the only difference is who started the run.
  *
  * WHY IT LIVES HERE AND NOT IN record-columns.ts. That module builds columns from
- * a type's DECLARED attributes; `_origin` and `owner_sub` are neither declared nor
- * per-type — one is an undeclared key inside the data blob, the other is a column
- * on the row itself. So this is an extra column a table opts into, appended
- * alongside the generated ones, rather than a special case threaded through the
- * generic builder.
+ * a type's DECLARED attributes; `_origin`, `_trigger` and `owner_sub` are neither
+ * declared nor per-type — the first two are undeclared keys inside the data blob,
+ * the last is a column on the row itself. So this is an extra column a table opts
+ * into, appended alongside the generated ones, rather than a special case
+ * threaded through the generic builder. (It also means the values are NOT
+ * filterable server-side — see the note in draft-origin.ts before adding one.)
  *
  * Plain `.ts` with `createElement` (no JSX), matching record-columns.ts, so the
  * column config stays importable from non-React tests.
@@ -46,6 +54,20 @@ function originCell(row: EntityRecord): ReactNode {
       },
       origin.label,
     ),
+    // WHO PRESSED IT, rendered whole and TRUNCATED BY CSS rather than shortened
+    // in code. The string is opaque by contract — n8n forwards whatever the
+    // caller sent, today an email — so any "just show the name part" rule here
+    // would be this app inventing a format the pipeline deliberately does not
+    // have. The ellipsis says there is more; the tooltip has all of it.
+    origin.triggeredBy
+      ? createElement(
+          'span',
+          {
+            className: 'inline-block max-w-[96px] truncate align-bottom text-[10px] text-gray-500',
+          },
+          origin.triggeredBy,
+        )
+      : null,
     // "Edited" is a SECOND fact, not a different origin: a machine-written draft
     // someone has since worked on is still machine-written, and collapsing the
     // two would hide exactly the row a reviewer most wants to find.
@@ -60,14 +82,19 @@ export function originColumn(): ColumnConfig<EntityRecord> {
   return {
     id: ORIGIN_COLUMN_ID,
     header: 'Created by',
-    width: 132,
+    // Room for the pill plus a truncated person. The cell renders one line.
+    width: 160,
     cell: originCell,
     sortable: true,
-    // Sort groups the machine-written rows together; the "edited" flag is a
-    // tiebreak so a row somebody has touched sorts apart from an untouched one.
+    // SORTS BY KIND FIRST, then by the caller. Sorting on the label alone was
+    // right while there was one automation label; with three ('AI writer',
+    // 'Generated', 'Scheduled') it would scatter the machine-written rows across
+    // the alphabet and put 'Person' in the middle of them — the exact grouping
+    // this sort exists to give. The "edited" flag stays a tiebreak, so a row
+    // somebody has touched sorts apart from an untouched one.
     accessorFn: (row: EntityRecord) => {
       const origin = describeRecordOrigin(row);
-      return `${origin.label.toLowerCase()}${origin.editedFields.length > 0 ? ' edited' : ''}`;
+      return `${origin.kind} ${origin.label.toLowerCase()}${origin.editedFields.length > 0 ? ' edited' : ''}`;
     },
   };
 }
