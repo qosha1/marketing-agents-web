@@ -71,6 +71,20 @@ export interface EntityRecord {
   name: string;
   data: Record<string, unknown>;
   createdAt: string;
+  /**
+   * Who the backend recorded as the row's owner. A service credential looks like
+   * `svc:n8n-ogmc`; a person is their central-auth user id. Every list/detail
+   * response carries it (wire `owner_sub`), and it is half of what
+   * lib/draft-origin.ts reads to say where a record came from.
+   */
+  ownerSub?: string | null;
+  /**
+   * The backend's per-field "this was set through the GET-then-write endpoints"
+   * marks, shaped `{ data: { <field>: { at, sub } } }` (wire `human_edited`).
+   * An ENDPOINT distinction, not a claim about who typed the value — see
+   * lib/draft-origin.ts.
+   */
+  humanEdited?: Record<string, unknown> | null;
 }
 
 // ---- schema (no-code type modeling) ----
