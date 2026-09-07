@@ -39,17 +39,12 @@ import {
   type KanbanColumnConfig,
   type KanbanMove,
   notify,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
 } from '@startsimpli/ui';
 
 import { InlineReviewActions, type ReviewConfig } from '@startsimpli/ui/collection';
 
 import {
   boardColumns,
-  choicesOf,
   laneMoveData,
   pickStatusAttr,
   readData,
@@ -57,7 +52,7 @@ import {
   type AttrFilter,
   type RollupCounts,
 } from '@/lib/board';
-import { ASSIGNEE_NAME_ATTR, cardBody, moveChoices } from '@/lib/board-card';
+import { ASSIGNEE_NAME_ATTR, cardBody } from '@/lib/board-card';
 import { nearestScrollParent, type LaneState } from '@/lib/lanes';
 import { initialsOf } from '@/lib/roster';
 import {
@@ -186,8 +181,6 @@ export function EntityBoard({
   const statusAttr = useMemo(() => pickStatusAttr(type), [type]);
   const columns = useMemo(() => boardColumns(statusAttr), [statusAttr]);
   const statusName = statusAttr?.name ?? '';
-  /** The lane attribute, said out loud — for the move control's accessible name. */
-  const statusLabel = statusName.replace(/_/g, ' ') || 'status';
 
   const items = useMemo(() => {
     const out: Record<string, EntityRecord[]> = {};
@@ -264,7 +257,6 @@ export function EntityBoard({
 
   if (!statusAttr) return null;
 
-  const choices = choicesOf(statusAttr);
   const kanbanCols: KanbanColumnConfig[] = columns.map((c) => ({ id: c.id, label: c.label }));
 
   function handleMove(move: KanbanMove) {
@@ -347,7 +339,6 @@ export function EntityBoard({
         // the pure rule for what is not (bd startsim-8hgmq.5). Selection only —
         // it writes nothing, so a lane move is untouched by it.
         const body = cardBody(type, record, { statusName, pinned });
-        const currentStatus = String(readData(record.data, statusName) ?? '');
         return (
           <>
             <div className="m-2 cursor-grab rounded-md border bg-white p-3 shadow-sm active:cursor-grabbing">
@@ -398,33 +389,15 @@ export function EntityBoard({
                 onPointerDown={(e) => e.stopPropagation()}
               >
                 {/*
-                  THE CONTROL STAYS; ITS ECHOED VALUE GOES (bd startsim-8hgmq.5).
-                  It used to display the record's status — inside the lane of the
-                  same name, which is what the lanes already are. It still EARNS
-                  its place: the ✕/✓/✎ cluster beside it only reaches
-                  approve/reject/needs-work, so this is the only way to a lane
-                  like `written` without dragging. So it now reads as an ACTION,
-                  offering the lanes the card is not in (`moveChoices`).
-
-                  Held at the empty string on purpose, which is Radix's
-                  placeholder sentinel: the value never advances, so picking the
-                  same lane twice fires `onValueChange` twice. A controlled value
-                  that tracked the selection would swallow the second — move a
-                  card to `written`, drag it back, and the control would refuse
-                  to move it there again.
+                  NO STATUS CONTROL HERE, ON PURPOSE (bd startsim-8hgmq.12).
+                  Moving a card between lanes is what the board IS — dragging is
+                  the mechanism, and every declared status has a lane of its own,
+                  so a dropdown reached nothing a drag does not. It first showed
+                  the record's status inside the lane of the same name, then read
+                  "Move to…"; both were a second way to do the thing the reader is
+                  already dragging. What stays is the DECISION, which a drag
+                  cannot express: approve writes status AND team_verdict together.
                 */}
-                <Select value="" onValueChange={(val) => applyStatus(record, val)}>
-                  <SelectTrigger className="h-7 flex-1 text-xs" aria-label={`Move to another ${statusLabel}`}>
-                    <span className="text-neutral-500">Move to…</span>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {moveChoices(choices, currentStatus).map((c) => (
-                      <SelectItem key={c} value={c}>
-                        {c}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
                 {/*
                   The decision, on the card (bd startsim-6y458). The SAME shared
                   cluster the table's Actions column renders, over the same
