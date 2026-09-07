@@ -59,6 +59,81 @@ export function humanizeHeader(name: string): string {
   return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
 
+/**
+ * Attributes that are NEVER default-visible, however early they sit in the type's
+ * attribute order. The reviewers asked for these three off the column view
+ * ("these don't have much added value for us" — Malin + Jurga, bd startsim-b008b):
+ *
+ *   ai_rank      → "Ai rank"      · the AI's ordering signal, the "AI verdict"
+ *   scope_path   → "Scope path"   · always "/ogmc" on this tenant — one value
+ *   team_verdict → "Team verdict" · the decision, already made by the row's actions
+ *
+ * They stay COLUMNS — one toggle away in the Columns menu — they just stop being
+ * on by default.
+ *
+ * team_verdict KEEPS BEING WRITTEN. It is the signal the n8n re-rank agent keys
+ * off (`good` → ready, `bad` → rejected); InlineReviewActions / applyDecisionToData
+ * must go on writing it. Only the column goes away.
+ */
+export const NEVER_DEFAULT_ATTRS: readonly string[] = ['ai_rank', 'scope_path', 'team_verdict'];
+
+/**
+ * Long body/blob attributes that are never default-visible — a table is for
+ * scanning, not for reading a 500-word article. They live on the detail page and
+ * stay one toggle away in the Columns menu.
+ */
+const LONG_FIELDS: readonly string[] = [
+  'blog', 'linkedin', 'seo', 'sources', 'body', 'content', 'auto_checks', '_origin', '_sample',
+];
+
+/** The content-defining fields, shown first when the type declares them. */
+const PREFERRED_ATTRS: readonly string[] = [
+  'content_type', 'status', 'judge_verdict', 'candidate_index', 'story_title', 'sent_at',
+  'market', 'assignee_name',
+];
+
+/** How many attribute columns a default view may open with — a WIDTH CEILING. */
+const DEFAULT_ATTR_CAP = 6;
+
+export interface DefaultVisibleOptions {
+  /** Attributes folded into the title cell — the same list passed as `hide`. */
+  hide?: string[];
+  /** Whether the view renders the trailing inline-decision column. */
+  withActions?: boolean;
+}
+
+/**
+ * The column ids a records table opens with, for any type. Lives here rather than
+ * at the call site so every view — today's topic / draft / news tables and
+ * whatever is added next — gets the same defaults for free.
+ *
+ * Order mirrors buildRecordColumns: Title, then Created (so "when was this made"
+ * is readable without crossing the table), then the content-defining attributes.
+ */
+export function defaultVisibleColumns(
+  attributes: AttributeDef[],
+  opts: DefaultVisibleOptions = {},
+): string[] {
+  const excluded = new Set([...LONG_FIELDS, ...(opts.hide ?? [])]);
+  const attrIds = attributes.map((a) => a.name).filter((n) => !excluded.has(n));
+  const preferred = PREFERRED_ATTRS.filter((p) => attrIds.includes(p));
+  const rest = attrIds.filter((a) => !preferred.includes(a));
+  // Cap FIRST, then drop the no-value columns. Filtering before the cap would
+  // BACKFILL the freed slots with whatever attribute came next (on `topic`:
+  // team_notes, a longtext blob, and source_1, a raw URL) — re-widening the very
+  // table the reviewer already can't scroll. Removing a column has to make the
+  // row narrower; the cap is a width ceiling, not a quota to fill.
+  const visibleAttrs = [...preferred, ...rest]
+    .slice(0, DEFAULT_ATTR_CAP)
+    .filter((n) => !NEVER_DEFAULT_ATTRS.includes(n));
+  return [
+    'name',
+    'createdAt',
+    ...visibleAttrs,
+    ...(opts.withActions ? ['__actions'] : []),
+  ];
+}
+
 export interface RecordColumnsOptions {
   /**
    * Render the primary column as a stacked Title + subtitle instead of a bare
@@ -105,10 +180,12 @@ function titleSubtitleCell(row: EntityRecord, subtitleAttrs: string[]) {
 
 /**
  * Build UnifiedTable columns from a type's declared attributes. Each attribute
- * becomes a column reading out of the record's `data` blob; a leading Name
- * column and a trailing Created column frame them. With `opts.subtitleAttrs`, the
- * leading column becomes a stacked Title + subtitle (and `opts.hide` folds the
- * now-redundant title/subtitle/angle columns into it).
+ * becomes a column reading out of the record's `data` blob, behind a leading
+ * Name + Created pair. With `opts.subtitleAttrs`, the leading column becomes a
+ * stacked Title + subtitle (and `opts.hide` folds the now-redundant
+ * title/subtitle/angle columns into it).
+ *
+ * Which of these open visible is `defaultVisibleColumns` above.
  */
 export function buildRecordColumns(
   attributes: AttributeDef[],
@@ -153,19 +230,24 @@ export function buildRecordColumns(
         minWidth: 240,
       };
 
+  // Created sits IMMEDIATELY after the title, not at the far right — "when was
+  // this made" is read alongside "what is it", and at the end of a wide row it
+  // was off-screen (Malin, bd startsim-b008b).
+  const createdColumn: ColumnConfig<EntityRecord> = {
+    id: 'createdAt',
+    header: 'Created',
+    width: COL_WIDTH.createdAt,
+    cell: (row) =>
+      row.createdAt ? new Date(row.createdAt).toLocaleDateString() : '—',
+    sortable: true,
+    // ISO timestamps sort chronologically as plain strings.
+    accessorFn: (row: EntityRecord) => row.createdAt ?? '',
+  };
+
   const columns: ColumnConfig<EntityRecord>[] = [
     nameColumn,
+    createdColumn,
     ...attrColumns,
-    {
-      id: 'createdAt',
-      header: 'Created',
-      width: COL_WIDTH.createdAt,
-      cell: (row) =>
-        row.createdAt ? new Date(row.createdAt).toLocaleDateString() : '—',
-      sortable: true,
-      // ISO timestamps sort chronologically as plain strings.
-      accessorFn: (row: EntityRecord) => row.createdAt ?? '',
-    },
   ];
 
   if (opts.actionsCell) {

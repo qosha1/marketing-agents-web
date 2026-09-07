@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildRecordColumns } from '../record-columns';
+import { buildRecordColumns, defaultVisibleColumns } from '../record-columns';
 import type { AttributeDef, EntityRecord } from '@/lib/foundry-api';
 
 const attrs: AttributeDef[] = [
@@ -68,5 +68,105 @@ describe('buildRecordColumns', () => {
     expect(cell.length).toBeLessThanOrEqual(91);
     expect(cell.endsWith('…')).toBe(true);
     expect(cell).not.toContain('\n');
+  });
+});
+
+/**
+ * The live marketing-agents schemas, in the order the tenant API returns them
+ * (read off the tenant DB 2026-09-07 — `AttributeDef.Meta.ordering` is empty, so
+ * this natural order is what the app receives). The ORDER is load-bearing: it
+ * decides which attributes the default-visible cap lets through, so a made-up
+ * order would test nothing.
+ */
+function defs(names: string[]): AttributeDef[] {
+  return names.map((name, i) => ({
+    id: String(i + 1), name, dataType: 'text', required: false, config: {},
+  }));
+}
+
+const TOPIC_ATTRS = defs([
+  'title', 'angle', 'market', 'content_type', 'status', 'ai_rank', 'team_verdict',
+  'team_notes', 'source_1', 'source_2', 'source_3', 'delivered_at', 'scheduled_for',
+  'subtitle', 'assignee_sub', 'assignee_name', 'scope_path',
+]);
+const DRAFT_ATTRS = defs([
+  'content_type', 'candidate_index', 'blog', 'linkedin', 'seo', 'sources',
+  'judge_verdict', 'auto_checks', 'chosen', 'sent_at', 'assignee_sub',
+  'assignee_name', 'lang', 'status', 'scope_path',
+]);
+/** What the content (topic) table passes as both `hide` and the folded-in set. */
+const CONTENT_HIDE = ['title', 'subtitle', 'angle'];
+
+describe('Created sits next to Title (startsim-b008b)', () => {
+  it('renders Created as the SECOND column, immediately after the title column', () => {
+    const ids = buildRecordColumns(attrs).map((c) => c.id);
+    expect(ids.slice(0, 2)).toEqual(['name', 'createdAt']);
+  });
+
+  it('keeps Created second on the content spine, ahead of every attribute', () => {
+    const cols = buildRecordColumns(TOPIC_ATTRS, {
+      subtitleAttrs: ['subtitle', 'angle'],
+      hide: CONTENT_HIDE,
+      actionsCell: () => null,
+    });
+    const ids = cols.map((c) => c.id);
+    expect(ids.slice(0, 2)).toEqual(['name', 'createdAt']);
+    // The inline decision cluster stays last — Created moving up must not
+    // displace the actions column.
+    expect(ids[ids.length - 1]).toBe('__actions');
+  });
+
+  it('lists Created right after the title in the default-visible set too', () => {
+    const visible = defaultVisibleColumns(TOPIC_ATTRS, {
+      hide: CONTENT_HIDE,
+      withActions: true,
+    });
+    expect(visible.slice(0, 2)).toEqual(['name', 'createdAt']);
+  });
+});
+
+describe('columns with no added value are never default-visible (startsim-b008b)', () => {
+  it('leaves AI rank, Scope path and Team verdict out of the topic default', () => {
+    const visible = defaultVisibleColumns(TOPIC_ATTRS, {
+      hide: CONTENT_HIDE,
+      withActions: true,
+    });
+    for (const name of ['ai_rank', 'scope_path', 'team_verdict']) {
+      expect(visible).not.toContain(name);
+    }
+    // …while the columns that DO carry the review are still there.
+    expect(visible).toEqual(
+      expect.arrayContaining(['name', 'createdAt', 'content_type', 'status', 'market', 'assignee_name']),
+    );
+  });
+
+  it('leaves Scope path out of the draft default without touching the Judge column', () => {
+    const visible = defaultVisibleColumns(DRAFT_ATTRS);
+    expect(visible).not.toContain('scope_path');
+    // judge_verdict renders as "Judge" — a DIFFERENT column, and one the
+    // reviewer did not ask to lose.
+    expect(visible).toContain('judge_verdict');
+  });
+
+  it('still OFFERS them in the Columns menu — the default goes away, not the column', () => {
+    const ids = buildRecordColumns(TOPIC_ATTRS, {
+      subtitleAttrs: ['subtitle', 'angle'],
+      hide: CONTENT_HIDE,
+    }).map((c) => c.id);
+    for (const name of ['ai_rank', 'scope_path', 'team_verdict']) {
+      expect(ids).toContain(name);
+    }
+  });
+
+  it('does not backfill the freed slots with a notes blob or a raw source URL', () => {
+    const visible = defaultVisibleColumns(TOPIC_ATTRS, {
+      hide: CONTENT_HIDE,
+      withActions: true,
+    });
+    // Dropping three columns must make the row NARROWER. Filtering before the
+    // cap would promote team_notes (longtext) and source_1 into the row and
+    // re-widen the table the reviewer already can't scroll.
+    expect(visible).not.toContain('team_notes');
+    expect(visible).not.toContain('source_1');
   });
 });

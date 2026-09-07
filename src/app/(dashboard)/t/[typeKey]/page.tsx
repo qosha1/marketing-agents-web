@@ -26,7 +26,7 @@ import {
   type EntityRecord,
 } from '@/lib/foundry-api';
 import { RecordForm } from '@/components/record-form';
-import { buildRecordColumns } from '@/components/record-columns';
+import { buildRecordColumns, defaultVisibleColumns } from '@/components/record-columns';
 import {
   EntityDetailDrawer,
   GoodExampleToggle,
@@ -76,6 +76,10 @@ import {
 const PAGE_SIZE = 20; // matches DRF PageNumberPagination's default page size
 const DRAFT_TYPE_KEY = 'draft';
 const STATUS_ATTR = 'status';
+// The content spine's title/subtitle/angle are folded into the stacked Title
+// cell — one list, so the columns that get BUILT and the columns that open
+// VISIBLE can't drift apart.
+const CONTENT_TITLE_ATTRS = ['title', 'subtitle', 'angle'];
 
 // TOPIC_REVIEW_CONFIG / NEWS_REVIEW_CONFIG used to be declared right here,
 // which is why the board had no decision at all: there was nothing for a
@@ -269,7 +273,7 @@ export default function TypeRecordsPage() {
     if (isContent) {
       return buildRecordColumns(attrs, {
         subtitleAttrs: ['subtitle', 'angle'],
-        hide: ['title', 'subtitle', 'angle'],
+        hide: CONTENT_TITLE_ATTRS,
         // Per-row fast triage: ✕ reject · ✓ good · ✎ edit, act-in-place (no drawer).
         // The header names WHAT is being decided — approving a topic and
         // approving a draft are different kinds of decision (startsim-b313v).
@@ -316,39 +320,28 @@ export default function TypeRecordsPage() {
 
   const hasStatusBoard = !!statusAttr;
 
-  // Default-visible columns: Name + the content-defining fields (Kind, State,
-  // Judge, Assignee, …) first, then the next few short attrs, then Created.
-  // Long body/blob fields (blog, linkedin, seo, sources, …) are NEVER
-  // default-visible — a table is for scanning, not reading a 500-word
-  // article; those live on the detail page and stay one toggle away in the
-  // Columns menu. persistKey is bumped so a previously-saved column choice
-  // (which would otherwise keep hiding a newly-preferred column) is reset.
+  // Which columns the table OPENS with — owned by record-columns.ts so every
+  // view built on buildRecordColumns gets the same defaults (and the same
+  // never-default set) without a per-call-site list.
+  //
+  // persistKey is bumped whenever those defaults change: a saved column choice is
+  // read back verbatim and wins outright, so without a bump a returning reviewer
+  // keeps the old columns and the change is invisible to exactly the people who
+  // asked for it.
   const columnVisibility = useMemo(() => {
-    const LONG_FIELDS = new Set([
-      'blog', 'linkedin', 'seo', 'sources', 'body', 'content', 'auto_checks', '_origin', '_sample',
-      // On the content spine these are folded into the stacked Title column.
-      ...(isContent ? ['title', 'subtitle', 'angle'] : []),
-    ]);
-    const attrIds = (type?.attributes ?? []).map((a) => a.name).filter((n) => !LONG_FIELDS.has(n));
-    // assignee_name (startsim-71z6) is preferred so the chip actually surfaces
-    // by default, the same way content_type/status/market already do — not
-    // buried behind the Columns menu.
-    const preferred = [
-      'content_type', 'status', 'judge_verdict', 'candidate_index', 'story_title', 'sent_at', 'market', 'assignee_name',
-    ].filter((p) => attrIds.includes(p));
-    const rest = attrIds.filter((a) => !preferred.includes(a));
-    // Cap raised 5 -> 6 so adding assignee_name to `preferred` doesn't evict an
-    // existing default column (e.g. the draft table's preferred set was
-    // already exactly 5 wide before this attribute existed).
-    const visibleAttrs = [...preferred, ...rest].slice(0, 6);
     return {
       enabled: true,
       alwaysVisible: isContent || isNews ? ['name', '__actions'] : ['name'],
-      defaultVisible: ['name', ...visibleAttrs, 'createdAt', ...(isContent || isNews ? ['__actions'] : [])],
-      // v4: adds assignee_name to the preferred set (startsim-71z6).
-      persistKey: `records-${typeKey}-v4`,
+      defaultVisible: defaultVisibleColumns(type?.attributes ?? [], {
+        // On the content spine these are folded into the stacked Title column.
+        hide: isContent ? CONTENT_TITLE_ATTRS : undefined,
+        withActions: isContent || isNews,
+      }),
+      // v5: Created moves up next to the title, and ai_rank / scope_path /
+      // team_verdict stop being default columns (bd startsim-b008b).
+      persistKey: `records-${typeKey}-v5`,
     };
-  }, [type?.attributes, typeKey]);
+  }, [type?.attributes, typeKey, isContent, isNews]);
 
   // Kind + State facet chips (shared TableFilters). Options are the raw enum
   // values; UnifiedTable renders the chips and reports changes via onChange —
