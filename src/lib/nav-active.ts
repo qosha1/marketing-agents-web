@@ -18,11 +18,28 @@
  *     this, "Topics" stayed lit on every category page and two items were
  *     highlighted at once.
  *
+ *  3. BOTH PATHNAMES ARE READ THROUGH `canonicalViewPath` FIRST, so a nav item
+ *     is active for both PRESENTATIONS of the thing it names, not just for the
+ *     one its href happens to point at (startsim-flv2x.10). An item has to pick
+ *     a single destination, and the two groups pick opposite ones — Content
+ *     items are tables (contentTabHref), Data items with a status enum are
+ *     boards (typeRoute) — so before this, whichever presentation an item did
+ *     NOT name showed a sidebar with nothing selected at all: Weekly Briefs went
+ *     dark on /board/topic?content_type=weekly_brief, News Item went dark on
+ *     /t/news_item. A sidebar with no selection reads as "you have left where
+ *     you were", which is the complaint.
+ *
+ *     Folding the PATH is all this takes, and rule 1 is what keeps it honest:
+ *     the query still has to agree, so /board/topic?content_type=lead_magnet
+ *     lights Evergreen and NOT its sibling Weekly Briefs. Matching on the type
+ *     alone would light both — blank traded for confidently wrong.
+ *
  * Paging and sorting are deliberately NOT facets: they are state, not a place,
  * and blanking the sidebar while someone pages through a table would be worse
  * than the bug this fixes.
  */
 import { CONTENT_TYPE_ATTR } from '@/lib/content';
+import { canonicalViewPath } from '@/lib/view-toggle';
 
 /**
  * Params that own a nav item of their own. Derived from the taxonomy contract
@@ -33,8 +50,11 @@ const FACET_PARAMS: readonly string[] = [CONTENT_TYPE_ATTR];
 export function navIsActive(href: string, activeHref?: string): boolean {
   if (!activeHref) return false;
 
-  const [curPath, curQuery = ''] = activeHref.split('?');
-  const [hrefPath, hrefQuery] = href.split('?');
+  const [rawCurPath, curQuery = ''] = activeHref.split('?');
+  const [rawHrefPath, hrefQuery] = href.split('?');
+  // Only the PATH is folded — the query is what still tells the kinds apart.
+  const curPath = canonicalViewPath(rawCurPath);
+  const hrefPath = canonicalViewPath(rawHrefPath);
   const current = new URLSearchParams(curQuery);
 
   if (hrefQuery !== undefined) {

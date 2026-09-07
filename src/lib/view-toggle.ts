@@ -62,6 +62,45 @@ export type ToggleParams = Record<string, string | undefined | null>;
  */
 const TRAVELLING_PARAMS: readonly string[] = [CONTENT_TYPE_ATTR];
 
+/**
+ * The two route bases the toggle switches between. Named ONCE: the hrefs below
+ * and `canonicalViewPath` all read them, so the sibling relationship cannot
+ * drift into two spellings inside its own module — which is exactly how the
+ * sidebar came to disagree with the toggle (startsim-flv2x.10).
+ */
+const BOARD_BASE = '/board';
+const TABLE_BASE = '/t';
+
+/**
+ * One path for both presentations of the same records: a board path folded onto
+ * its table sibling, everything else returned unchanged.
+ *
+ *   /board/topic  ->  /t/topic          /t/topic  ->  /t/topic (unchanged)
+ *   /settings     ->  /settings
+ *
+ * WHY THIS LIVES HERE. It is the same fact the two hrefs above encode — that
+ * /t/<type> and /board/<type> are one thing seen two ways — asked as a question
+ * instead of built as a URL. Anything that needs to know whether two locations
+ * are "the same place" (the sidebar's active test, today) reads it from this
+ * module rather than re-deriving it, so there is one place to change if the
+ * board ever stops being a sibling route (startsim-flv2x.2 left that open).
+ *
+ * It is deliberately PURELY SYNTACTIC — no schema, no `typeRoute`, no
+ * `isBoardType`. Whether a type is board-first decides which href its nav item
+ * gets; it has nothing to do with whether two paths address the same records,
+ * and reaching for the schema here would couple the sidebar to board.ts for no
+ * gain.
+ *
+ * The trailing slash in the prefix test is load-bearing: `/boardroom` is not a
+ * board, and folding it to `/troom` would be the mirror of the `/t/topicality`
+ * false match nav-active.ts already guards against.
+ */
+export function canonicalViewPath(path: string): string {
+  if (path === BOARD_BASE) return TABLE_BASE;
+  if (path.startsWith(`${BOARD_BASE}/`)) return TABLE_BASE + path.slice(BOARD_BASE.length);
+  return path;
+}
+
 function siblingHref(base: string, typeKey: string, params: ToggleParams): string {
   const carried = new URLSearchParams();
   for (const name of TRAVELLING_PARAMS) {
@@ -78,7 +117,7 @@ function siblingHref(base: string, typeKey: string, params: ToggleParams): strin
  * currently filtered by.
  */
 export function boardViewHref(typeKey: string, params: ToggleParams): string {
-  return siblingHref('/board', typeKey, params);
+  return siblingHref(BOARD_BASE, typeKey, params);
 }
 
 /**
@@ -86,5 +125,5 @@ export function boardViewHref(typeKey: string, params: ToggleParams): string {
  * currently filtered by.
  */
 export function tableViewHref(typeKey: string, params: ToggleParams): string {
-  return siblingHref('/t', typeKey, params);
+  return siblingHref(TABLE_BASE, typeKey, params);
 }
