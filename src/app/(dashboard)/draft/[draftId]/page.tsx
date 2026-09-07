@@ -121,9 +121,9 @@ import {
   getEntity,
   listAllEntities,
   listTypes,
-  updateEntity,
   type EntityRecord,
 } from '@/lib/foundry-api';
+import { entityKey, saveEntity } from '@/lib/entity-cache';
 import { compileFeedback, readNotes, readReview, revisedFrom, revisionChain } from '@/lib/review';
 import { unifiedBlogDiff } from '@/lib/blog-diff';
 import {
@@ -341,7 +341,7 @@ export default function DraftPage() {
   const draftId = String(params.draftId);
 
   const draftQuery = useQuery({
-    queryKey: ['entity', draftId],
+    queryKey: entityKey(draftId),
     queryFn: () => getEntity(draftId),
   });
 
@@ -374,7 +374,7 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
   const topicRef = draftStr(draft.data, 'topic_ref');
 
   const topicQuery = useQuery({
-    queryKey: ['entity', topicRef],
+    queryKey: entityKey(topicRef),
     queryFn: () => getEntity(topicRef),
     enabled: !!topicRef,
   });
@@ -489,7 +489,7 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
   // Parent draft (for the "Compare to previous" blog diff) — fetched only when the
   // reviewer opens the diff on a revised draft.
   const parentQuery = useQuery({
-    queryKey: ['entity', parentId],
+    queryKey: entityKey(parentId),
     queryFn: () => getEntity(parentId),
     enabled: !!parentId && showDiff,
   });
@@ -629,8 +629,12 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
     notes: notesRef.current,
     ...overrides,
   });
+  // `saveEntity`, not a bare `updateEntity`: the PATCH response is the freshest
+  // copy of this row that exists, and dropping it left ['entity', <id>] holding
+  // the pre-edit blob for five minutes — the reviewer reopened the draft and her
+  // edit was gone (bd startsim-ug09d/startsim-mk5qp). See lib/entity-cache.ts.
   const persist = (overrides: Record<string, unknown> = {}) =>
-    updateEntity(draft.id, { data: mergedData(overrides) });
+    saveEntity(qc, draft.id, { data: mergedData(overrides) });
 
   // Debounced autosave from the content editors. No list invalidation here — the
   // editors show their own "Saved" pill, and refetching mid-edit would churn it.
@@ -644,7 +648,7 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
         (s) => edited.find((e) => e.key === s.key) ?? s,
       );
     }
-    await updateEntity(draft.id, { data: mergedData() });
+    await saveEntity(qc, draft.id, { data: mergedData() });
   }
 
   // Scorecard autosave is debounced so per-keystroke note edits don't churn.
@@ -821,8 +825,12 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
         status: 'approved',
         ...(override.overridden ? { override_reason: override.reason } : {}),
       });
-      await updateEntity(topic.id, { data: { ...topic.data, status: 'written' } });
-      await qc.invalidateQueries({ queryKey: ['entity', draftId] });
+      // The topic gets the same treatment — its own ['entity', <id>] is read by
+      // this page's `topicQuery` and by the topic drawer.
+      await saveEntity(qc, topic.id, { data: { ...topic.data, status: 'written' } });
+      // No ['entity', draftId] invalidation: `persist` above just wrote the
+      // server's own answer into that entry, so invalidating it would only buy a
+      // round trip to fetch what is already there.
       await qc.invalidateQueries({ queryKey: ['entities', CONTENT_TYPE_KEY, 'all'] });
       notify.success('Accepted.');
       goToDraft(nextDraft); // advance to the next draft in the queue
@@ -840,7 +848,6 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
       // Approved + a publication date, per the team's vocabulary: the status
       // says a human signed it off, `sent_at` says when it went out.
       await persist({ status: 'approved', sent_at: sentAt });
-      await qc.invalidateQueries({ queryKey: ['entity', draftId] });
       await qc.invalidateQueries({ queryKey: ['entities', CONTENT_TYPE_KEY, 'all'] });
       notify.success('Marked sent.');
       goToDraft(nextDraft); // advance to the next draft in the queue
@@ -864,7 +871,6 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
     setRejecting(true);
     try {
       await persist({ chosen: false });
-      await qc.invalidateQueries({ queryKey: ['entity', draftId] });
       await qc.invalidateQueries({ queryKey: ['entities', CONTENT_TYPE_KEY, 'all'] });
       notify.success('Candidate rejected.');
       goToDraft(nextDraft); // advance to the next draft in the queue
@@ -918,8 +924,9 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
       }
       // Mark this draft as awaiting a revision (full-blob merge preserves edits +
       // review + notes) and reflect the new status pill.
+      // `persist` primes ['entity', <id>] with the server's answer, so the status
+      // pill flips on the next render without a round trip.
       await persist({ status: 'under_review' });
-      await qc.invalidateQueries({ queryKey: ['entity', draftId] });
       notify.success('Revision requested — GPT is rewriting the draft (~1 min).');
       // Stop polling after ~90s even if nothing shows up.
       if (pollTimeoutRef.current) clearTimeout(pollTimeoutRef.current);

@@ -65,10 +65,10 @@ import {
   deleteTag,
   listAllTags,
   orgMembers,
-  updateEntity,
   type EntityRecord,
   type EntityTypeDef,
 } from '@/lib/foundry-api';
+import { saveEntity } from '@/lib/entity-cache';
 
 /** Name convention (any type, not just topic/draft) that upgrades the two plain
  *  text fields into one roster picker (startsim-71z6). */
@@ -273,7 +273,11 @@ export function RecordEditFields({
     }
     setSaving(true);
     try {
-      await updateEntity(record.id, { name: name.trim() || record.name, data: nextData });
+      // `saveEntity` also writes the server's answer into ['entity', <id>] — the
+      // key the full-page editors read. Invalidating only the LIST left that entry
+      // holding the pre-edit blob for five minutes, so opening /draft/<id> right
+      // after an "Edit fields" save showed the old values back (bd startsim-mk5qp).
+      await saveEntity(qc, record.id, { name: name.trim() || record.name, data: nextData });
       await qc.invalidateQueries({ queryKey: ['entities', type.key] });
       notify.success('Saved.');
       onSaved();
