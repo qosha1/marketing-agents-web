@@ -21,6 +21,8 @@
  * status name in a button label is how the two drift apart.
  */
 
+import type { ReviewConfig } from '@startsimpli/ui/collection';
+
 export interface DecisionLabel {
   /** Stable id — the verdict value persisted on the record. */
   id: string;
@@ -70,4 +72,37 @@ export const NEWS_ACTIONS_HEADER = 'Curation';
 export const TOPIC_DECISION_LABELS: Record<string, string> = {
   approve: 'Approve topic',
   reject: 'Reject topic',
+};
+
+/**
+ * THE topic review config — one object, imported by every surface that lets a
+ * human decide a topic (bd startsim-6y458).
+ *
+ * It used to be a `const` inside the Topics TABLE page, which is why the board
+ * had no decision at all: there was nothing for a second surface to import, and
+ * a copy-pasted second literal would have been one careless edit away from the
+ * drift this config exists to prevent. Approving a topic writes TWO fields with
+ * two different consumers — `status`, the pipeline gate the writer and
+ * `canGenerateDrafts` key off, and `team_verdict`, the signal the n8n re-rank
+ * agent turns back INTO status. A surface that wrote one without the other
+ * would look right on screen and silently desynchronise them.
+ *
+ * So both surfaces resolve this same object through the shared
+ * `resolveReviewConfig` and hand it to the shared `InlineReviewActions`. The
+ * statuses stay derived from the type's own enum — startsim-wn2p.3's to rename,
+ * never re-declared here.
+ */
+export const TOPIC_REVIEW_CONFIG: ReviewConfig = { decisionLabels: TOPIC_DECISION_LABELS };
+
+/**
+ * News curation: a binary Accept (→ acceptable, the gate before topic
+ * generation) / Reject (→ rejected). No verdict and no "needs work" — that type
+ * declares no `team_verdict`, and only `acceptable` news is fed to the n8n
+ * topic strategist.
+ */
+export const NEWS_REVIEW_CONFIG: ReviewConfig = {
+  approveStatus: 'acceptable',
+  rejectStatus: 'rejected',
+  verdicts: [],
+  omitNeedsWork: true,
 };

@@ -39,18 +39,26 @@ import {
   SelectValue,
 } from '@startsimpli/ui';
 
+import { InlineReviewActions, type ReviewConfig } from '@startsimpli/ui/collection';
+
 import {
   boardColumns,
   choicesOf,
+  laneMoveData,
   pickStatusAttr,
   readData,
-  toCamelKey,
   UNSET_COLUMN,
   type RollupCounts,
 } from '@/lib/board';
 import { nearestScrollParent, type LaneState } from '@/lib/lanes';
 import { initialsOf } from '@/lib/roster';
-import { updateEntity, type Paginated, type EntityRecord, type EntityTypeDef } from '@/lib/foundry-api';
+import {
+  collectionClient,
+  updateEntity,
+  type Paginated,
+  type EntityRecord,
+  type EntityTypeDef,
+} from '@/lib/foundry-api';
 
 /** Attribute-name convention for the assignee chip (startsim-71z6) — any type
  *  that declares this attr gets the chip, not just topic/draft. */
@@ -85,6 +93,23 @@ interface Props {
    * filter can express it. Shown in the Unset lane so it is never a silent zero.
    */
   unaccounted?: number;
+  /**
+   * The review field-map for this type. PASSING IT IS WHAT PUTS THE DECISION
+   * CLUSTER ON EVERY CARD (bd startsim-6y458) — the same ✕ / ✓ / ✎ buttons the
+   * table's Actions column renders, over the same shared `InlineReviewActions`,
+   * so Approve means the same coherent status+verdict write on both surfaces.
+   * Omit it and the board is exactly what it was: lanes, a drag, and a per-card
+   * status select. The caller supplies the object (see lib/review-vocabulary.ts)
+   * rather than the board deriving one, because only the caller knows which of
+   * its types are reviewable and what its decisions are ABOUT.
+   */
+  review?: ReviewConfig;
+  /**
+   * Fired after a decision is saved from a card, so the page can refetch. A
+   * decision moves the record to another lane and changes two lanes' counts,
+   * and only the server knows where it landed — see the board page's handler.
+   */
+  onDecided?: (record: EntityRecord) => void;
 }
 
 /**
@@ -139,6 +164,8 @@ export function EntityBoard({
   rollupById,
   rollupLabel,
   unaccounted = 0,
+  review,
+  onDecided,
 }: Props) {
   const qc = useQueryClient();
   const statusAttr = useMemo(() => pickStatusAttr(type), [type]);
@@ -166,8 +193,6 @@ export function EntityBoard({
     return out;
   }, [columns, lanes]);
 
-  const statusCamel = toCamelKey(statusName);
-
   /**
    * Move a record between two lanes' caches. Both writes happen together so a
    * rollback restores a consistent board rather than a card that is in neither
@@ -175,7 +200,7 @@ export function EntityBoard({
    */
   const patchLanes = useCallback(
     (record: EntityRecord, from: string, to: string, newStatus: string) => {
-      const moved = { ...record, data: { ...record.data, [statusCamel]: newStatus } };
+      const moved = { ...record, data: laneMoveData(record.data, statusName, newStatus) };
       qc.setQueryData<Paginated<EntityRecord>>(laneKey(from), (old) =>
         old
           ? { ...old, results: old.results.filter((r) => r.id !== record.id), count: Math.max(0, old.count - 1) }
@@ -185,7 +210,7 @@ export function EntityBoard({
         old ? { ...old, results: [moved, ...old.results], count: old.count + 1 } : old,
       );
     },
-    [qc, laneKey, statusCamel],
+    [qc, laneKey, statusName],
   );
 
   const applyStatus = useCallback(
@@ -197,7 +222,8 @@ export function EntityBoard({
       const prevTo = qc.getQueryData<Paginated<EntityRecord>>(laneKey(newStatus));
       patchLanes(record, from, newStatus, newStatus);
       try {
-        await updateEntity(record.id, { data: { ...record.data, [statusCamel]: newStatus } });
+        // Status only, on purpose — laneMoveData carries the reasoning.
+        await updateEntity(record.id, { data: laneMoveData(record.data, statusName, newStatus) });
         // Re-fetch BOTH lanes rather than the whole board. Dropping the trailing
         // ['page', n] segment invalidates EVERY page of the lane, not only the
         // one that was patched: removing a record shifts every later page up by
@@ -210,7 +236,7 @@ export function EntityBoard({
         notify.error(err instanceof Error ? err.message : 'Could not update status.');
       }
     },
-    [qc, laneKey, columns, statusName, statusCamel, patchLanes],
+    [qc, laneKey, columns, statusName, patchLanes],
   );
 
   if (!statusAttr) return null;
@@ -338,9 +364,9 @@ export function EntityBoard({
                   );
                 })}
               </dl>
-              {/* stop pointerdown so interacting with the select never starts a drag */}
+              {/* stop pointerdown so interacting with a control never starts a drag */}
               <div
-                className="mt-2"
+                className="mt-2 flex items-center gap-2"
                 onClick={(e) => e.stopPropagation()}
                 onPointerDown={(e) => e.stopPropagation()}
               >
@@ -348,7 +374,7 @@ export function EntityBoard({
                   value={String(readData(record.data, statusName) ?? '')}
                   onValueChange={(val) => applyStatus(record, val)}
                 >
-                  <SelectTrigger className="h-7 text-xs">
+                  <SelectTrigger className="h-7 flex-1 text-xs">
                     <SelectValue placeholder="Set status…" />
                   </SelectTrigger>
                   <SelectContent>
@@ -359,6 +385,23 @@ export function EntityBoard({
                     ))}
                   </SelectContent>
                 </Select>
+                {/*
+                  The decision, on the card (bd startsim-6y458). The SAME shared
+                  cluster the table's Actions column renders, over the same
+                  config, so Approve writes the same coherent status+verdict pair
+                  on both surfaces. It stops click propagation itself; the
+                  pointerdown guard is this wrapper's, because without it a press
+                  on a button starts a card drag instead.
+                */}
+                {review ? (
+                  <InlineReviewActions
+                    client={collectionClient}
+                    type={type}
+                    record={record}
+                    config={review}
+                    onSaved={() => onDecided?.(record)}
+                  />
+                ) : null}
               </div>
             </div>
             {sentinelFor ? <LoadMoreSentinel onVisible={() => onLoadMore(sentinelFor)} /> : null}

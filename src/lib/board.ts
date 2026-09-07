@@ -36,6 +36,30 @@ export function readData(
   return bag[toCamelKey(name)] ?? bag[name];
 }
 
+/**
+ * The full data blob a LANE MOVE writes — a drag between columns, or the
+ * per-card status select. The backend PATCH replaces `data`, so this returns
+ * the whole merged blob, with the status under the camelised key the blob
+ * actually uses.
+ *
+ * IT WRITES THE STATUS AND ONLY THE STATUS, deliberately (bd startsim-6y458).
+ * A drag says "put this in that lane"; it does not say "I judge this good". The
+ * board's Approve / Reject buttons are what carry a verdict, because that is
+ * what a verdict is — a judgement someone made on purpose. Deriving one from a
+ * lane move would have to invent a verdict for lanes that have no counterpart
+ * (`written`, Unset), would feed the n8n re-rank agent — whose INPUT
+ * `team_verdict` is — a judgement no human made, and would need a value meaning
+ * "un-judged" for the reverse drag. A stale-but-honest verdict beats a
+ * fabricated one.
+ */
+export function laneMoveData(
+  data: EntityRecord['data'] | undefined,
+  statusName: string,
+  newStatus: string,
+): Record<string, unknown> {
+  return { ...(data ?? {}), [toCamelKey(statusName)]: newStatus };
+}
+
 /** The enum choices that define the board lanes (coerced to strings). */
 export function choicesOf(attr: AttributeDef | null | undefined): string[] {
   const c = attr?.config?.choices;
