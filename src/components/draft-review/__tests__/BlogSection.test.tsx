@@ -109,6 +109,24 @@ describe('BlogSection autosave', () => {
     expect(first).toHaveBeenCalledTimes(1);
   });
 
+  it('uses the writer that arrived WITH the change, not the one before it', async () => {
+    // The case that pins the mechanism: `value` and `onSave` change in the same
+    // render. The mirror is written by an effect declared before the autosave
+    // effect, so it must already hold the new writer when the autosave effect
+    // snapshots it in that same commit — which is what assigning during render
+    // used to guarantee.
+    const before = vi.fn();
+    const withTheChange = vi.fn();
+    const { rerender } = render(<BlogSection value="" onChange={noop} onSave={before} />);
+
+    rerender(<BlogSection value="edited" onChange={noop} onSave={withTheChange} />);
+    await tick(1_200);
+
+    expect(before).not.toHaveBeenCalled();
+    expect(withTheChange).toHaveBeenCalledTimes(1);
+    expect(withTheChange).toHaveBeenCalledWith('edited');
+  });
+
   it('does not save the same text twice', async () => {
     const onSave = vi.fn();
     const { rerender } = render(<BlogSection value="" onChange={noop} onSave={onSave} />);
