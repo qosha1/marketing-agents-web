@@ -16,7 +16,7 @@ import { useParams, useSearchParams, useRouter, usePathname } from 'next/navigat
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus, ChevronDown, X } from 'lucide-react';
 import { UnifiedTable, Button, BaseDialog, type FiltersConfig } from '@startsimpli/ui';
-import { ReviewDrawer, InlineReviewActions, type ReviewConfig } from '@startsimpli/ui/collection';
+import { ReviewDrawer, InlineReviewActions } from '@startsimpli/ui/collection';
 import {
   listTypes,
   listEntities,
@@ -58,30 +58,31 @@ import {
   TOPIC_GATE_PARAM,
   APPROVED_TOPIC_STATUSES,
 } from '@/lib/drafts-view';
-import { CONTENT_CATEGORIES, CONTENT_TYPE_ATTR, CONTENT_TYPE_KEY, contentCategoryLabel } from '@/lib/content';
+import {
+  CONTENT_CATEGORIES,
+  CONTENT_TYPE_ATTR,
+  CONTENT_TYPE_KEY,
+  NEWS_TYPE_KEY,
+  contentCategoryLabel,
+} from '@/lib/content';
 import { boardViewHref } from '@/lib/view-toggle';
-import { NEWS_ACTIONS_HEADER, TOPIC_ACTIONS_HEADER, TOPIC_DECISION_LABELS } from '@/lib/review-vocabulary';
+import {
+  NEWS_ACTIONS_HEADER,
+  NEWS_REVIEW_CONFIG,
+  TOPIC_ACTIONS_HEADER,
+  TOPIC_REVIEW_CONFIG,
+} from '@/lib/review-vocabulary';
 
 const PAGE_SIZE = 20; // matches DRF PageNumberPagination's default page size
 const DRAFT_TYPE_KEY = 'draft';
-const NEWS_TYPE_KEY = 'news_item';
 const STATUS_ATTR = 'status';
 
-// News curation: a binary Accept (→acceptable, the gate before topic generation)
-// / Reject (→rejected) — no verdict, no "needs work". Only `acceptable` news is
-// fed to the n8n topic strategist.
-// The TOPIC decision names its subject on the buttons, so "Approve" in a topic
-// drawer cannot be read as approving its drafts (bd startsim-b313v). Labels only
-// — the statuses this type transitions between are derived from its own enum and
-// stay startsim-wn2p.3's to rename.
-const TOPIC_REVIEW_CONFIG: ReviewConfig = { decisionLabels: TOPIC_DECISION_LABELS };
-
-const NEWS_REVIEW_CONFIG: ReviewConfig = {
-  approveStatus: 'acceptable',
-  rejectStatus: 'rejected',
-  verdicts: [],
-  omitNeedsWork: true,
-};
+// TOPIC_REVIEW_CONFIG / NEWS_REVIEW_CONFIG used to be declared right here,
+// which is why the board had no decision at all: there was nothing for a
+// second surface to import (bd startsim-6y458). They live in
+// lib/review-vocabulary.ts now, and the board renders the same shared cluster
+// over the same objects, so the two surfaces cannot drift into writing
+// different fields for the same word.
 
 export default function TypeRecordsPage() {
   const params = useParams<{ typeKey: string }>();

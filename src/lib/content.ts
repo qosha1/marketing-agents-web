@@ -13,6 +13,14 @@
 /** The entity type that carries content_type (the editorial spine). */
 export const CONTENT_TYPE_KEY = 'topic';
 
+/**
+ * The entity type holding curated news articles — the gate BEFORE the spine:
+ * only `acceptable` news is fed to the n8n topic strategist. Here rather than
+ * in one page because both the table and the board now need to know which type
+ * they are looking at in order to offer its review vocabulary (startsim-6y458).
+ */
+export const NEWS_TYPE_KEY = 'news_item';
+
 /** The enum attribute on that type whose values are the content categories. */
 export const CONTENT_TYPE_ATTR = 'content_type';
 

@@ -65,9 +65,11 @@ import {
   CONTENT_CATEGORIES,
   CONTENT_TYPE_ATTR,
   CONTENT_TYPE_KEY,
+  NEWS_TYPE_KEY,
   contentBoardHref,
   contentCategoryLabel,
 } from '@/lib/content';
+import { NEWS_REVIEW_CONFIG, TOPIC_REVIEW_CONFIG } from '@/lib/review-vocabulary';
 import { tableViewHref } from '@/lib/view-toggle';
 import { DRAFT_TYPE, listAllRelationships, topicIdForDraft } from '@/lib/topic-drafts';
 import {
@@ -307,6 +309,34 @@ export default function BoardPage() {
   const loading = typesQuery.isLoading || !lanesSettled;
   const mySub = whoamiQuery.data?.sub;
 
+  /**
+   * The review vocabulary for THIS type, or undefined for a type nobody
+   * reviews — passing it is what puts Approve / Reject on every card
+   * (bd startsim-6y458). Deliberately the same two objects the table page
+   * hands to its inline cluster, imported from the one module rather than
+   * re-declared, so the two surfaces cannot drift into writing different
+   * fields for the same word.
+   */
+  const review =
+    typeKey === CONTENT_TYPE_KEY
+      ? TOPIC_REVIEW_CONFIG
+      : typeKey === NEWS_TYPE_KEY
+        ? NEWS_REVIEW_CONFIG
+        : undefined;
+
+  /**
+   * A decision changes the record's status, so it changes which lane holds it
+   * AND both lanes' counts — and only the server knows where it landed.
+   * Invalidating the type's whole `['entities', typeKey]` prefix catches every
+   * lane, the board count, and the topic set the draft-progress rollup matches
+   * against; hunting for the record across refreshed lanes instead would leave
+   * a stale card wherever the search missed. Same reasoning as the drawer's
+   * onSaved below.
+   */
+  const onDecided = useCallback(() => {
+    void qc.invalidateQueries({ queryKey: ['entities', typeKey] });
+  }, [qc, typeKey]);
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -442,6 +472,8 @@ export default function BoardPage() {
           onCardClick={setSelected}
           rollupById={rollupById}
           rollupLabel={isTopicBoard ? rollupLabel : undefined}
+          review={review}
+          onDecided={onDecided}
         />
       )}
 
