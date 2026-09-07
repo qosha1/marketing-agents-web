@@ -48,7 +48,7 @@ import {
   mountGenerateRun,
   noteGenerateCount,
   noteGeneratePoll,
-  startGenerateRun,
+  startGenerateRunOnce,
   unmountGenerateRun,
 } from '@/lib/generate-run';
 import {
@@ -553,9 +553,23 @@ export function TopicDrafts({ topic, type }: { topic: EntityRecord; type: Entity
 
   async function generate() {
     if (!draftCountKnown || !gate.allowed) return;
-    startGenerateRun(topicId, { at: Date.now(), baseline: drafts.length });
+    // CLAIM THE RUN, don't just start one (bd startsim-8hgmq.3). `disabled`
+    // below is driven by `generating`, which is seeded from the store AT MOUNT
+    // — so an instance that mounted before the writer started still renders an
+    // enabled button over a live run. The webhook answers immediately while the
+    // drafts take ~100s to appear, and the server-side gate cannot refuse
+    // inside that window because the drafts it counts do not exist yet. On
+    // 2026-09-07 a second press left six near-duplicate drafts in the review
+    // queue.
+    //
+    // A press that loses the claim still JOINS the run — the state below is the
+    // truth for this topic either way, and the reader gets the progress copy
+    // instead of a button that appears to do nothing. What it does not do is
+    // fire a second writer.
+    const claimed = startGenerateRunOnce(topicId, { at: Date.now(), baseline: drafts.length });
     setStopped('idle');
     setGenerating(true);
+    if (!claimed) return;
     try {
       const res = await fetch('/actions/generate-drafts', {
         method: 'POST',
