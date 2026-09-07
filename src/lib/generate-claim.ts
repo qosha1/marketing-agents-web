@@ -83,10 +83,17 @@ export function claimGenerateRun(topicRef: string, now: number): GenerateClaim {
   sweep(now);
   const held = claims.get(topicRef);
   if (held !== undefined) {
+    // Clamped because these two are LOGGED, and a log that reports a negative
+    // age is a log nobody trusts. `now` comes from the caller's clock, which can
+    // step backwards across a task restart; the refusal itself is unaffected
+    // (an age below the TTL still refuses, which is the safe direction) but the
+    // numbers beside it should stay readable. Same instinct as `noteGeneratePoll`
+    // in ./generate-run, where contact only ever moves forward.
+    const heldForMs = Math.max(0, now - held);
     return {
       claimed: false,
-      heldForMs: now - held,
-      expiresInMs: GENERATE_CLAIM_TTL_MS - (now - held),
+      heldForMs,
+      expiresInMs: Math.max(0, GENERATE_CLAIM_TTL_MS - heldForMs),
     };
   }
   claims.set(topicRef, now);
