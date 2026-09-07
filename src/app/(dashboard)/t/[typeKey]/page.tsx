@@ -10,7 +10,7 @@
  * The board is still one click away via the "Board view" toggle. Reusable across
  * tenants/types — nothing here is OGMC-specific beyond the shared content taxonomy.
  */
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useSearchParams, useRouter, usePathname } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -460,8 +460,12 @@ export default function TypeRecordsPage() {
   }, [records, collapseRejected, acted]);
 
   // Read at click time by `remember` above, so an action records the position the
-  // row actually held on screen.
-  rowOrderRef.current = visibleRecords.map((r) => r.id);
+  // row actually held on screen. Written from an effect rather than during
+  // render (react-hooks/refs): the only readers are click handlers, and a click
+  // cannot land before the commit that put those rows on screen.
+  useEffect(() => {
+    rowOrderRef.current = visibleRecords.map((r) => r.id);
+  }, [visibleRecords]);
 
   if (typesQuery.isLoading) {
     return <p className="text-sm text-gray-500">Loading…</p>;

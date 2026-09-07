@@ -52,7 +52,7 @@
  * rail (or presses j/k) and lands on the offending field with the text marked,
  * instead of decoding "Checks 7/8". a/r/x set the Decision from the keyboard.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useSearchParams, useRouter } from 'next/navigation';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import Link from 'next/link';
@@ -76,7 +76,7 @@ import {
 } from '@startsimpli/ui/document-editor';
 
 import { readData, typeRoute } from '@/lib/board';
-import { declaredLangChoices, translatableTargets } from '@/lib/draft-translation';
+import { declaredLangChoices, pendingTranslation, translatableTargets } from '@/lib/draft-translation';
 import { getRegisteredToken } from '@/infrastructure/auth';
 import { wordCount } from '@startsimpli/ui';
 import { formatBearer } from '@/lib/bearer';
@@ -232,16 +232,29 @@ const NO_MATCHES: string[] = [];
  */
 function LanguageSwitcher({ draft }: { draft: EntityRecord }) {
   const qc = useQueryClient();
-  const [translating, setTranslating] = useState<string | null>(null);
+  // What the reviewer CLICKED. Whether it has landed is observed from the
+  // language group, never mirrored back into this state (see `translating`).
+  const [requested, setRequested] = useState<string | null>(null);
+
+  // While a translation is being produced the new draft does not exist yet. The
+  // action answers 202 and finishes detached (a 400-500 word brief does not fit
+  // in a request — startsim-jb1z measured 19.6s for one document), so the only
+  // honest way to show the result is to keep looking for it. Asked of the
+  // query's OWN data so polling stops on the arrival itself rather than on a
+  // state write; memoised on `requested` so a re-render never restarts the
+  // interval.
+  const pollUntilTranslated = useCallback(
+    (query: { state: { data?: EntityRecord[] } }) =>
+      pendingTranslation(requested, (query.state.data ?? []).map((d) => draftLang(d)))
+        ? 5_000
+        : (false as const),
+    [requested],
+  );
 
   const translationsQuery = useQuery({
     queryKey: ['draft-translations', draft.id],
     queryFn: () => fetchDraftTranslations(draft),
-    // While a translation is being produced the new draft does not exist yet.
-    // The action answers 202 and finishes detached (a 400-500 word brief does
-    // not fit in a request — startsim-jb1z measured 19.6s for one document), so
-    // the only honest way to show the result is to keep looking for it.
-    refetchInterval: translating ? 5_000 : false,
+    refetchInterval: pollUntilTranslated,
   });
   // The tenant's DECLARED choices, never a list in this file: adding a language
   // is a schema change and no code change (startsim-jb1z's naming ban).
@@ -259,16 +272,20 @@ function LanguageSwitcher({ draft }: { draft: EntityRecord }) {
     variants.map((d) => draftLang(d)),
   );
 
-  // The awaited language arrived — stop polling and let the chip render.
+  // DERIVED, not remembered: we are translating exactly while the language the
+  // reviewer asked for is missing from the group. Nothing has to clear it, so
+  // there is no state write inside an effect to go wrong (bd startsim-mcoza).
+  const translating = pendingTranslation(requested, translations.map((d) => draftLang(d)));
+  const arrived = requested !== null && translating === null;
+
+  // Announced once per arrival: `arrived` only flips false->true when a NEW
+  // requested language lands, so this cannot repeat on a re-render.
   useEffect(() => {
-    if (translating && translations.some((d) => draftLang(d) === translating)) {
-      setTranslating(null);
-      notify.success('Translation ready.');
-    }
-  }, [translating, translations]);
+    if (arrived) notify.success('Translation ready.');
+  }, [arrived]);
 
   async function translateTo(target: string) {
-    setTranslating(target);
+    setRequested(target);
     try {
       // AWAITED. getRegisteredToken() is async, and interpolating it directly
       // sent `Bearer [object Promise]` — Django rejected it and the detached job
@@ -288,7 +305,7 @@ function LanguageSwitcher({ draft }: { draft: EntityRecord }) {
       notify.success(`Translating to ${target.toUpperCase()} — this takes about a minute.`);
       void qc.invalidateQueries({ queryKey: ['draft-translations', draft.id] });
     } catch (err) {
-      setTranslating(null);
+      setRequested(null);
       notify.error(err instanceof Error ? err.message : 'Could not start the translation.');
     }
   }

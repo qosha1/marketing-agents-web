@@ -27,6 +27,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     if (sessionStorage.getItem(BOUNCE_KEY)) {
       // We already bounced to central and returned without a session — this
       // account isn't a member of this foundry. Stop the loop; show denial.
+      //
+      // Deliberately left as state set from the effect (bd startsim-mcoza). Both
+      // ways of deriving it are WORSE, and both were measured, not guessed:
+      // reading the mark during render repaints an in-flight redirect as the
+      // denial screen (red in layout.test.tsx), and caching that read so it
+      // can't repaints reopens the double-bounce loop — during hydration
+      // `useSyncExternalStore` serves `getServerSnapshot()`, so the effect
+      // would see "not bounced yet" on a load where it HAD bounced and go
+      // round again. The denial screen is the thing this guard is most often
+      // blamed for; the four tests beside it pin what it does today.
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- deriving it flashes denial over an in-flight redirect; caching the read reopens the double-bounce loop across hydration.
       setDenied(true);
       return;
     }

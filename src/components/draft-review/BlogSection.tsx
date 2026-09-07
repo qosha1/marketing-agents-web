@@ -168,12 +168,26 @@ export function BlogSection({
   useRangeHighlight(previewRef, highlight, value);
 
   // Debounced autosave, mirroring DocumentEditor: fire onSave only on a real
-  // content change, keep the latest value + writer in refs so the effect depends
-  // only on the serialized value.
-  const valueRef = React.useRef(value);
-  valueRef.current = value;
+  // content change, and keep the writer in a ref so the effect depends only on
+  // the serialized value.
+  //
+  // The mirror is an effect, not a render-time assignment (react-hooks/refs).
+  // It is declared FIRST on purpose: a component's passive effects run in hook
+  // order, so this has already written the ref by the time the autosave effect
+  // below snapshots it in the same commit — which is exactly what assigning
+  // during render used to give us.
+  //
+  // Why the ref at all: the draft page passes an inline arrow, so a new
+  // `onSave` arrives on every parent render. Depending on it would restart the
+  // debounce on each of those renders and a busy page would never autosave.
   const onSaveRef = React.useRef(onSave);
-  onSaveRef.current = onSave;
+  React.useEffect(() => {
+    onSaveRef.current = onSave;
+  });
+
+  // `value` needs no mirror. The autosave effect re-runs on every change to it
+  // and its cleanup clears the pending timer, so the timer that actually fires
+  // is always the one whose closure holds the current text.
   const savedRef = React.useRef(value);
 
   React.useEffect(() => {
@@ -185,9 +199,9 @@ export function BlogSection({
     const timer = setTimeout(async () => {
       setStatus('saving');
       try {
-        await fn(valueRef.current);
+        await fn(value);
         if (cancelled) return;
-        savedRef.current = valueRef.current;
+        savedRef.current = value;
         setStatus('saved');
       } catch {
         if (!cancelled) setStatus('error');
