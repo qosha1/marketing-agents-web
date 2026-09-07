@@ -37,6 +37,13 @@ export const LANE_PAGE_SIZE = 50;
  * `?status=surfaced` still lays out every lane, and if the board-wide filter won
  * on the status attribute then every lane would return the same records.
  *
+ * THE BOARD PAGE NO LONGER SENDS ONE (bd startsim-flv2x.7). `boardAttrFilters`
+ * refuses a value of the lane attribute upstream, so `base` cannot carry the
+ * key. That is the fix for the header and the chips, which read the facet list
+ * rather than the lanes and so were reporting a filter this line quietly ate.
+ * The overwrite stays: this function is generic, its own contract is "select
+ * exactly one lane", and it must hold for any caller.
+ *
  * VERIFIED live 2026-08-24 against marketing-agents:
  *   attr.status=rejected + attr.published_at__gte=2026-08-10  ->  count 808
  *   attr.status=new      + the same window                    ->  count 23

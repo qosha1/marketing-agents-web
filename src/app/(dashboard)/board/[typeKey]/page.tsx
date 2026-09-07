@@ -6,10 +6,14 @@
  * on click. Falls back to a pointer to the table view for types without a status
  * field. Reusable across tenants — the route is /board/<typeKey>.
  *
- * Pre-filterable by any declared ENUM attribute (?<attrName>=<value>, one per
- * declared enum, ANDed — startsim-uhmk), generalized from the old
- * content_type-only hand-rolled filter to the shared pickAttrFilters/
- * applyAttrFilters mechanism (same one the table already used). The topic
+ * Pre-filterable by any declared ENUM attribute EXCEPT the one whose choices are
+ * the lanes (?<attrName>=<value>, ANDed — startsim-uhmk), generalized from the
+ * old content_type-only hand-rolled filter to the shared pickAttrFilters/
+ * applyAttrFilters mechanism (same one the table already used). The lane
+ * attribute is REFUSED rather than applied: every lane query overwrites it, so
+ * applying it here chipped and counted a filter nothing on screen honoured —
+ * "82 of 2 records" live on 2026-09-06 (bd startsim-flv2x.7,
+ * boardAttrFilters). The topic
  * board additionally renders on-page category tabs (Weekly Briefs / Lead
  * Magnets / General) that pre-filter it the same way, plus a separate
  * free-text `assignee_sub` quick-filter (startsim-a2oq: "assigned to me" /
@@ -40,9 +44,9 @@ import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { EntityBoard } from '@/components/entity-board';
 import { EntityDetailDrawer } from '@/components/entity-detail-drawer';
 import {
+  boardAttrFilters,
   boardColumns,
   BLANK,
-  pickAttrFilters,
   pickRecencyAttr,
   pickRecencyWindow,
   pickStatusAttr,
@@ -121,8 +125,11 @@ export default function BoardPage() {
   // Generic ?<enumAttr>=<value> filters (any number, ANDed) — replaces the old
   // content_type-only hand-rolled filter; content_type is just one enum among
   // however many the type declares.
+  //
+  // `.applied` is the ONE list behind both the header chips and the filters the
+  // count is taken over, so the two cannot drift apart (bd startsim-flv2x.7).
   const filters = useMemo(
-    () => pickAttrFilters(type, Object.fromEntries(searchParams.entries())),
+    () => boardAttrFilters(type, Object.fromEntries(searchParams.entries())).applied,
     [type, searchParams],
   );
 
