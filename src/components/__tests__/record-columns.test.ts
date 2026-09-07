@@ -180,7 +180,7 @@ describe('columns with no added value are never default-visible (startsim-b008b)
     ]);
   });
 
-  it('opens the draft table on its review columns, Judge included', () => {
+  it('keeps Judge in the draft type\'s review columns (before the view\'s sparse list)', () => {
     expect(defaultVisibleColumns(DRAFT_ATTRS)).toEqual([
       'name', 'createdAt', 'content_type', 'status', 'judge_verdict',
       'candidate_index', 'sent_at', 'assignee_name',
@@ -263,5 +263,82 @@ describe('the News Item table opens narrow (startsim-8hgmq.1)', () => {
     for (const name of ['url', 'title', 'snippet']) {
       expect(ids).toContain(name);
     }
+  });
+});
+
+/** What /t/draft passes as its measured-empty set — see DRAFT_SPARSE_ATTRS. */
+const DRAFT_SPARSE = ['sent_at', 'assignee_name'];
+
+describe('the Drafts table drops columns nothing has filled in (startsim-8hgmq.10)', () => {
+  it('opens on exactly these seven columns', () => {
+    // It opened on nine and overflowed at EVERY viewport, 1440 included
+    // (1134 clientWidth vs 1211 scrollWidth = 77px), once "Created by" made it
+    // a nine-column table.
+    expect(defaultVisibleColumns(DRAFT_ATTRS, {
+      afterCreated: ['__origin'],
+      sparse: DRAFT_SPARSE,
+    })).toEqual([
+      'name', 'createdAt', '__origin', 'content_type', 'status',
+      'judge_verdict', 'candidate_index',
+    ]);
+  });
+
+  it('renders that as the header row Name | Created | Kind | # | Judge | State | Created by', () => {
+    const visible = new Set(defaultVisibleColumns(DRAFT_ATTRS, {
+      afterCreated: ['__origin'],
+      sparse: DRAFT_SPARSE,
+    }));
+    const headerRow = buildRecordColumns(DRAFT_ATTRS)
+      .filter((c) => visible.has(c.id))
+      .map((c) => c.header);
+    // __origin is appended by the page, not by buildRecordColumns, so it is not
+    // in this row — the six declared ones are.
+    expect(headerRow).toEqual(['Name', 'Created', 'Kind', '#', 'Judge', 'State']);
+  });
+
+  it('drops Sent at and Assignee without backfilling', () => {
+    const visible = defaultVisibleColumns(DRAFT_ATTRS, {
+      afterCreated: ['__origin'],
+      sparse: DRAFT_SPARSE,
+    });
+    // Counted across all 153 live drafts, 2026-09-07:
+    //   sent_at        filled in   1/153
+    //   assignee_name  filled in   1/153
+    // …against content_type 153/153, status 153/153, judge_verdict 150/153 and
+    // candidate_index 150/153. Two of the nine default columns rendered an em
+    // dash in 152 of 153 rows.
+    //
+    // These are LIFECYCLE fields, not junk: sent_at fills as drafts get sent and
+    // assignee_name as they get assigned. The claim is only that neither is
+    // worth a DEFAULT column while 152 of 153 rows are blank — both stay one
+    // toggle away in the Columns menu, and a team that starts assigning drafts
+    // switches Assignee back on.
+    for (const name of ['sent_at', 'assignee_name']) {
+      expect(visible).not.toContain(name);
+    }
+    // The freed slots must not be handed to the next attributes in declaration
+    // order — chosen (a boolean) and lang (69/153) are what sits there.
+    for (const name of ['chosen', 'lang', 'assignee_sub']) {
+      expect(visible).not.toContain(name);
+    }
+  });
+
+  it('still OFFERS Sent at and Assignee in the Columns menu', () => {
+    const ids = buildRecordColumns(DRAFT_ATTRS).map((c) => c.id);
+    for (const name of ['sent_at', 'assignee_name']) {
+      expect(ids).toContain(name);
+    }
+  });
+
+  it('is per-view: the topic table KEEPS its Assignee column', () => {
+    // assignee_name is just as empty on topic (2 of 84 live records), but the
+    // reviewers asked for that column and startsim-71z6 built its initials chip
+    // for it. `sparse` is passed by the view that measured itself, so dropping
+    // it from drafts must not reach across to the content spine.
+    const topic = defaultVisibleColumns(TOPIC_ATTRS, {
+      hide: CONTENT_HIDE,
+      withActions: true,
+    });
+    expect(topic).toContain('assignee_name');
   });
 });

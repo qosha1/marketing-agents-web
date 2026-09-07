@@ -128,6 +128,19 @@ export interface DefaultVisibleOptions {
    * columns, not declared attributes, so they cannot evict one.
    */
   afterCreated?: string[];
+  /**
+   * Attributes THIS view has counted as near-always-blank, so they stop
+   * spending a default column (bd startsim-8hgmq.10). Applied after the cap,
+   * like every other exclusion, so dropping one narrows the row.
+   *
+   * Per-view rather than a constant here, because emptiness is a property of a
+   * type's DATA and not of an attribute's name. `assignee_name` is the proof:
+   * it is blank in 152 of 153 drafts AND in 82 of 84 topics, but the reviewers
+   * asked for the topic column and startsim-71z6 built its initials chip, so a
+   * shared name list would take away a column somebody uses. The view that
+   * measured itself is the one that gets to drop it.
+   */
+  sparse?: string[];
 }
 
 /**
@@ -163,6 +176,7 @@ export function defaultVisibleColumns(
     ...NEVER_DEFAULT_ATTRS,
     ...WIDE_FIELDS,
     ...NAME_DUPLICATE_ATTRS,
+    ...(opts.sparse ?? []),
   ]);
   const visibleAttrs = [...preferred, ...rest]
     .slice(0, DEFAULT_ATTR_CAP)
