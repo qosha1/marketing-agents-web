@@ -92,7 +92,25 @@ export const TOPIC_DECISION_LABELS: Record<string, string> = {
  * statuses stay derived from the type's own enum — startsim-wn2p.3's to rename,
  * never re-declared here.
  */
-export const TOPIC_REVIEW_CONFIG: ReviewConfig = { decisionLabels: TOPIC_DECISION_LABELS };
+export const TOPIC_REVIEW_CONFIG: ReviewConfig = {
+  decisionLabels: TOPIC_DECISION_LABELS,
+  /**
+   * APPROVING A TOPIC IS NOT THE END OF THE JOB, so the drawer stays on it
+   * (@startsimpli/ui 0.4.113, bd startsim-t1t1k).
+   *
+   * Approving is precisely what makes "Generate drafts" legal for that topic.
+   * The drawer used to auto-advance, so the control the approval had just
+   * unlocked appeared under the NEXT topic, and the reviewer's route to a draft
+   * became: approve, close the drawer, reload, filter to Ready, find the same
+   * topic, approve it a second time. Six steps, and the second approve wrote
+   * nothing — what the reload bought was a fresh record.
+   *
+   * Only 'approve' is held. Rejecting a topic has no follow-on, so it still
+   * advances and fast triage keeps its rhythm; moving on from an approved topic
+   * is one press of j.
+   */
+  holdAfter: ['approve'],
+};
 
 /**
  * News curation: a binary Accept (→ acceptable, the gate before topic
