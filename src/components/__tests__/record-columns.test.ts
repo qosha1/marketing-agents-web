@@ -186,4 +186,14 @@ describe('columns with no added value are never default-visible (startsim-b008b)
       'candidate_index', 'sent_at', 'assignee_name',
     ]);
   });
+
+  // `afterCreated` is how the Drafts table gets its "Created by" column beside
+  // Created (bd startsim-4gw21). It sits OUTSIDE the attribute cap on purpose:
+  // a computed column must not evict a declared attribute the reviewer reads.
+  it('places an afterCreated column beside Created without spending a cap slot', () => {
+    expect(defaultVisibleColumns(DRAFT_ATTRS, { afterCreated: ['__origin'] })).toEqual([
+      'name', 'createdAt', '__origin', 'content_type', 'status', 'judge_verdict',
+      'candidate_index', 'sent_at', 'assignee_name',
+    ]);
+  });
 });
