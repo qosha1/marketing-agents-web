@@ -145,9 +145,18 @@ export function applyAttrFilter(
 
 /**
  * Every declared ENUM attribute present in `params` with a valid choice value —
- * the multi-facet sibling of pickAttrFilter (startsim-uhmk). A board route can
- * be pre-filtered by more than one facet at once (e.g. content_type AND
- * status), the same way the topic table already is.
+ * the multi-facet sibling of pickAttrFilter (startsim-uhmk). A route can be
+ * pre-filtered by more than one facet at once (e.g. content_type AND status),
+ * the way the topic TABLE is.
+ *
+ * IT APPLIES EVERY ENUM, THE STATUS ONE INCLUDED, which is why a BOARD cannot
+ * use it as-is: one of those enums is what its lanes ARE. Its only caller is now
+ * {@link boardAttrFilters}, which is this function minus that attribute — see
+ * there for why (bd startsim-flv2x.7). The table at /t/[typeKey] is multi-facet
+ * too but builds its Kind/State map inline, so it is unaffected either way.
+ *
+ * This docstring used to offer a BOARD pre-filtered by "content_type AND status"
+ * as its example. That was the misreading the bug grew out of.
  */
 export function pickAttrFilters(
   type: EntityTypeDef | undefined | null,
@@ -175,23 +184,45 @@ export function applyAttrFilters(
 }
 
 /**
- * The enum facets a BOARD may act on, split from the one its LANES already own.
+ * The enum facets a BOARD applies, split from the one its LANES already own.
  *
- * THIS IS A CHARACTERIZATION AND IT STILL CARRIES THE BUG (bd startsim-flv2x.7).
- * It returns exactly what the board page computed inline before this seam
- * existed — every declared enum applied, nothing ignored — so the extraction can
- * be proved behaviour-neutral before the behaviour changes. Same idiom, and the
- * same reason, as lib/view-toggle.ts's own "this module still carries the bug".
+ * A board's lanes ARE an enum attribute, so a URL naming a value of that
+ * attribute is asking the board to be a single lane. It never was one:
+ * {@link laneFilters} in lib/lanes.ts applies each lane's own value LAST, and
+ * deliberately, so an incoming value is overwritten by every lane query and
+ * changes nothing on screen. What it did change was the two things that read the
+ * facet list instead of the lanes — the header chip and the countEntities total.
+ * That is how `/board/topic?status=ready` came to read "82 of 2 records" above
+ * four fully populated lanes: a chip claiming a filter that is not applied, over
+ * a "loaded of matching" line whose second number is smaller than its first
+ * (measured live 2026-09-06, bd startsim-flv2x.7).
  *
- * `applied` is the single source of BOTH the header chips and the filters handed
- * to `countEntities`; `ignored` is what was recognised and deliberately not
- * applied. They are returned together because the defect is that three places
- * disagreed about who owns the lane attribute.
+ * SO THE BOARD REFUSES THAT FACET RATHER THAN HONOURING IT. Honouring it means
+ * narrowing the board to the one named lane, which makes the chip true at the
+ * cost of a one-lane kanban — a worse table with none of the table's columns,
+ * weighed and rejected on startsim-flv2x.2. Refusing is also simply what the
+ * lanes have always done; this only stops the header and the chips disagreeing
+ * with them.
+ *
+ * BY SCHEMA, NOT BY THE NAME "status". {@link pickStatusAttr} prefers an
+ * attribute called `status` but falls back to the first enum with choices, so a
+ * `deal` board whose lanes are `stage` has exactly the same collision —
+ * `?stage=won` must be refused there while `?region=emea` is applied.
  */
 export interface BoardFacets {
-  /** Chipped in the header AND counted by — the two must never diverge. */
+  /**
+   * The facets the board acts on: chipped in the header AND counted by. ONE
+   * list feeding both, so the two cannot drift apart again — that drift was
+   * the bug.
+   */
   applied: AttrFilter[];
-  /** Recognised, valid, and deliberately not applied. */
+  /**
+   * Recognised, valid, and deliberately not applied — the lane attribute.
+   *
+   * Kept rather than discarded because a facet dropped silently leaves the
+   * reader unable to tell it was dropped on purpose. Saying so where the other
+   * chips are is startsim-flv2x.8; nothing renders this yet.
+   */
   ignored: AttrFilter[];
 }
 
@@ -199,7 +230,15 @@ export function boardAttrFilters(
   type: EntityTypeDef | undefined | null,
   params: Record<string, string | undefined | null>,
 ): BoardFacets {
-  return { applied: pickAttrFilters(type, params), ignored: [] };
+  // undefined when the type has no lanes at all, which no attribute name equals
+  // — so a type with no status enum applies every facet, as it should.
+  const laneAttrName = pickStatusAttr(type)?.name;
+  const applied: AttrFilter[] = [];
+  const ignored: AttrFilter[] = [];
+  for (const f of pickAttrFilters(type, params)) {
+    (f.name === laneAttrName ? ignored : applied).push(f);
+  }
+  return { applied, ignored };
 }
 
 // ---- generic free-text attribute filter (startsim-a2oq) ----
@@ -510,10 +549,21 @@ export function recencyFilters(
  * The board's OTHER facets, expressed as backend filters — so a COUNT of "what
  * this type holds" is a count of the same slice the board is showing.
  *
- * Without this, `/board/news_item?status=surfaced` shows 31 records and reports
- * "4,085 older not shown", which is false twice over: those 4,085 are mostly not
- * older, and they are not this facet's records. A line whose whole job is to be
- * honest about what is hidden cannot be the one lying.
+ * Without this, a facet-scoped board counts the whole type: measured on the live
+ * topic board 2026-09-06, `?content_type=weekly_brief` lays out 41 records across
+ * its lanes, and the header would report the type's other 41 as a remainder that
+ * is merely "not shown". A line whose whole job is to be honest about what is
+ * hidden cannot be the one lying. (The tenant moves daily — the numbers are
+ * dated on purpose, which is the lesson of the paragraph below.)
+ *
+ * THE EXAMPLE HERE USED TO BE `/board/news_item?status=surfaced`, AND IT HAD
+ * GONE FALSE (bd startsim-flv2x.7). It was true under wn2p.24, when the board
+ * fetched one list and filtered it client-side with applyAttrFilters. wn2p.27
+ * made the data per-lane and {@link laneFilters} began overwriting the status
+ * key, so the lanes stopped honouring the param while this count went on
+ * applying it — the "82 of 2 records" header. A status value cannot reach here
+ * any more: {@link boardAttrFilters} refuses it upstream. Passing one in by hand
+ * would reintroduce exactly that defect.
  *
  * Returns null — meaning "do not claim a number" — for the {@link BLANK}
  * sentinel, which asks for records where an attribute is ABSENT. The backend's

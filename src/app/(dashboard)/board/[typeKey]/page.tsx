@@ -6,10 +6,14 @@
  * on click. Falls back to a pointer to the table view for types without a status
  * field. Reusable across tenants — the route is /board/<typeKey>.
  *
- * Pre-filterable by any declared ENUM attribute (?<attrName>=<value>, one per
- * declared enum, ANDed — startsim-uhmk), generalized from the old
- * content_type-only hand-rolled filter to the shared pickAttrFilters/
- * applyAttrFilters mechanism (same one the table already used). The topic
+ * Pre-filterable by any declared ENUM attribute EXCEPT the one whose choices are
+ * the lanes (?<attrName>=<value>, ANDed — startsim-uhmk), generalized from the
+ * old content_type-only hand-rolled filter to the shared pickAttrFilters/
+ * applyAttrFilters mechanism (same one the table already used). The lane
+ * attribute is REFUSED rather than applied: every lane query overwrites it, so
+ * applying it here chipped and counted a filter nothing on screen honoured —
+ * "82 of 2 records" live on 2026-09-06 (bd startsim-flv2x.7,
+ * boardAttrFilters). The topic
  * board additionally renders on-page category tabs (Weekly Briefs / Lead
  * Magnets / General) that pre-filter it the same way, plus a separate
  * free-text `assignee_sub` quick-filter (startsim-a2oq: "assigned to me" /
