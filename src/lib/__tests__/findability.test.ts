@@ -34,6 +34,8 @@ import {
   draftsViewChips,
   clearedDraftsView,
   draftsViewFilters,
+  draftsGateNeedsClient,
+  applyTopicGate,
   DRAFTS_DEFAULT_DAYS,
   TOPIC_GATE_PARAM,
 } from '@/lib/drafts-view';
@@ -151,13 +153,23 @@ describe('d0j7d (c) — the Drafts default filter is VISIBLE and CLEARABLE', () 
     expect(draftsViewChips({ since: 'all' }, now).map((c) => c.param)).toEqual([TOPIC_GATE_PARAM]);
   });
 
-  it('narrows to the approved topics SERVER-side, with the backend comma list', () => {
-    expect(draftsViewFilters({}, ['10', '11'])).toEqual({ 'attr.topic_ref__in': '10,11' });
+  // These two used to assert the OPPOSITE — that the gate narrowed SERVER-side
+  // with `attr.topic_ref__in`, and that an empty approved set sent an `__none__`
+  // sentinel rather than widening. Both were the defect (bd startsim-8hgmq.4):
+  // `topic_ref` is not a declared attribute, so the backend answered every one
+  // of those requests with count:0 and the tab opened empty for everyone. The
+  // gate now runs on the client; `drafts-gate.test.ts` pins the new contract and
+  // records why. What they were protecting — a gate must never widen to the whole
+  // corpus — still holds, and is asserted below over the client-side form.
+  it('sends no request filter for the gate, because the backend cannot express it', () => {
+    expect(draftsViewFilters({}, ['10', '11'])).toEqual({});
+    expect(draftsViewFilters({}, [])).toEqual({});
   });
 
   it('does not silently return everything when no topic is approved', () => {
     // A gate that matches nothing must narrow to nothing, never widen to all.
-    expect(draftsViewFilters({}, [])).toEqual({ 'attr.topic_ref__in': '__none__' });
+    expect(draftsGateNeedsClient({}, [])).toBe(true);
+    expect(applyTopicGate([{ id: 1, name: 'd', data: { topic_ref: '10' } } as never], [])).toEqual([]);
   });
 });
 

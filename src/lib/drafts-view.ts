@@ -27,7 +27,6 @@
  */
 import {
   applyRecencyWindow,
-  inFilters,
   pickRecencyWindow,
   readData,
   RECENCY_ALL,
@@ -101,39 +100,57 @@ export function clearedDraftsView(): Record<string, string> {
 }
 
 /**
- * The SERVER-SIDE half of the default: the approved topics' ids as an
- * `attr.topic_ref__in` comma list (rule 8 — narrow before fetching, not after).
+ * The request filters for the drafts default view — and there are none.
  *
- * THE RECENCY HALF IS NOT HERE, and that is a fact about the backend rather than
- * a shortcut. A draft's age is `core_entity.created_at`, a column, and the
- * tenant's EntityQuery recognises no filter on it: `_ENTITY_FILTERS` is
- * type, id, id__in, external_id, search, source, party, occurred_after,
- * occurred_before, the related_ family and order — and `occurred_after` aliases
- * the `occurred_at` ATTRIBUTE, not
- * the row's own timestamp. Guessing `attr.created_at__gte` would now earn a 400
- * rather than being ignored. So recency is applied by {@link applyDraftsRecency}
- * over the topic-narrowed set, whose size the gate above already bounds.
+ * THE TOPIC GATE CANNOT BE A REQUEST FILTER, and finding out why cost the
+ * Drafts tab (bd startsim-8hgmq.4). This used to narrow server-side with
+ * `attr.topic_ref__in` (rule 8 — narrow before fetching, not after). But
+ * `topic_ref` is not a DECLARED attribute on the draft type, and the tenant
+ * backend answers a filter on an undeclared attribute with `count: 0` while
+ * reporting it in `applied_filters` and NOT in `ignored_filters`. So the tab
+ * rendered "0 total / No results found" for every user, on every load, under a
+ * chip that said "Topic approved" — with 153 drafts in the tenant and 84 of them
+ * written for an approved topic.
  *
- * An ACTIVE gate with no approved topics narrows to a sentinel that matches
- * nothing, never to `{}`. Returning no filter there would widen the result to
- * the whole corpus under a filled-in filter chip — the failure mode that handed
- * a cleanup loop page 1 of the corpus and cost nine production rows.
+ * `foundry-api.ts` already warns about the MIRROR of this: an UNRECOGNISED
+ * parameter is silently IGNORED and the request returns EVERYTHING. Same
+ * silence, opposite direction. Only one of the two had been defended against.
+ *
+ * The gate itself is not in doubt, only where it runs. {@link applyTopicGate}
+ * already existed for the case where there are more approved topics than the
+ * backend's comma-list cap; it is now the only path, so no request can carry a
+ * filter the server answers with nothing. Declaring `topic_ref` as a real
+ * AttributeDef (plus `redenormalize_attributes`) would let the server half work
+ * as written and is the better long-run answer — it is a schema change, and this
+ * is not the hour for one.
+ *
+ * The recency half was never a request parameter either: a draft's age is
+ * `core_entity.created_at`, a column, and the tenant's EntityQuery recognises no
+ * filter on it (`occurred_after` aliases the `occurred_at` ATTRIBUTE, not the
+ * row's own timestamp). See {@link applyDraftsRecency}.
  */
 export function draftsViewFilters(params: Params, approvedTopicIds: string[]): Record<string, string> {
-  if (!topicGateActive(params)) return {};
-  if (approvedTopicIds.length === 0) return { [`attr.${TOPIC_REF_ATTR}__in`]: '__none__' };
-  return inFilters(TOPIC_REF_ATTR, approvedTopicIds) ?? {};
+  // Both arguments are kept: the signature is the seam the page calls through,
+  // and declaring `topic_ref` server-side is still the better long-run fix.
+  void params;
+  void approvedTopicIds;
+  return {};
 }
 
 /**
- * True when the gate is on but the server cannot express it — more approved
- * topics than the backend's comma-list cap. The caller must then narrow with
- * {@link applyTopicGate} on the client rather than show an unnarrowed list under
- * an active chip.
+ * True whenever the gate is on — the server cannot express it at all, so the
+ * client always narrows (see {@link draftsViewFilters}). This used to be true
+ * only past the backend's comma-list cap; below the cap the request filter was
+ * trusted, and it silently returned nothing.
+ *
+ * Note the empty-approved case is now `true` as well, and must be: the old code
+ * sent an `__none__` sentinel so an active chip could never widen to the whole
+ * corpus. {@link applyTopicGate} over an empty id list gives the same empty
+ * result without a request that lies about what it filtered.
  */
 export function draftsGateNeedsClient(params: Params, approvedTopicIds: string[]): boolean {
-  if (!topicGateActive(params)) return false;
-  return approvedTopicIds.length > 0 && inFilters(TOPIC_REF_ATTR, approvedTopicIds) == null;
+  void approvedTopicIds;
+  return topicGateActive(params);
 }
 
 /** Client-side form of the same gate, for the cap-exceeded case above. */
