@@ -169,4 +169,21 @@ describe('columns with no added value are never default-visible (startsim-b008b)
     expect(visible).not.toContain('team_notes');
     expect(visible).not.toContain('source_1');
   });
+
+  it('opens the topic table on exactly these seven columns', () => {
+    // Pinned, not descriptive: this is the set that was rendered against the
+    // deployed table to measure the row width (2026-09-07 — 1288px -> 1134px,
+    // i.e. no horizontal overflow at 1440 or 1366). If the set changes, the
+    // measurement behind bd startsim-5pq7h stops being about this table.
+    expect(defaultVisibleColumns(TOPIC_ATTRS, { hide: CONTENT_HIDE, withActions: true })).toEqual([
+      'name', 'createdAt', 'content_type', 'status', 'market', 'assignee_name', '__actions',
+    ]);
+  });
+
+  it('opens the draft table on its review columns, Judge included', () => {
+    expect(defaultVisibleColumns(DRAFT_ATTRS)).toEqual([
+      'name', 'createdAt', 'content_type', 'status', 'judge_verdict',
+      'candidate_index', 'sent_at', 'assignee_name',
+    ]);
+  });
 });
