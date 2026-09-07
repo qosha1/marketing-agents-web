@@ -78,13 +78,34 @@ export function humanizeHeader(name: string): string {
 export const NEVER_DEFAULT_ATTRS: readonly string[] = ['ai_rank', 'scope_path', 'team_verdict'];
 
 /**
- * Long body/blob attributes that are never default-visible — a table is for
- * scanning, not for reading a 500-word article. They live on the detail page and
- * stay one toggle away in the Columns menu.
+ * Attributes that widen a row without helping anyone scan it, so they are never
+ * default-visible. Two shapes, both measured on the live tenant 2026-09-07:
+ *
+ *   body/blob text — a table is for scanning, not for reading a 500-word
+ *   article (`snippet` averages 313 characters and runs to 6,374)
+ *
+ *   long single-line values — `url` averages 106 characters and runs to 171,
+ *   so its cell is as wide as a paragraph even though it is one line
+ *
+ * They live on the detail page and stay one toggle away in the Columns menu.
  */
-const LONG_FIELDS: readonly string[] = [
-  'blog', 'linkedin', 'seo', 'sources', 'body', 'content', 'auto_checks', '_origin', '_sample',
+const WIDE_FIELDS: readonly string[] = [
+  'blog', 'linkedin', 'seo', 'sources', 'body', 'content', 'snippet', 'url',
+  'auto_checks', '_origin', '_sample',
 ];
+
+/**
+ * Attributes that just repeat the record's own name, so a column of them says
+ * nothing the leading Title column has not already said. On news_item
+ * `data.title` was byte-identical to `record.name` in 146 of 150 live rows
+ * (2026-09-07), and it was sitting in the default six purely because the type's
+ * attribute order is DB-natural (bd startsim-8hgmq.1).
+ *
+ * The content spine reaches the same end differently: it FOLDS title/subtitle/
+ * angle into a stacked Title cell via `hide`, so on topic there is no `title`
+ * column to drop. This list is for the types that do not fold.
+ */
+const NAME_DUPLICATE_ATTRS: readonly string[] = ['title'];
 
 /** The content-defining fields, shown first when the type declares them. */
 const PREFERRED_ATTRS: readonly string[] = [
@@ -107,6 +128,19 @@ export interface DefaultVisibleOptions {
    * columns, not declared attributes, so they cannot evict one.
    */
   afterCreated?: string[];
+  /**
+   * Attributes THIS view has counted as near-always-blank, so they stop
+   * spending a default column (bd startsim-8hgmq.10). Applied after the cap,
+   * like every other exclusion, so dropping one narrows the row.
+   *
+   * Per-view rather than a constant here, because emptiness is a property of a
+   * type's DATA and not of an attribute's name. `assignee_name` is the proof:
+   * it is blank in 152 of 153 drafts AND in 82 of 84 topics, but the reviewers
+   * asked for the topic column and startsim-71z6 built its initials chip, so a
+   * shared name list would take away a column somebody uses. The view that
+   * measured itself is the one that gets to drop it.
+   */
+  sparse?: string[];
 }
 
 /**
@@ -121,18 +155,32 @@ export function defaultVisibleColumns(
   attributes: AttributeDef[],
   opts: DefaultVisibleOptions = {},
 ): string[] {
-  const excluded = new Set([...LONG_FIELDS, ...(opts.hide ?? [])]);
-  const attrIds = attributes.map((a) => a.name).filter((n) => !excluded.has(n));
+  // `hide` is the ONLY pre-cap exclusion, and it has to be: those attributes are
+  // folded into the stacked Title cell, so buildRecordColumns never emits a
+  // column for them and naming one here would point at nothing.
+  const hidden = new Set(opts.hide ?? []);
+  const attrIds = attributes.map((a) => a.name).filter((n) => !hidden.has(n));
   const preferred = PREFERRED_ATTRS.filter((p) => attrIds.includes(p));
   const rest = attrIds.filter((a) => !preferred.includes(a));
   // Cap FIRST, then drop the no-value columns. Filtering before the cap would
-  // BACKFILL the freed slots with whatever attribute came next (on `topic`:
-  // team_notes, a longtext blob, and source_1, a raw URL) — re-widening the very
-  // table the reviewer already can't scroll. Removing a column has to make the
-  // row narrower; the cap is a width ceiling, not a quota to fill.
+  // BACKFILL the freed slots with whatever attribute came next — re-widening the
+  // very table the reviewer already can't scroll. Removing a column has to make
+  // the row narrower; the cap is a width ceiling, not a quota to fill.
+  //
+  // This is not hypothetical. Dropping news_item's Url/Title/Snippet BEFORE the
+  // cap hands their three slots to source_name, tier and approved — which on 150
+  // live rows were, respectively, identical to domain 150/150, null 150/150 and
+  // true 150/150. Three long columns would become three worthless ones and the
+  // table would still be wider than the screen (bd startsim-8hgmq.1).
+  const droppedAfterCap = new Set([
+    ...NEVER_DEFAULT_ATTRS,
+    ...WIDE_FIELDS,
+    ...NAME_DUPLICATE_ATTRS,
+    ...(opts.sparse ?? []),
+  ]);
   const visibleAttrs = [...preferred, ...rest]
     .slice(0, DEFAULT_ATTR_CAP)
-    .filter((n) => !NEVER_DEFAULT_ATTRS.includes(n));
+    .filter((n) => !droppedAfterCap.has(n));
   return [
     'name',
     'createdAt',

@@ -82,6 +82,21 @@ const STATUS_ATTR = 'status';
 // VISIBLE can't drift apart.
 const CONTENT_TITLE_ATTRS = ['title', 'subtitle', 'angle'];
 
+/**
+ * Draft attributes counted as near-always-blank, so they stop opening as
+ * columns (bd startsim-8hgmq.10). Across all 153 live drafts on 2026-09-07,
+ * `sent_at` was filled in 1 and `assignee_name` in 1 — against content_type
+ * 153/153, status 153/153, judge_verdict 150/153 and candidate_index 150/153.
+ * Two of nine default columns rendered an em dash in 152 of 153 rows, on a
+ * table that overflowed at every viewport including 1440.
+ *
+ * They are LIFECYCLE fields, not junk: sent_at fills as drafts get sent and
+ * assignee_name as they get assigned. Neither is worth a DEFAULT column while
+ * almost every row is blank; both stay one toggle away in the Columns menu, and
+ * a team that starts assigning drafts switches Assignee straight back on.
+ */
+const DRAFT_SPARSE_ATTRS = ['sent_at', 'assignee_name'];
+
 // TOPIC_REVIEW_CONFIG / NEWS_REVIEW_CONFIG used to be declared right here,
 // which is why the board had no decision at all: there was nothing for a
 // second surface to import (bd startsim-6y458). They live in
@@ -349,12 +364,20 @@ export default function TypeRecordsPage() {
         // of the question a reviewer actually asks (bd startsim-4gw21). Default
         // ON: a provenance column nobody switches on answers nobody's question.
         afterCreated: isDraft ? [ORIGIN_COLUMN_ID] : undefined,
+        // Measured empty on this view, so they do not open as columns. NOT
+        // fixed by folding the origin column back inside the attribute cap —
+        // afterCreated sits outside it on purpose, so a computed column can
+        // never evict a declared attribute a reviewer reads.
+        sparse: isDraft ? DRAFT_SPARSE_ATTRS : undefined,
       }),
-      // v5: Created moves up next to the title, ai_rank / scope_path /
+      // v6: the News Item table stops opening on Url / Title / Snippet — three
+      // wide columns in its default six, one of them a duplicate of the Name
+      // column — and does not backfill their slots (bd startsim-8hgmq.1).
+      // v5 was: Created moves up next to the title, ai_rank / scope_path /
       // team_verdict stop being default columns (bd startsim-b008b), and the
       // draft table gains "Created by" (bd startsim-4gw21). The bumped key is
-      // what stops a saved v4 choice from overriding any of it.
-      persistKey: `records-${typeKey}-v5`,
+      // what stops a saved v5 choice from overriding any of it.
+      persistKey: `records-${typeKey}-v6`,
     };
   }, [type?.attributes, typeKey, isContent, isNews, isDraft]);
 
