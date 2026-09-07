@@ -350,11 +350,14 @@ export default function TypeRecordsPage() {
         // ON: a provenance column nobody switches on answers nobody's question.
         afterCreated: isDraft ? [ORIGIN_COLUMN_ID] : undefined,
       }),
-      // v5: Created moves up next to the title, ai_rank / scope_path /
+      // v6: the News Item table stops opening on Url / Title / Snippet — three
+      // wide columns in its default six, one of them a duplicate of the Name
+      // column — and does not backfill their slots (bd startsim-8hgmq.1).
+      // v5 was: Created moves up next to the title, ai_rank / scope_path /
       // team_verdict stop being default columns (bd startsim-b008b), and the
       // draft table gains "Created by" (bd startsim-4gw21). The bumped key is
-      // what stops a saved v4 choice from overriding any of it.
-      persistKey: `records-${typeKey}-v5`,
+      // what stops a saved v5 choice from overriding any of it.
+      persistKey: `records-${typeKey}-v6`,
     };
   }, [type?.attributes, typeKey, isContent, isNews, isDraft]);
 

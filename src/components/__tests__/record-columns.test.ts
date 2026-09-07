@@ -197,3 +197,71 @@ describe('columns with no added value are never default-visible (startsim-b008b)
     ]);
   });
 });
+
+/**
+ * News Item, in the order the tenant API returns it (read off
+ * `GET /api/v1/schema/types` on the live tenant 2026-09-07, same as the two
+ * fixtures above — both of which were re-verified against that response and
+ * match it exactly, 17 and 15 attributes in the same order).
+ */
+const NEWS_ATTRS = defs([
+  'url', 'title', 'snippet', 'domain', 'source_name', 'tier', 'approved',
+  'adapter', 'query', 'market', 'lang', 'published_at', 'first_seen',
+  'last_seen', 'times_seen', 'used_in', 'notes', 'content', 'status',
+]);
+
+describe('the News Item table opens narrow (startsim-8hgmq.1)', () => {
+  it('opens on exactly these six columns', () => {
+    // It used to open on name, createdAt, url, title, snippet, domain, market,
+    // status, __actions — measured 1134 clientWidth vs 1628 scrollWidth at a
+    // 1440 viewport, 494px of overflow and the worst of the three content
+    // views. Three of its six attribute columns were long text and one was a
+    // duplicate, purely because the type's attribute order is DB-natural.
+    expect(defaultVisibleColumns(NEWS_ATTRS, { withActions: true })).toEqual([
+      'name', 'createdAt', 'status', 'market', 'domain', '__actions',
+    ]);
+  });
+
+  it('renders that as the header row Name | Created | Domain | Market | State | Curation', () => {
+    // defaultVisibleColumns answers WHICH columns open (preferred ones first);
+    // the header the reviewer actually reads is buildRecordColumns' order,
+    // which follows the type's attribute order. Pin the row itself, because
+    // the row is what was measured.
+    const visible = new Set(defaultVisibleColumns(NEWS_ATTRS, { withActions: true }));
+    const headerRow = buildRecordColumns(NEWS_ATTRS, {
+      actionsHeader: 'Curation',
+      actionsCell: () => null,
+    })
+      .filter((c) => visible.has(c.id))
+      .map((c) => c.header);
+    expect(headerRow).toEqual(['Name', 'Created', 'Domain', 'Market', 'State', 'Curation']);
+  });
+
+  it('drops the three wide columns without backfilling three empty ones', () => {
+    const visible = defaultVisibleColumns(NEWS_ATTRS, { withActions: true });
+    // The wide ones go…
+    for (const name of ['url', 'title', 'snippet']) {
+      expect(visible).not.toContain(name);
+    }
+    // …and the cap must NOT hand their slots to whatever comes next in the
+    // type's attribute order. On the live tenant (150 rows sampled 2026-09-07)
+    // those next three carry no information at all:
+    //   source_name → identical to domain in 150/150 rows
+    //   tier        → null in 150/150 rows, so the cell renders "—"
+    //   approved    → true in 150/150 rows, so the cell renders "Yes"
+    // Swapping three long columns for three worthless ones leaves the table
+    // just as unreadable and still wider than the screen.
+    for (const name of ['source_name', 'tier', 'approved']) {
+      expect(visible).not.toContain(name);
+    }
+  });
+
+  it('still OFFERS Url, Title and Snippet in the Columns menu', () => {
+    // The default goes away, not the column — a reader who wants the link or
+    // the snippet is one toggle away, exactly like blog/linkedin on drafts.
+    const ids = buildRecordColumns(NEWS_ATTRS).map((c) => c.id);
+    for (const name of ['url', 'title', 'snippet']) {
+      expect(ids).toContain(name);
+    }
+  });
+});
