@@ -100,6 +100,13 @@ export interface DefaultVisibleOptions {
   hide?: string[];
   /** Whether the view renders the trailing inline-decision column. */
   withActions?: boolean;
+  /**
+   * Extra column ids to show immediately after Created — where a row came from
+   * belongs beside when it arrived (the Drafts table's origin column,
+   * bd startsim-4gw21). Kept out of the attribute cap: these are computed
+   * columns, not declared attributes, so they cannot evict one.
+   */
+  afterCreated?: string[];
 }
 
 /**
@@ -129,6 +136,7 @@ export function defaultVisibleColumns(
   return [
     'name',
     'createdAt',
+    ...(opts.afterCreated ?? []),
     ...visibleAttrs,
     ...(opts.withActions ? ['__actions'] : []),
   ];

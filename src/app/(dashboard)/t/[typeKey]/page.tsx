@@ -27,6 +27,7 @@ import {
 } from '@/lib/foundry-api';
 import { RecordForm } from '@/components/record-form';
 import { buildRecordColumns, defaultVisibleColumns } from '@/components/record-columns';
+import { originColumn, ORIGIN_COLUMN_ID } from '@/components/origin-column';
 import {
   EntityDetailDrawer,
   GoodExampleToggle,
@@ -315,8 +316,16 @@ export default function TypeRecordsPage() {
           : undefined,
       });
     }
+    if (isDraft) {
+      // "Created by" (bd startsim-4gw21). A reviewer found drafts nobody on her
+      // team had written and had to ASK where they came from; the answer was on
+      // the row the whole time (`_origin` + `owner_sub`) and simply never
+      // rendered. Appended rather than threaded through buildRecordColumns
+      // because neither field is a DECLARED attribute — see origin-column.ts.
+      return [...buildRecordColumns(attrs), originColumn()];
+    }
     return buildRecordColumns(attrs);
-  }, [type, isContent, isNews, typeKey, qc, acted]);
+  }, [type, isContent, isNews, isDraft, typeKey, qc, acted]);
 
   const hasStatusBoard = !!statusAttr;
 
@@ -336,12 +345,18 @@ export default function TypeRecordsPage() {
         // On the content spine these are folded into the stacked Title column.
         hide: isContent ? CONTENT_TITLE_ATTRS : undefined,
         withActions: isContent || isNews,
+        // Where the row came from sits next to when it arrived — the two halves
+        // of the question a reviewer actually asks (bd startsim-4gw21). Default
+        // ON: a provenance column nobody switches on answers nobody's question.
+        afterCreated: isDraft ? [ORIGIN_COLUMN_ID] : undefined,
       }),
-      // v5: Created moves up next to the title, and ai_rank / scope_path /
-      // team_verdict stop being default columns (bd startsim-b008b).
+      // v5: Created moves up next to the title, ai_rank / scope_path /
+      // team_verdict stop being default columns (bd startsim-b008b), and the
+      // draft table gains "Created by" (bd startsim-4gw21). The bumped key is
+      // what stops a saved v4 choice from overriding any of it.
       persistKey: `records-${typeKey}-v5`,
     };
-  }, [type?.attributes, typeKey, isContent, isNews]);
+  }, [type?.attributes, typeKey, isContent, isNews, isDraft]);
 
   // Kind + State facet chips (shared TableFilters). Options are the raw enum
   // values; UnifiedTable renders the chips and reports changes via onChange —
