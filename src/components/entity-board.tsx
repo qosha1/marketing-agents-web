@@ -24,6 +24,13 @@
  * Either move path PATCHes the full data blob (the backend PATCH replaces data, so we
  * always send {...record.data, [status]: value}), optimistically moving the card between
  * the two lanes' caches and rolling both back on error.
+ *
+ * A CARD DOES NOT REPEAT WHAT THE BOARD ALREADY SAYS (bd startsim-8hgmq.5). The
+ * lane it sits in, the tab it was reached under, and its own heading are all on
+ * screen already; what a card body has left to say is lib/board-card.ts's
+ * `cardBody`, a pure rule that names no attribute. The per-card status control
+ * survives that cleanup because it is the only way to reach a lane the ✕/✓/✎
+ * cluster does not cover — it just stopped displaying the lane it is already in.
  */
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
@@ -36,7 +43,6 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
 } from '@startsimpli/ui';
 
 import { InlineReviewActions, type ReviewConfig } from '@startsimpli/ui/collection';
@@ -48,8 +54,10 @@ import {
   pickStatusAttr,
   readData,
   UNSET_COLUMN,
+  type AttrFilter,
   type RollupCounts,
 } from '@/lib/board';
+import { ASSIGNEE_NAME_ATTR, cardBody, moveChoices } from '@/lib/board-card';
 import { nearestScrollParent, type LaneState } from '@/lib/lanes';
 import { initialsOf } from '@/lib/roster';
 import {
@@ -59,10 +67,6 @@ import {
   type EntityTypeDef,
 } from '@/lib/foundry-api';
 import { saveEntity } from '@/lib/entity-cache';
-
-/** Attribute-name convention for the assignee chip (startsim-71z6) — any type
- *  that declares this attr gets the chip, not just topic/draft. */
-const ASSIGNEE_NAME_ATTR = 'assignee_name';
 
 interface Props {
   type: EntityTypeDef;
@@ -104,6 +108,16 @@ interface Props {
    * its types are reviewable and what its decisions are ABOUT.
    */
   review?: ReviewConfig;
+  /**
+   * The enum facets the board is ALREADY SCOPED BY — the page's applied filters
+   * (`boardAttrFilters(...).applied`), handed straight through. A card does not
+   * repeat what the tab and the header chip above it already say: under the
+   * Evergreen tab every card is `lead_magnet`, so that row is suppressed
+   * (bd startsim-8hgmq.5). Derived from the filter, never from an attribute
+   * name — a `deal` board scoped by `?region=emea` gets the same for free, and
+   * an unscoped board keeps the row, where it tells the kinds apart.
+   */
+  pinned?: readonly AttrFilter[];
   /**
    * Fired after a decision is saved from a card, so the page can refetch. A
    * decision moves the record to another lane and changes two lanes' counts,
@@ -165,12 +179,15 @@ export function EntityBoard({
   rollupLabel,
   unaccounted = 0,
   review,
+  pinned,
   onDecided,
 }: Props) {
   const qc = useQueryClient();
   const statusAttr = useMemo(() => pickStatusAttr(type), [type]);
   const columns = useMemo(() => boardColumns(statusAttr), [statusAttr]);
   const statusName = statusAttr?.name ?? '';
+  /** The lane attribute, said out loud — for the move control's accessible name. */
+  const statusLabel = statusName.replace(/_/g, ' ') || 'status';
 
   const items = useMemo(() => {
     const out: Record<string, EntityRecord[]> = {};
@@ -248,12 +265,6 @@ export function EntityBoard({
   if (!statusAttr) return null;
 
   const choices = choicesOf(statusAttr);
-  // Assignee gets its OWN dedicated chip (below), never a plain meta row.
-  const displayAttrs = type.attributes
-    .filter(
-      (a) => a.name !== statusName && a.dataType !== 'json' && a.dataType !== 'longtext' && a.name !== ASSIGNEE_NAME_ATTR,
-    )
-    .slice(0, 3);
   const kanbanCols: KanbanColumnConfig[] = columns.map((c) => ({ id: c.id, label: c.label }));
 
   function handleMove(move: KanbanMove) {
@@ -331,6 +342,12 @@ export function EntityBoard({
         const rollupCounts = rollupById?.get(record.id);
         const rollupText = rollupCounts && rollupLabel ? rollupLabel(rollupCounts) : null;
         const sentinelFor = sentinelIds.get(String(record.id));
+        // WHAT THIS CARD HAS LEFT TO SAY. The lane it sits in, the tab above it,
+        // and its own heading are all already on screen; lib/board-card.ts is
+        // the pure rule for what is not (bd startsim-8hgmq.5). Selection only —
+        // it writes nothing, so a lane move is untouched by it.
+        const body = cardBody(type, record, { statusName, pinned });
+        const currentStatus = String(readData(record.data, statusName) ?? '');
         return (
           <>
             <div className="m-2 cursor-grab rounded-md border bg-white p-3 shadow-sm active:cursor-grabbing">
@@ -339,8 +356,14 @@ export function EntityBoard({
                 className="block w-full text-left text-sm font-medium leading-snug hover:underline"
                 onClick={() => onCardClick(record)}
               >
-                {record.name || record.externalId || `#${record.id}`}
+                {body.heading}
               </button>
+              {/* The line that says what this record is ABOUT — the stacked
+                  subtitle the table's Title cell already had. Two lines at most:
+                  a card is a card. */}
+              {body.subtitle ? (
+                <p className="mt-0.5 line-clamp-2 text-xs leading-snug text-neutral-500">{body.subtitle}</p>
+              ) : null}
               {assigneeInitials || rollupText ? (
                 <div className="mt-1 flex flex-wrap items-center gap-1">
                   {assigneeInitials ? (
@@ -358,33 +381,44 @@ export function EntityBoard({
                   ) : null}
                 </div>
               ) : null}
-              <dl className="mt-1 space-y-0.5">
-                {displayAttrs.map((a) => {
-                  const v = readData(record.data, a.name);
-                  if (v == null || v === '') return null;
-                  return (
-                    <div key={String(a.id)} className="flex gap-1 text-xs text-neutral-600">
-                      <dt className="capitalize text-neutral-400">{a.name.replace(/_/g, ' ')}:</dt>
-                      <dd className="truncate">{a.dataType === 'boolean' ? (v ? 'Yes' : 'No') : String(v)}</dd>
+              {body.rows.length ? (
+                <dl className="mt-1 space-y-0.5">
+                  {body.rows.map((row) => (
+                    <div key={row.name} className="flex gap-1 text-xs text-neutral-600">
+                      <dt className="capitalize text-neutral-400">{row.label}:</dt>
+                      <dd className="truncate">{row.value}</dd>
                     </div>
-                  );
-                })}
-              </dl>
+                  ))}
+                </dl>
+              ) : null}
               {/* stop pointerdown so interacting with a control never starts a drag */}
               <div
                 className="mt-2 flex items-center gap-2"
                 onClick={(e) => e.stopPropagation()}
                 onPointerDown={(e) => e.stopPropagation()}
               >
-                <Select
-                  value={String(readData(record.data, statusName) ?? '')}
-                  onValueChange={(val) => applyStatus(record, val)}
-                >
-                  <SelectTrigger className="h-7 flex-1 text-xs">
-                    <SelectValue placeholder="Set status…" />
+                {/*
+                  THE CONTROL STAYS; ITS ECHOED VALUE GOES (bd startsim-8hgmq.5).
+                  It used to display the record's status — inside the lane of the
+                  same name, which is what the lanes already are. It still EARNS
+                  its place: the ✕/✓/✎ cluster beside it only reaches
+                  approve/reject/needs-work, so this is the only way to a lane
+                  like `written` without dragging. So it now reads as an ACTION,
+                  offering the lanes the card is not in (`moveChoices`).
+
+                  Held at the empty string on purpose, which is Radix's
+                  placeholder sentinel: the value never advances, so picking the
+                  same lane twice fires `onValueChange` twice. A controlled value
+                  that tracked the selection would swallow the second — move a
+                  card to `written`, drag it back, and the control would refuse
+                  to move it there again.
+                */}
+                <Select value="" onValueChange={(val) => applyStatus(record, val)}>
+                  <SelectTrigger className="h-7 flex-1 text-xs" aria-label={`Move to another ${statusLabel}`}>
+                    <span className="text-neutral-500">Move to…</span>
                   </SelectTrigger>
                   <SelectContent>
-                    {choices.map((c) => (
+                    {moveChoices(choices, currentStatus).map((c) => (
                       <SelectItem key={c} value={c}>
                         {c}
                       </SelectItem>

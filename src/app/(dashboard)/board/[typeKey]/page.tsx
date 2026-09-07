@@ -473,6 +473,11 @@ export default function BoardPage() {
           rollupById={rollupById}
           rollupLabel={isTopicBoard ? rollupLabel : undefined}
           review={review}
+          // The facets the board is scoped by — the SAME list the header chips
+          // and the count are taken over. A card under the Evergreen tab does
+          // not print "Content Type: lead_magnet" back at the reader
+          // (bd startsim-8hgmq.5).
+          pinned={filters}
           onDecided={onDecided}
         />
       )}
