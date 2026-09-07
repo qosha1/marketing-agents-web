@@ -54,11 +54,11 @@ import { nearestScrollParent, type LaneState } from '@/lib/lanes';
 import { initialsOf } from '@/lib/roster';
 import {
   collectionClient,
-  updateEntity,
   type Paginated,
   type EntityRecord,
   type EntityTypeDef,
 } from '@/lib/foundry-api';
+import { saveEntity } from '@/lib/entity-cache';
 
 /** Attribute-name convention for the assignee chip (startsim-71z6) — any type
  *  that declares this attr gets the chip, not just topic/draft. */
@@ -222,8 +222,14 @@ export function EntityBoard({
       const prevTo = qc.getQueryData<Paginated<EntityRecord>>(laneKey(newStatus));
       patchLanes(record, from, newStatus, newStatus);
       try {
-        // Status only, on purpose — laneMoveData carries the reasoning.
-        await updateEntity(record.id, { data: laneMoveData(record.data, statusName, newStatus) });
+        // Status only, on purpose — laneMoveData carries the reasoning. Written
+        // through `saveEntity` so ['entity', <id>] stays in step with the lanes:
+        // refreshing only the two lanes left the record's OWN entry holding the
+        // pre-drag status for five minutes, so opening the card right after a
+        // drag showed it back in the lane it came from (bd startsim-mk5qp).
+        await saveEntity(qc, record.id, {
+          data: laneMoveData(record.data, statusName, newStatus),
+        });
         // Re-fetch BOTH lanes rather than the whole board. Dropping the trailing
         // ['page', n] segment invalidates EVERY page of the lane, not only the
         // one that was patched: removing a record shifts every later page up by
