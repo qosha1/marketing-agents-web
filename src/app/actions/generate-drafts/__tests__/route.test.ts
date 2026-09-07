@@ -69,13 +69,30 @@ function draftWire(id: number, topicRef: string | number) {
   };
 }
 
-/** Route the mocked tenant reads by path, the way the real backend would. */
+/**
+ * Route the mocked tenant reads by path, the way the real backend would.
+ *
+ * `attrFilter` IS THE POINT OF THIS HELPER, not a knob (bd startsim-8hgmq.3).
+ * It used to answer every `entities?` path with the fixture rows, which quietly
+ * assumed any filter in the URL had worked. The live tenant does one of two
+ * things instead, and the gate must be right under both:
+ *
+ *  - 'undeclared' (DEFAULT — what the deployed backend actually does): a filter
+ *    on an attribute the type does not DECLARE is ACCEPTED and matches nothing.
+ *    `count: 0`, the parameter reported in `applied_filters` and NOT in
+ *    `ignored_filters`. `topic_ref` is undeclared on the draft type (verified
+ *    live, bd startsim-8hgmq.4). A gate that narrows by it therefore counts
+ *    zero drafts for every topic in the tenant, forever.
+ *  - 'ignored': an UNRECOGNISED parameter is dropped and EVERY row comes back
+ *    (the mirror, warned about in `foundry-api.ts`).
+ */
 function stubTenant(opts: {
   topic?: unknown;
   types?: unknown[];
   drafts?: unknown[];
   draftsNext?: string | null;
   fail?: boolean;
+  attrFilter?: 'undeclared' | 'ignored';
 }) {
   vi.mocked(tenantFetch).mockImplementation(async (path: string) => {
     if (opts.fail) throw new Error(`tenant GET ${path} is unreachable`);
@@ -83,7 +100,8 @@ function stubTenant(opts: {
       return { count: 1, next: null, previous: null, results: opts.types ?? [TOPIC_TYPE_WIRE] };
     }
     if (path.startsWith('entities?')) {
-      const drafts = opts.drafts ?? [];
+      const undeclared = (opts.attrFilter ?? 'undeclared') === 'undeclared';
+      const drafts = path.includes('attr.') && undeclared ? [] : (opts.drafts ?? []);
       return {
         count: drafts.length,
         next: opts.draftsNext ?? null,
@@ -154,6 +172,11 @@ describe('POST /actions/generate-drafts', () => {
   });
 
   it('refuses a topic whose drafts already exist — no silent 4th candidate', async () => {
+    // THE 2026-09-07 DEFECT (bd startsim-8hgmq.3). This assertion is unchanged;
+    // what changed is the fixture underneath it, which now answers
+    // `attr.topic_ref` the way the live backend does — with nothing. Under the
+    // old, filter-honouring stub this passed while production relayed the
+    // writer a second time over a topic that already had three drafts.
     stubTenant({
       topic: topicWire('ready'),
       drafts: [draftWire(1, TOPIC_ID), draftWire(2, TOPIC_ID), draftWire(3, TOPIC_ID)],
@@ -189,6 +212,7 @@ describe('POST /actions/generate-drafts', () => {
     stubTenant({
       topic: topicWire('ready'),
       drafts: [draftWire(1, 999), draftWire(2, 1000), draftWire(3, 1001)],
+      attrFilter: 'ignored',
     });
 
     const res = await POST(post({ story: story() }));
@@ -222,6 +246,26 @@ describe('POST /actions/generate-drafts', () => {
     // "Could not check" is not "allowed". Failing open here would reinstate the
     // exact hole this route exists to close, on the one day the tenant blips.
     stubTenant({ fail: true });
+
+    const res = await POST(post({ story: story() }));
+
+    expect(res.status).toBe(502);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('fails CLOSED when the draft listing runs out of pages before matching', async () => {
+    // Dropping the `attr.topic_ref` narrowing (bd startsim-8hgmq.3) means this
+    // gate now reads the draft corpus and matches in JS, bounded by
+    // MAX_PAGES * PAGE_SIZE. `next` never clears here, so the walk ends still
+    // holding a page it did not read, having matched nothing for this topic —
+    // a count that was never established. Allowing on it would re-open the
+    // silent double-write at a larger corpus size, so it is a 502, exactly as
+    // an unreachable tenant is.
+    stubTenant({
+      topic: topicWire('ready'),
+      drafts: [draftWire(1, 999)],
+      draftsNext: 'http://tenant/entities?page=2',
+    });
 
     const res = await POST(post({ story: story() }));
 

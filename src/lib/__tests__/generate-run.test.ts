@@ -10,6 +10,7 @@ import {
   noteGeneratePoll,
   resetGenerateRuns,
   startGenerateRun,
+  startGenerateRunOnce,
   unmountGenerateRun,
 } from '../generate-run';
 import { GENERATE_SETTLE_MS, GENERATE_STALL_MS, GENERATE_WINDOW_MS } from '../generate-poll';
@@ -175,5 +176,67 @@ describe('a run that has ended stays ended', () => {
 
     expect(generateRunStopped(TOPIC)).toBe('idle');
     expect(isGenerateRunning('topic-99')).toBe(true);
+  });
+});
+
+describe('one writer run per topic — a second press cannot start another', () => {
+  /**
+   * bd startsim-8hgmq.3. On 2026-09-07 the "Generate drafts" webhook fired
+   * three times in five minutes and left six near-duplicate drafts in the
+   * reviewer's queue. The webhook answers immediately while the drafts take
+   * ~100s to appear, so pressing again is the natural thing to do — and the
+   * server-side gate cannot catch it inside that window, because the drafts it
+   * counts do not exist yet. The claim below is what refuses the second press.
+   */
+  it('refuses a second claim while the first run is in flight', () => {
+    expect(startGenerateRunOnce(TOPIC, { at: T, baseline: 0 })).toBe(true);
+
+    // The impatient second press, 20s in — nothing has been written yet, so the
+    // draft count both the client and the server would read is still 0.
+    expect(startGenerateRunOnce(TOPIC, { at: T + 20_000, baseline: 0 })).toBe(false);
+    expect(isGenerateRunning(TOPIC)).toBe(true);
+  });
+
+  it('does not restart the clock on the run it refuses', () => {
+    // A refusal that reset `startedAt` would push the window back on every
+    // press, so an impatient reader could keep a dead run alive indefinitely
+    // and never see `no_response`.
+    startGenerateRunOnce(TOPIC, { at: T, baseline: 0 });
+    noteGeneratePoll(TOPIC, T + GENERATE_WINDOW_MS - 1_000);
+
+    startGenerateRunOnce(TOPIC, { at: T + 20_000, baseline: 0 });
+
+    expect(generateRunDecision(TOPIC, T + GENERATE_WINDOW_MS)).toEqual({
+      keepPolling: false,
+      terminal: true,
+      reason: 'no_response',
+    });
+  });
+
+  it('refuses an instance that never saw the run start', () => {
+    // The hole a component-state `disabled` cannot close: `generating` is
+    // seeded from the store AT MOUNT, so an instance mounted BEFORE the run
+    // began still holds `false` and renders an enabled button over a live
+    // writer. The claim races against the run itself, not against that copy.
+    mountGenerateRun(TOPIC, T - 1_000); // an instance is watching; nothing running
+    startGenerateRunOnce(TOPIC, { at: T, baseline: 0 }); // another one presses
+
+    expect(startGenerateRunOnce(TOPIC, { at: T + 1_000, baseline: 0 })).toBe(false);
+  });
+
+  it('allows a fresh run once the previous one has ended', () => {
+    // Refusal is scoped to a run IN FLIGHT, never a topic that has been
+    // written for. Whether an already-written topic may be written again is
+    // the gate's question (`canGenerateDrafts` -> drafts_exist), not this one.
+    startGenerateRunOnce(TOPIC, { at: T, baseline: 0 });
+    endGenerateRun(TOPIC, 'no_response');
+
+    expect(startGenerateRunOnce(TOPIC, { at: T + 60_000, baseline: 0 })).toBe(true);
+    expect(generateRunStopped(TOPIC)).toBe('idle');
+  });
+
+  it('is per topic, so one running writer does not lock the next topic', () => {
+    startGenerateRunOnce(TOPIC, { at: T, baseline: 0 });
+    expect(startGenerateRunOnce('topic-43', { at: T + 1_000, baseline: 0 })).toBe(true);
   });
 });

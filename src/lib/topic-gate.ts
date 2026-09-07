@@ -19,16 +19,38 @@
  *     included, and the feature dies for everyone. `entityTypeFromWire` is the
  *     whole fix and `__tests__/topic-gate.test.ts` fixtures it in snake_case.
  *
- *  2. THE DRAFT ROWS ARE RE-CHECKED IN JS RATHER THAN TRUSTING `count`.
- *     Measured and written down in `foundry-api.ts`: the deployed tenant image
- *     SILENTLY IGNORES a query parameter it does not recognise (`?bogus=1`
- *     returns everything, not a 400). So a dropped `attr.topic_ref` would make
- *     the envelope's `count` the total draft count — 88 today — and every topic
- *     would refuse as `drafts_exist`. Filtering the returned rows ourselves is
- *     correct when the filter works AND when it is ignored (in which case this
- *     degrades to exactly what the n8n poll does: read the drafts, match on
- *     `topic_ref`). The filter stays in the URL because it is the verified
- *     `attr.<name>` shape and saves the bandwidth when it is honoured.
+ *  2. THE DRAFTS ARE LISTED BY TYPE ALONE, AND MATCHED IN JS.
+ *     This read is the whole gate: `canGenerateDrafts` refuses on
+ *     `draftCount > 0`, so a draft this misses is a writer fired twice.
+ *
+ *     It used to narrow with `attr.topic_ref=<id>` as well. That filter is what
+ *     broke it (bd startsim-8hgmq.3). The tenant has THREE answers to a filter,
+ *     not two, and only two were reasoned about here:
+ *       - HONOURED — the rows come back narrowed;
+ *       - IGNORED — an UNRECOGNISED parameter is dropped and EVERYTHING comes
+ *         back (measured, and written down in `foundry-api.ts`), which is why
+ *         the rows are re-checked in JS instead of trusting the envelope
+ *         `count`: 88 unrelated drafts would otherwise refuse every topic;
+ *       - ACCEPTED AND MATCHED NOTHING — a filter on an attribute the type does
+ *         not DECLARE is applied and finds no rows. `count: 0`, the parameter
+ *         reported in `applied_filters` and NOT in `ignored_filters`,
+ *         indistinguishable from a filter that legitimately matched nothing.
+ *     `topic_ref` is undeclared on the draft type — verified against the live
+ *     tenant in bd startsim-8hgmq.4, where the same filter emptied the entire
+ *     Drafts tab. So this gate counted ZERO drafts for every topic in the
+ *     tenant, always, and the JS re-check ran over an empty array and could not
+ *     save it. On 2026-09-07 that relayed the writer twice for one topic
+ *     (n8n 12848 at 15:43:02 and 12853 at 15:46:08, the second fired 79 seconds
+ *     AFTER the first three drafts had already landed), leaving six
+ *     near-duplicate drafts in the reviewer's queue.
+ *
+ *     `type` is a first-class `_ENTITY_FILTERS` key, so it narrows for real.
+ *     Everything else is matched here, which is exactly what the n8n poller
+ *     does. The cost is paging the draft corpus (153 rows today) on a button
+ *     press — the same read `fetchTopicDrafts` already performs for the client
+ *     half of this gate. Declaring `topic_ref` as a real AttributeDef (plus
+ *     `redenormalize_attributes`) would let a server-side narrowing work; that
+ *     is a schema change, and the gate must be correct without one.
  *
  *  3. IT MATCHES ON `topic_ref` ONLY, where the client's `fetchTopicDrafts`
  *     also honours a `written_for` edge and an `external_id` stamp. That is a
@@ -138,16 +160,28 @@ export async function resolveTopicGate(
   const review = resolveReviewConfig(rawType ? entityTypeFromWire(rawType) : null);
 
   const topicId = String(topic.id);
-  const query = new URLSearchParams({ type: DRAFT_TYPE, [`attr.topic_ref`]: topicId });
+  // TYPE ONLY. See note 2 in the header: `attr.topic_ref` is a filter the tenant
+  // accepts and answers with nothing, which zeroed this count for every topic.
+  const query = new URLSearchParams({ type: DRAFT_TYPE });
   const { rows: draftRows, truncated } = await readPages(read, `entities?${query.toString()}`);
   const draftCount = draftRows.filter(
     (d) => String(readData(d.data as EntityRecord['data'], 'topic_ref') ?? '') === topicId,
   ).length;
   if (truncated && draftCount === 0) {
-    // Not a behaviour change — the line that makes a future under-count
-    // diagnosable instead of invisible. Reaching here means the attr filter was
-    // dropped AND the tenant holds more drafts than MAX_PAGES * PAGE_SIZE.
-    console.warn('[generate-drafts] draft listing was truncated before a match', { topicId });
+    // A COUNT WE COULD NOT ESTABLISH IS NOT A COUNT OF ZERO. Dropping the
+    // `attr.topic_ref` narrowing above traded a filter the tenant answers with
+    // nothing for a listing bounded by MAX_PAGES * PAGE_SIZE (1000; 153 drafts
+    // today). Past that ceiling a topic whose drafts sit beyond the last page
+    // read would count 0 and be waved through — the very defect this function
+    // exists to stop, re-entering through the door the fix opened.
+    //
+    // So it throws, which the caller turns into "could not verify" (502), the
+    // same answer an unreachable tenant gets. Warning and allowing would fail
+    // OPEN on an unverifiable read while the paragraph above this function
+    // promises the opposite.
+    throw new Error(
+      `draft listing was truncated at ${MAX_PAGES * PAGE_SIZE} rows before matching topic ${topicId}`,
+    );
   }
 
   return canGenerateDrafts(topic, review, draftCount);

@@ -105,6 +105,39 @@ export function startGenerateRun(topicId: TopicId, { at, baseline }: { at: numbe
 }
 
 /**
+ * Claim the writer for this topic, or refuse because it is already running.
+ *
+ * WHY A CLAIM AND NOT A BOOLEAN CHECK AT THE CALL SITE (bd startsim-8hgmq.3).
+ * The webhook answers "Workflow got started" immediately and the drafts take
+ * ~100 seconds to appear, so a second press inside that window is the natural
+ * thing for a reader to do — and the SERVER cannot catch it: the gate it
+ * re-checks counts drafts that DO NOT EXIST YET, so both presses read zero and
+ * both are relayed. Whatever stops the second press has to be here.
+ *
+ * "One run per topic" was previously a property of ONE COMPONENT'S RENDER STATE
+ * — `disabled={generating}`, seeded from `isGenerateRunning` at mount. That is
+ * not the same statement. `generating` is a snapshot: an instance that mounted
+ * BEFORE the run began keeps `false` forever, because mounting is the only
+ * moment the store is read and nothing pushes a later change into an instance
+ * that did not start the run. Two live instances for one topic — the drawer
+ * reached from the board and from the table — therefore leave one button
+ * enabled over a running writer.
+ *
+ * Test-and-set in the STORE closes that by construction: the run is the lock,
+ * so every caller races against the same entry rather than against its own copy
+ * of a boolean. Returns false when a run is already in flight; the caller must
+ * not start one.
+ */
+export function startGenerateRunOnce(
+  topicId: TopicId,
+  { at, baseline }: { at: number; baseline: number },
+): boolean {
+  if (isGenerateRunning(topicId)) return false;
+  startGenerateRun(topicId, { at, baseline });
+  return true;
+}
+
+/**
  * A component instance for this topic mounted — possibly the first, possibly one
  * rejoining a run started before the reader navigated away.
  *
