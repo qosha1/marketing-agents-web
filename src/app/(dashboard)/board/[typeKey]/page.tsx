@@ -40,9 +40,9 @@ import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { EntityBoard } from '@/components/entity-board';
 import { EntityDetailDrawer } from '@/components/entity-detail-drawer';
 import {
+  boardAttrFilters,
   boardColumns,
   BLANK,
-  pickAttrFilters,
   pickRecencyAttr,
   pickRecencyWindow,
   pickStatusAttr,
@@ -121,8 +121,11 @@ export default function BoardPage() {
   // Generic ?<enumAttr>=<value> filters (any number, ANDed) — replaces the old
   // content_type-only hand-rolled filter; content_type is just one enum among
   // however many the type declares.
+  //
+  // `.applied` is the ONE list behind both the header chips and the filters the
+  // count is taken over, so the two cannot drift apart (bd startsim-flv2x.7).
   const filters = useMemo(
-    () => pickAttrFilters(type, Object.fromEntries(searchParams.entries())),
+    () => boardAttrFilters(type, Object.fromEntries(searchParams.entries())).applied,
     [type, searchParams],
   );
 

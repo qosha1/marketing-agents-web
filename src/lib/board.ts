@@ -174,6 +174,34 @@ export function applyAttrFilters(
   return filters.reduce((recs, f) => applyAttrFilter(recs, f), records);
 }
 
+/**
+ * The enum facets a BOARD may act on, split from the one its LANES already own.
+ *
+ * THIS IS A CHARACTERIZATION AND IT STILL CARRIES THE BUG (bd startsim-flv2x.7).
+ * It returns exactly what the board page computed inline before this seam
+ * existed — every declared enum applied, nothing ignored — so the extraction can
+ * be proved behaviour-neutral before the behaviour changes. Same idiom, and the
+ * same reason, as lib/view-toggle.ts's own "this module still carries the bug".
+ *
+ * `applied` is the single source of BOTH the header chips and the filters handed
+ * to `countEntities`; `ignored` is what was recognised and deliberately not
+ * applied. They are returned together because the defect is that three places
+ * disagreed about who owns the lane attribute.
+ */
+export interface BoardFacets {
+  /** Chipped in the header AND counted by — the two must never diverge. */
+  applied: AttrFilter[];
+  /** Recognised, valid, and deliberately not applied. */
+  ignored: AttrFilter[];
+}
+
+export function boardAttrFilters(
+  type: EntityTypeDef | undefined | null,
+  params: Record<string, string | undefined | null>,
+): BoardFacets {
+  return { applied: pickAttrFilters(type, params), ignored: [] };
+}
+
 // ---- generic free-text attribute filter (startsim-a2oq) ----
 // A NEW, parallel path to the enum filter above, not an extension of it: a
 // free-text attribute (e.g. `assignee_sub`) has no declared `choices` to
