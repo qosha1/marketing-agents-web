@@ -29,9 +29,11 @@ import {
   groupByStatus,
   pickStatusAttr,
   readData,
+  RECENCY_ALL,
   UNSET_COLUMN,
 } from '@/lib/board';
 import { CONTENT_TYPE_KEY } from '@/lib/content';
+import type { ViewChip } from '@/lib/drafts-view';
 import type { EntityRecord, EntityTypeDef } from '@/lib/foundry-api';
 
 /** Coerce an unknown data-blob value to a trimmed string ('' when absent). */
@@ -142,9 +144,149 @@ function verdictBreakdown(topics: EntityRecord[]): string {
     .join(' · ');
 }
 
-/** The records table for the topic type, filtered to one status value. */
-function topicStatusHref(status: string): string {
-  return `/t/${CONTENT_TYPE_KEY}?status=${encodeURIComponent(status)}`;
+// ---- (2b) The destination: the SAME predicate the card counted (startsim-8hgmq.14) ----
+
+/**
+ * URL param that carries a queue predicate to the topics table.
+ *
+ * IT NAMES THE QUEUE, NOT ITS INGREDIENTS, and that is the whole point. Each
+ * card's predicate has TWO halves and the href used to carry at most one:
+ * `topicStatusHref(intake)` kept `status` and dropped `team_verdict != ''`, and
+ * the unjudged row linked to a bare `/t/topic` and dropped both. Measured live
+ * on marketing-agents 2026-09-07:
+ *
+ *   "Judged, not filed — 20 topics"  ->  /t/topic?status=suggested  ->  42 rows
+ *   "Not yet judged — 23 topics"     ->  /t/topic                   ->  84 rows
+ *
+ * The two cards are DISJOINT (20 + 23 = 43), yet the second link's destination
+ * contained the first's rows as well — so a reader who clicked "20 topics" and
+ * counted 42 could not tell which 20 were meant.
+ *
+ * SPELLING BOTH HALVES INTO THE URL WAS THE ALTERNATIVE, AND IT LOSES TWICE.
+ * It needs a param for "team_verdict is blank", which `__isnull` does not
+ * express — isnull answers "is there an Attribute ROW", not "is the value
+ * empty", a distinction 167 live `news_item` rows already paid for (memory
+ * `tenant-entity-server-side-filters`). And it leaves the predicate implemented
+ * twice, once here and once as a URL, free to drift apart exactly the way the
+ * count and the list just did.
+ *
+ * So the card links to the queue by NAME and {@link applyTopicQueue} re-runs the
+ * one {@link QUEUE_ROWS} entry the count was taken over. The number and the list
+ * are the same `filter()` call.
+ */
+export const TOPIC_QUEUE_PARAM = 'queue';
+
+/** The param value that turns the gate off — the shared 'all' sentinel. */
+const QUEUE_ALL = RECENCY_ALL;
+
+type Params = Record<string, string | undefined | null>;
+
+/** One queue: its id, the words it is stated in, and the predicate it IS. */
+interface QueueDef {
+  /** Stable id — the row key, and the value carried in {@link TOPIC_QUEUE_PARAM}. */
+  id: string;
+  /** The card's phrase, and the destination's chip. One string, both surfaces. */
+  title: string;
+  /** True when `match` needs the schema's intake stage to mean anything. */
+  needsIntake: boolean;
+  match: (topic: EntityRecord, intake: string) => boolean;
+  meta: (matched: EntityRecord[], intake: string) => string;
+}
+
+/**
+ * Every queue, in display order. The ONE table behind the count, the label, the
+ * href and the destination's filter — so a row cannot state a number one of
+ * them disagrees with.
+ */
+const QUEUE_ROWS: QueueDef[] = [
+  {
+    id: 'judged-not-filed',
+    title: 'Judged, not filed',
+    needsIntake: true,
+    match: isJudgedNotFiled,
+    meta: (matched, intake) =>
+      `A team_verdict is recorded (${verdictBreakdown(matched)}) but status is still “${intake}”. Advance each to the stage its verdict implies.`,
+  },
+  {
+    id: 'unjudged',
+    title: 'Not yet judged',
+    needsIntake: false,
+    match: (topic) => isUnjudged(topic),
+    meta: () => 'No team_verdict and no team_notes — nobody has looked at these yet.',
+  },
+];
+
+/** The records one queue is true of — the only place a queue predicate runs. */
+function queueRecords(
+  def: QueueDef,
+  topics: EntityRecord[],
+  intake: string | null,
+): EntityRecord[] {
+  if (def.needsIntake && intake == null) return [];
+  return topics.filter((t) => def.match(t, intake ?? ''));
+}
+
+/**
+ * The queue this URL selects, or null when it names none we RECOGNISE.
+ *
+ * An unknown value is not a queue and gets no gate and no chip — the same rule
+ * the board applies to `?status=bogus`. Narrowing to an empty table under a URL
+ * nothing on the page acknowledges is the worse failure of the two.
+ */
+function pickQueue(params: Params): QueueDef | null {
+  const id = asString(params[TOPIC_QUEUE_PARAM]);
+  return QUEUE_ROWS.find((r) => r.id === id) ?? null;
+}
+
+/** Where a queue row sends the reader: the topics table, gated to that queue. */
+export function topicQueueHref(id: string): string {
+  return `/t/${CONTENT_TYPE_KEY}?${TOPIC_QUEUE_PARAM}=${encodeURIComponent(id)}`;
+}
+
+/** The params that turn the gate off — what the chip's ✕ and "Show everything" set. */
+export function clearedTopicQueue(): Record<string, string> {
+  return { [TOPIC_QUEUE_PARAM]: QUEUE_ALL };
+}
+
+/**
+ * The chip above the destination table, naming the card the reader arrived
+ * from. Empty when no queue is active.
+ *
+ * A gate the page does not SAY it applied is the same failure one place over: a
+ * reader who lands on 20 of 84 topics with nothing on screen to explain it
+ * cannot tell a filter from an empty pipeline. Shares {@link ViewChip} with the
+ * Drafts default view so both render through one block.
+ */
+export function topicQueueChips(params: Params): ViewChip[] {
+  const def = pickQueue(params);
+  return def ? [{ param: TOPIC_QUEUE_PARAM, value: QUEUE_ALL, label: def.title }] : [];
+}
+
+/**
+ * Narrow a fetched set to the active queue — the SAME predicate {@link topicQueue}
+ * counted, over the same records.
+ *
+ * Client-side, and it has to be: `team_verdict == ''` is not a filter the tenant
+ * backend can express (`attr.team_verdict__isnull` asks whether an Attribute row
+ * EXISTS, which is a different question), so there is no server-side half to
+ * keep in step. Both surfaces fetch the topic type with `listAllEntities`, whose
+ * cap is 50 pages x 200 rows; the live type is 84 records, so neither side is
+ * truncated and the two sets are the same set. The cap is shared, so if it ever
+ * did bite it would bite both identically.
+ */
+export function applyTopicQueue(
+  records: EntityRecord[],
+  params: Params,
+  type: EntityTypeDef | undefined | null,
+): EntityRecord[] {
+  const def = pickQueue(params);
+  if (!def) return records;
+  return queueRecords(def, records, intakeStage(type));
+}
+
+/** True while a queue gate is narrowing the table. */
+export function topicQueueActive(params: Params): boolean {
+  return pickQueue(params) !== null;
 }
 
 /**
@@ -179,31 +321,22 @@ export function topicQueue(
   type: EntityTypeDef | undefined | null,
   topics: EntityRecord[],
 ): QueueRow[] {
-  const rows: QueueRow[] = [];
   const intake = intakeStage(type);
+  const rows: QueueRow[] = [];
 
-  if (intake) {
-    const stranded = topics.filter((t) => isJudgedNotFiled(t, intake));
-    if (stranded.length > 0) {
-      rows.push({
-        id: 'judged-not-filed',
-        count: stranded.length,
-        label: `Judged, not filed — ${plural(stranded.length, 'topic')}`,
-        meta: `A team_verdict is recorded (${verdictBreakdown(stranded)}) but status is still “${intake}”. Advance each to the stage its verdict implies.`,
-        href: topicStatusHref(intake),
-        tone: 'warn',
-      });
-    }
-  }
-
-  const unjudged = topics.filter(isUnjudged);
-  if (unjudged.length > 0) {
+  for (const def of QUEUE_ROWS) {
+    // A predicate the schema cannot even pose is DROPPED, not reported as 0.
+    if (def.needsIntake && intake == null) continue;
+    const matched = queueRecords(def, topics, intake);
+    if (matched.length === 0) continue;
     rows.push({
-      id: 'unjudged',
-      count: unjudged.length,
-      label: `Not yet judged — ${plural(unjudged.length, 'topic')}`,
-      meta: 'No team_verdict and no team_notes — nobody has looked at these yet.',
-      href: `/t/${CONTENT_TYPE_KEY}`,
+      id: def.id,
+      count: matched.length,
+      label: `${def.title} — ${plural(matched.length, 'topic')}`,
+      meta: def.meta(matched, intake ?? ''),
+      // Same `def`, so the destination re-runs the predicate this count came
+      // from. The href cannot name a narrower or wider pile than the number.
+      href: topicQueueHref(def.id),
       tone: 'warn',
     });
   }
