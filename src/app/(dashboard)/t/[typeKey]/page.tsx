@@ -66,6 +66,12 @@ import {
   NEWS_TYPE_KEY,
   contentCategoryLabel,
 } from '@/lib/content';
+import {
+  applyTopicQueue,
+  clearedTopicQueue,
+  topicQueueActive,
+  topicQueueChips,
+} from '@/lib/health-data';
 import { boardViewHref } from '@/lib/view-toggle';
 import {
   NEWS_ACTIONS_HEADER,
@@ -190,9 +196,18 @@ export default function TypeRecordsPage() {
   // the gate (never showing FEWER drafts than exist) and says so out loud.
   const gateBroken = gateOn && approvedTopicsQuery.isError;
   const gateReady = !gateOn || approvedTopicsQuery.isSuccess || approvedTopicsQuery.isError;
+  // ONE chip list for both default-view gates: the Drafts default
+  // (startsim-f4lac) and the Dashboard queue a reader arrived from
+  // (startsim-8hgmq.14). A gate the page does not SAY it applied reads to the
+  // reader as an empty pipeline rather than as a filter.
   const viewChips = useMemo(
-    () => (isDraft ? draftsViewChips(viewParams).filter((c) => !(gateBroken && c.param === TOPIC_GATE_PARAM)) : []),
-    [isDraft, viewParams, gateBroken],
+    () => [
+      ...(isDraft
+        ? draftsViewChips(viewParams).filter((c) => !(gateBroken && c.param === TOPIC_GATE_PARAM))
+        : []),
+      ...(isContent ? topicQueueChips(viewParams) : []),
+    ],
+    [isDraft, isContent, viewParams, gateBroken],
   );
 
   // `title` on the topic spine, `story_title` on drafts — see pickTitleAttr.
@@ -268,12 +283,18 @@ export default function TypeRecordsPage() {
       // (see draftsViewFilters). The topic gate above bounds what reaches it.
       rows = applyDraftsRecency(rows, viewParams);
     }
+    // Where the Dashboard's "needs a human" cards land. The gate re-runs the
+    // SAME predicate the card counted (lib/health-data.ts QUEUE_ROWS), so the
+    // number on the card and the list under it are one filter() call and cannot
+    // disagree — they used to, by 22 rows and by 61 (bd startsim-8hgmq.14).
+    // Applied HERE rather than after, so `totalCount` below counts it too.
+    if (isContent) rows = applyTopicQueue(rows, viewParams, type);
     return rows.filter((r) =>
       Object.entries(filterState).every(
         ([k, v]) => String(readData(r.data, k) ?? '') === v,
       ),
     );
-  }, [allQuery.data, filterState, isDraft, gateBroken, viewParams, approvedIds]);
+  }, [allQuery.data, filterState, isContent, isDraft, gateBroken, viewParams, approvedIds, type]);
 
   // The content spine (topic) shows a stacked Title + subtitle (the split-off
   // `subtitle`, else `angle`) as its primary column and folds the now-redundant
@@ -444,8 +465,13 @@ export default function TypeRecordsPage() {
 
   // Collapse rejected out of the main list so they stop cluttering the active
   // review — kept, not deleted, and expandable below (startsim-ay9l). Skipped
-  // when the user is explicitly viewing the State=rejected filter.
-  const collapseRejected = isContent && filterState[STATUS_ATTR] !== 'rejected';
+  // when the user is explicitly viewing the State=rejected filter, and skipped
+  // under a Dashboard queue gate: that pile was COUNTED with whatever rejected
+  // rows satisfy its predicate, so collapsing them away here would put a
+  // smaller number on screen than the card the reader clicked
+  // (bd startsim-8hgmq.14).
+  const collapseRejected =
+    isContent && filterState[STATUS_ATTR] !== 'rejected' && !topicQueueActive(viewParams);
   const [showRejected, setShowRejected] = useState(false);
   const { visibleRecords, rejectedRecords } = useMemo(() => {
     if (!collapseRejected) return { visibleRecords: records, rejectedRecords: [] as EntityRecord[] };
@@ -580,7 +606,7 @@ export default function TypeRecordsPage() {
           {viewChips.length > 0 ? (
             <button
               type="button"
-              onClick={() => applyViewParams(clearedDraftsView())}
+              onClick={() => applyViewParams({ ...clearedDraftsView(), ...clearedTopicQueue() })}
               className="text-xs font-medium text-primary-700 underline underline-offset-2 hover:text-primary-800"
             >
               Show everything
