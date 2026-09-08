@@ -439,7 +439,6 @@ export default function TypeRecordsPage() {
     if (isContent && !anySort) return holdActedPositions(kept, acted, defaultTopicOrder);
     return kept;
   }, [needAll, filteredRecords, allQuery.data, pagedQuery.data, isContent, anySort, acted]);
-  const totalCount = needAll ? filteredRecords.length : (pagedQuery.data?.count ?? 0);
   const recordsLoading = needAll ? allQuery.isLoading : pagedQuery.isLoading;
   const activeKind = filterState[CONTENT_TYPE_ATTR];
 
@@ -460,6 +459,33 @@ export default function TypeRecordsPage() {
     }
     return { visibleRecords: vis, rejectedRecords: rej };
   }, [records, collapseRejected, acted]);
+
+  // THE count for this view — one expression, read by the header AND handed to
+  // the table as its pagination total, because a count and a list computed
+  // separately drift (bd startsim-8hgmq.16). They had: the header counted every
+  // row that MATCHED (84 topics) while the body rendered the 68 left after the
+  // rejected pile was collapsed out of it, so the page stated a size its own
+  // list did not have, on every load, with no interaction.
+  //
+  // `visibleRecords` IS what the table is given, so deriving from it cannot
+  // disagree with it. The server branch is the one case where that would be
+  // wrong: an unfiltered table holds a single PAGE, so its length is 20, not the
+  // size of the type — there the server's own count is the honest number, and
+  // `collapseRejected` implies `isContent` implies `needAll`, so the two
+  // branches never overlap.
+  const displayCount = needAll ? visibleRecords.length : (pagedQuery.data?.count ?? 0);
+
+  // Naming what was withheld is the other half. The rejected pile is kept, not
+  // deleted, and expandable below — but that disclosure is under the table, and
+  // a reviewer who reads a count has no reason to scroll looking for rows the
+  // header never mentioned. So the header says both numbers and the second one
+  // opens the pile it names.
+  const rejectedRef = useRef<HTMLDivElement | null>(null);
+  function revealRejected() {
+    setShowRejected(true);
+    // Not available under jsdom, and not worth a test double either way.
+    rejectedRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' });
+  }
 
   // Read at click time by `remember` above, so an action records the position the
   // row actually held on screen. Written from an effect rather than during
@@ -493,7 +519,23 @@ export default function TypeRecordsPage() {
           {activeKind ? contentCategoryLabel(activeKind) : type.label}
         </h1>
         <div className="flex items-center gap-3">
-          <span className="text-sm text-gray-500">{totalCount} total</span>
+          <span data-testid="record-count" className="text-sm text-gray-500">
+            {rejectedRecords.length > 0 ? (
+              <>
+                {displayCount} shown{' · '}
+                <button
+                  type="button"
+                  onClick={revealRejected}
+                  className="underline underline-offset-2 hover:text-gray-700"
+                  title="Rejected topics are kept out of the review queue — open them"
+                >
+                  {rejectedRecords.length} rejected
+                </button>
+              </>
+            ) : (
+              `${displayCount} total`
+            )}
+          </span>
           {hasStatusBoard ? (
             // Where this goes is a decision, not a string — which of the
             // filters you are looking through describe WHICH RECORDS, and so
@@ -594,14 +636,14 @@ export default function TypeRecordsPage() {
           enabled: true,
           serverSide: !needAll,
           pageSize: PAGE_SIZE,
-          totalCount: collapseRejected ? visibleRecords.length : totalCount,
+          totalCount: displayCount,
           currentPage: page,
           onPageChange: setPage,
         }}
       />
 
       {collapseRejected && rejectedRecords.length > 0 ? (
-        <div className="rounded-lg border border-border">
+        <div ref={rejectedRef} className="rounded-lg border border-border">
           <button
             type="button"
             onClick={() => setShowRejected((v) => !v)}
