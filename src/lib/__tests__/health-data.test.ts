@@ -1,14 +1,18 @@
 import { describe, it, expect } from 'vitest';
 
 import {
+  applyTopicQueue,
+  clearedTopicQueue,
   ingestionOverdue,
   ingestionSummary,
   intakeStage,
   isJudgedNotFiled,
   isUnjudged,
   queueTotal,
+  TOPIC_QUEUE_PARAM,
   topicPipeline,
   topicQueue,
+  topicQueueChips,
 } from '../health-data';
 import type { AttributeDef, EntityRecord, EntityTypeDef } from '@/lib/foundry-api';
 
@@ -121,7 +125,7 @@ describe('topicQueue', () => {
     expect(row.id).toBe('judged-not-filed');
     expect(row.count).toBe(19);
     expect(row.label).toBe('Judged, not filed — 19 topics');
-    expect(row.href).toBe('/t/topic?status=suggested');
+    expect(row.href).toBe('/t/topic?queue=judged-not-filed');
     // the fact the old widget got wrong: these already carry a verdict
     expect(row.meta).toContain('good 11');
     expect(row.meta).toContain('bad 8');
@@ -173,12 +177,157 @@ describe('topicQueue', () => {
     };
     const [row] = topicQueue(renamed, [topic(1, { status: 'inbox', team_verdict: 'good' })]);
     expect(row.label).toBe('Judged, not filed — 1 topic');
-    expect(row.href).toBe('/t/topic?status=inbox');
+    expect(row.href).toBe('/t/topic?queue=judged-not-filed');
   });
 
   it('omits the stranded row (rather than reporting 0) when no status enum is declared', () => {
     const rows = topicQueue(null, [topic(1, { status: 'suggested', team_verdict: 'good' })]);
     expect(rows.map((r) => r.id)).toEqual([]);
+  });
+});
+
+/**
+ * THE CARD'S NUMBER AND THE CARD'S DESTINATION, over one corpus (bd
+ * startsim-8hgmq.14).
+ *
+ * THE DEFECT. Every card computed a TWO-PART predicate and linked to a URL that
+ * carried at most ONE half, so the reader was handed a superset of the pile they
+ * clicked. Measured live on marketing-agents 2026-09-07 and reproduced below
+ * record for record:
+ *
+ *   "Judged, not filed — 20 topics"  ->  /t/topic?status=suggested  ->  42 rows
+ *   "Not yet judged — 23 topics"     ->  /t/topic                   ->  84 rows
+ *
+ * The two cards are meant to be DISJOINT (20 + 23 = 43), yet the second link's
+ * destination contained the first's rows as well.
+ *
+ * THE FIX IS ONE PREDICATE, NOT TWO IMPLEMENTATIONS. The href now names the
+ * queue itself (`?queue=judged-not-filed`) and the destination runs the same
+ * QUEUE_ROWS entry the count was taken over. Carrying both halves in the URL
+ * was the alternative and was rejected: it needs a param for "team_verdict is
+ * blank", which `__isnull` does NOT express (it answers "is there an Attribute
+ * ROW" — 167 live news_item rows proved that distinction), and it leaves two
+ * implementations of one predicate free to drift apart again.
+ *
+ * So the assertion that matters is the ROUND TRIP: take the href the card
+ * renders, parse it the way the destination parses its URL, and require the
+ * records that land to be EXACTLY the ones counted — by id, not merely by
+ * length, since a wrong predicate can return a right-sized set.
+ */
+describe('the card counts and the card links over ONE predicate', () => {
+  const ids = (rs: EntityRecord[]) => rs.map((r) => Number(r.id)).sort((a, b) => a - b);
+
+  /**
+   * The live topic corpus, record for record (tenant API, 2026-09-07):
+   * 84 topics = 42 suggested + 26 written + 16 rejected, of which 20 are
+   * judged-not-filed and 23 are unjudged. The unjudged 23 split 22 suggested +
+   * 1 WRITTEN — measured, not assumed, and the reason the ids are laid out in
+   * disjoint blocks below: each queue's expected membership is known by
+   * construction rather than re-derived by the assertion.
+   */
+  const judgedNotFiled = Array.from({ length: 20 }, (_, i) =>
+    topic(1000 + i, { status: 'suggested', team_verdict: i % 2 ? 'good' : 'bad' }),
+  );
+  const untouchedIntake = Array.from({ length: 22 }, (_, i) =>
+    topic(2000 + i, { status: 'suggested' }),
+  );
+  const untouchedWritten = [topic(3000, { status: 'written' })];
+  const rest = [
+    ...Array.from({ length: 25 }, (_, i) =>
+      topic(4000 + i, { status: 'written', team_verdict: 'good' }),
+    ),
+    ...Array.from({ length: 16 }, (_, i) =>
+      topic(5000 + i, { status: 'rejected', team_verdict: 'bad' }),
+    ),
+  ];
+  const live = [...judgedNotFiled, ...untouchedIntake, ...untouchedWritten, ...rest];
+
+  /** Read the href the way the destination reads its own URL. */
+  const paramsOf = (href: string) =>
+    Object.fromEntries(new URLSearchParams(href.split('?')[1] ?? ''));
+
+  it('reproduces the live corpus, so the numbers below are the measured ones', () => {
+    expect(live).toHaveLength(84);
+    const rows = topicQueue(topicType, live);
+    expect(rows.map((r) => [r.id, r.count])).toEqual([
+      ['judged-not-filed', 20],
+      ['unjudged', 23],
+    ]);
+  });
+
+  it('lands on exactly the records it counted — by id, for every row', () => {
+    const rows = topicQueue(topicType, live);
+    expect(rows.length).toBeGreaterThan(0);
+    const expected: Record<string, EntityRecord[]> = {
+      'judged-not-filed': judgedNotFiled,
+      unjudged: [...untouchedIntake, ...untouchedWritten],
+    };
+    for (const row of rows) {
+      const landed = applyTopicQueue(live, paramsOf(row.href ?? ''), topicType);
+      expect(landed).toHaveLength(row.count);
+      expect(ids(landed)).toEqual(ids(expected[row.id]));
+    }
+  });
+
+  it('sends the two cards to DISJOINT piles — the defect in one assertion', () => {
+    const [judged, unjudged] = topicQueue(topicType, live).map((row) =>
+      new Set(applyTopicQueue(live, paramsOf(row.href ?? ''), topicType).map((r) => r.id)),
+    );
+    expect([...judged].filter((id) => unjudged.has(id))).toEqual([]);
+    // What the old hrefs did: ?status=suggested returned all 42 suggested and a
+    // bare /t/topic returned all 84. Neither number is reachable now.
+    expect(judged.size + unjudged.size).toBe(43);
+  });
+
+  it('follows a renamed intake stage all the way to the destination', () => {
+    // The href no longer spells the intake stage out, so this is what keeps the
+    // schema-driven property the old `/t/topic?status=inbox` assertion carried.
+    const renamed: EntityTypeDef = {
+      ...topicType,
+      attributes: [{ ...statusAttr, config: { choices: ['inbox', 'done'] } }],
+    };
+    const records = [
+      topic(1, { status: 'inbox', team_verdict: 'good' }),
+      topic(2, { status: 'done', team_verdict: 'good' }),
+    ];
+    const [row] = topicQueue(renamed, records);
+    expect(row.count).toBe(1);
+    expect(ids(applyTopicQueue(records, paramsOf(row.href ?? ''), renamed))).toEqual([1]);
+  });
+
+  it('keeps a rejected-but-untouched topic in the pile it was counted in', () => {
+    // Today's corpus has none — the one non-`suggested` unjudged topic is
+    // `written`. But the destination COLLAPSES rejected rows out of the main
+    // list, so the day a rejected topic carries neither verdict nor note, the
+    // count and the visible list would disagree again. The gate selects it here;
+    // t/[typeKey]/page.tsx stops collapsing while a queue is active.
+    const withRejected = [...live, topic(9000, { status: 'rejected' })];
+    const [, unjudged] = topicQueue(topicType, withRejected);
+    expect(unjudged.count).toBe(24);
+    expect(
+      applyTopicQueue(withRejected, paramsOf(unjudged.href ?? ''), topicType).map((r) => r.id),
+    ).toContain(9000);
+  });
+
+  it('narrows nothing, and chips nothing, for a queue value it does not recognise', () => {
+    // The mirror of the board's `?status=bogus` rule: a param that is not a
+    // queue never produced a chip and must not start now. Silently narrowing to
+    // an empty table under no chip is the worse failure.
+    expect(applyTopicQueue(live, { [TOPIC_QUEUE_PARAM]: 'nonsense' }, topicType)).toHaveLength(84);
+    expect(topicQueueChips({ [TOPIC_QUEUE_PARAM]: 'nonsense' })).toEqual([]);
+    expect(applyTopicQueue(live, {}, topicType)).toHaveLength(84);
+    expect(topicQueueChips({})).toEqual([]);
+  });
+
+  it('renders the active queue as a chip that names the card it came from', () => {
+    const [row] = topicQueue(topicType, live);
+    const chips = topicQueueChips(paramsOf(row.href ?? ''));
+    expect(chips).toEqual([
+      { param: TOPIC_QUEUE_PARAM, value: clearedTopicQueue()[TOPIC_QUEUE_PARAM], label: 'Judged, not filed' },
+    ]);
+    // The chip's ✕ value must actually clear the gate, or the chip is a dead control.
+    expect(applyTopicQueue(live, clearedTopicQueue(), topicType)).toHaveLength(84);
+    expect(topicQueueChips(clearedTopicQueue())).toEqual([]);
   });
 });
 
