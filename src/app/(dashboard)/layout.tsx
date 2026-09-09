@@ -162,8 +162,21 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           viewport — then overflow-x-hidden CLIPS it instead of letting the board's
           own overflow-x-auto scroll. With min-w-0, main is bounded by the flex
           track and wide content scrolls inside it. No max-w cap so the board uses
-          the full width up to the screen edge (left-aligned, not mx-auto). */}
-      <main className="flex-1 min-w-0 overflow-x-hidden">
+          the full width up to the screen edge (left-aligned, not mx-auto).
+
+          overflow-x-CLIP, not -hidden, and the difference is load-bearing
+          (startsim-xe1uo.1). `hidden` makes an element a SCROLL CONTAINER even
+          when nothing can scroll it, and `position: sticky` resolves against the
+          nearest scroll container. So `hidden` here silently captured the table's
+          sticky scroll rail and pinned it to the bottom of MAIN — 6,619px down a
+          6,758px-tall page — instead of the bottom of the screen. `clip` clips
+          exactly the same content without becoming a scrollport.
+          MEASURED on the deployed tenant at 1093x614, /t/topic:
+            overflow-x: hidden -> rail bottom 6619, off screen, main width 853
+            overflow-x: clip   -> rail bottom  614  = viewport, main width 853
+          Width is unchanged because min-w-0 above is what bounds the flex track;
+          the two declarations do different jobs and both are needed. */}
+      <main className="flex-1 min-w-0 overflow-x-clip">
         <div className="w-full px-8 py-8">{children}</div>
       </main>
     </div>
