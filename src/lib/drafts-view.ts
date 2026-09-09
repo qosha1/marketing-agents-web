@@ -33,11 +33,16 @@ import {
   RECENCY_ALL,
   RECENCY_PARAM,
 } from '@/lib/board';
+import { TRIGGERED_BY_ATTR } from '@/lib/draft-origin';
 import type { AttributeDef, EntityRecord } from '@/lib/foundry-api';
+import { isOperatorEmail } from '@/lib/roster';
 import { declaresTopicRef, TOPIC_REF_ATTR } from '@/lib/topic-drafts';
 
 /** URL param carrying the "only drafts whose topic was approved" half. */
 export const TOPIC_GATE_PARAM = 'topic';
+
+/** URL param carrying the "not the drafts we made while testing" half. */
+export const ORIGIN_GATE_PARAM = 'made';
 
 /** The param value that clears a half of the default — shared with `since`. */
 export const GATE_ALL = RECENCY_ALL;
@@ -92,13 +97,20 @@ export function draftsViewChips(params: Params, now: Date = new Date()): ViewChi
   if (window.days != null) {
     out.push({ param: RECENCY_PARAM, value: RECENCY_ALL, label: `Last ${window.days} days` });
   }
+  if (originGateActive(params)) {
+    out.push({ param: ORIGIN_GATE_PARAM, value: GATE_ALL, label: 'No test drafts' });
+  }
   void now;
   return out;
 }
 
 /** The params that turn the WHOLE default off — what "Show everything" links to. */
 export function clearedDraftsView(): Record<string, string> {
-  return { [TOPIC_GATE_PARAM]: GATE_ALL, [RECENCY_PARAM]: RECENCY_ALL };
+  return {
+    [TOPIC_GATE_PARAM]: GATE_ALL,
+    [RECENCY_PARAM]: RECENCY_ALL,
+    [ORIGIN_GATE_PARAM]: GATE_ALL,
+  };
 }
 
 /**
@@ -197,4 +209,78 @@ export function applyDraftsRecency(
   now: Date = new Date(),
 ): EntityRecord[] {
   return applyRecencyWindow(records, pickRecencyWindow(params, DRAFTS_DEFAULT_DAYS), null, now);
+}
+
+/**
+ * The third half of the default view: the customer stops being handed the drafts
+ * WE made while testing her tenant (bd startsim-onrb7).
+ *
+ * The meeting on 2026-09-08 settled it — "test drafts created by Quinn's
+ * automated agents will be filtered out" — following Malin's earlier "there are
+ * drafts generated that appear in the Drafts tab that were not created by us".
+ * The attribution half already shipped (lib/draft-origin.ts renders a "Created
+ * by" column); knowing a draft was ours is not the same as not having to read it.
+ *
+ * THE BEAD SAID TO KEY OFF `_trigger` / `_triggered_by` AND EXPLICITLY NOT OFF
+ * OWNERSHIP. Measured over all 156 live drafts on 2026-09-09, that is backwards,
+ * and the numbers are worth keeping because the reasoning behind them was sound:
+ *
+ *   `_trigger`       6 rows of 156. The stamp went live 2026-09-07T21:31Z, so it
+ *                    describes two days of a two-month corpus; 150 rows have no
+ *                    such key and can never be back-attributed.
+ *   `_triggered_by`  3 rows, all naming `schilder@ogmc.ai` — THE CUSTOMER. Not
+ *                    one draft in this tenant is attributable to us this way.
+ *   `owner_sub`      3 rows owned by a person rather than `svc:n8n-ogmc`, and
+ *                    both of those people are platform QA accounts
+ *                    (qa-marketing-agents@startsimpli.com,
+ *                    qa+ma@startsimpli.com). Two Chinese and one Arabic
+ *                    translation, written while the translate action was being
+ *                    tested. Those three ARE the rows the bead is about.
+ *
+ * The bead's reasoning came from startsim-1oo1.2, which says ownership does not
+ * gate READS on this tenant because no marketing-agents type declares
+ * `row_scope`. That is true and it is about a different mechanism: the server
+ * will not filter BY owner, but every row carries `owner_sub` in its response and
+ * this gate runs on the client.
+ *
+ * SO IT READS BOTH, each load-bearing for a different half of time. `owner_sub`
+ * finds the three drafts that exist today; `_triggered_by` catches the next one
+ * the moment a platform account presses "Generate drafts" — and it has to, since
+ * the writer stores every draft it produces under `svc:n8n-ogmc` however it was
+ * started, so the owner says nothing at all about a button press.
+ *
+ * NEITHER IS A REQUEST PARAMETER, and neither may become one. `_triggered_by` is
+ * not a declared attribute on the draft type, and the tenant answers
+ * `attr.<undeclared>` with `count: 0` inside `applied_filters` — the silence that
+ * emptied this very tab in bd startsim-8hgmq.4. `owner_sub` is a row column, not
+ * an attribute, so there is no `attr.` spelling of it to get wrong.
+ */
+export function originGateActive(params: Params): boolean {
+  return String(params[ORIGIN_GATE_PARAM] ?? '') !== GATE_ALL;
+}
+
+/**
+ * Drop the drafts the platform team produced, keeping everything else.
+ *
+ * FAILS OPEN BY CONSTRUCTION. An empty `operatorSubs` — the roster request still
+ * in flight, or failed — means "we cannot tell who is who", and this then hides
+ * nothing rather than guessing. Showing three drafts that should have been
+ * hidden is a nuisance; hiding rows on a guess is the defect this whole module
+ * is written against.
+ */
+export function applyOriginGate(records: EntityRecord[], operatorSubs: string[]): EntityRecord[] {
+  const subs = new Set(operatorSubs.map(String).filter(Boolean));
+  return records.filter((r) => !madeByOperator(r, subs));
+}
+
+/** True when a record's provenance names the platform team rather than the customer. */
+function madeByOperator(
+  record: Pick<EntityRecord, 'data' | 'ownerSub'>,
+  subs: ReadonlySet<string>,
+): boolean {
+  const owner = record.ownerSub;
+  if (typeof owner === 'string' && subs.has(owner)) return true;
+  // `readData` is what handles the camelCased `TriggeredBy` the shared API
+  // client hands back — never hand-roll a second spelling (lib/draft-origin.ts).
+  return isOperatorEmail(readData(record.data, TRIGGERED_BY_ATTR));
 }

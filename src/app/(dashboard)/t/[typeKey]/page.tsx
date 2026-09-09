@@ -21,10 +21,12 @@ import {
   listTypes,
   listEntities,
   listAllEntities,
+  orgMembers,
   collectionClient,
   type EntityFilters,
   type EntityRecord,
 } from '@/lib/foundry-api';
+import { normalizeMembers, operatorSubs } from '@/lib/roster';
 import { RecordForm } from '@/components/record-form';
 import { buildRecordColumns, defaultVisibleColumns } from '@/components/record-columns';
 import { originColumn, ORIGIN_COLUMN_ID } from '@/components/origin-column';
@@ -49,13 +51,16 @@ import {
 } from '@/lib/board';
 import {
   applyDraftsRecency,
+  applyOriginGate,
   applyTopicGate,
   approvedTopicIds,
   clearedDraftsView,
   draftsGateNeedsClient,
   draftsViewChips,
   draftsViewFilters,
+  originGateActive,
   topicGateActive,
+  ORIGIN_GATE_PARAM,
   TOPIC_GATE_PARAM,
   APPROVED_TOPIC_STATUSES,
 } from '@/lib/drafts-view';
@@ -195,7 +200,30 @@ export default function TypeRecordsPage() {
   // filter, which is the exact failure this bead is about. So an error drops
   // the gate (never showing FEWER drafts than exist) and says so out loud.
   const gateBroken = gateOn && approvedTopicsQuery.isError;
-  const gateReady = !gateOn || approvedTopicsQuery.isSuccess || approvedTopicsQuery.isError;
+
+  // ---- the test-draft gate (startsim-onrb7) ----
+  // Which of this org's members are OURS rather than the customer's. The roster
+  // is the only place that says so: a platform QA account is an ordinary member
+  // of the customer's org (that is how it signs in), so nothing on the draft row
+  // itself can resolve `owner_sub` to a person. lib/roster.ts owns the rule.
+  const originGateOn = isDraft && originGateActive(viewParams);
+  const membersQuery = useQuery({
+    queryKey: ['org-members'],
+    queryFn: () => orgMembers(),
+    enabled: originGateOn,
+  });
+  const operatorSubList = useMemo(
+    () => (membersQuery.data ? operatorSubs(normalizeMembers(membersQuery.data)) : []),
+    [membersQuery.data],
+  );
+  // Same posture as the topic gate: a FAILED roster read is not a pending one.
+  // It drops the chip rather than leaving the table waiting behind a claim it is
+  // no longer honouring — and applyOriginGate over an empty list hides nothing,
+  // so the queue widens rather than narrows on a guess.
+  const originGateBroken = originGateOn && membersQuery.isError;
+  const gateReady =
+    (!gateOn || approvedTopicsQuery.isSuccess || approvedTopicsQuery.isError) &&
+    (!originGateOn || membersQuery.isSuccess || membersQuery.isError);
   // ONE chip list for both default-view gates: the Drafts default
   // (startsim-f4lac) and the Dashboard queue a reader arrived from
   // (startsim-8hgmq.14). A gate the page does not SAY it applied reads to the
@@ -203,11 +231,15 @@ export default function TypeRecordsPage() {
   const viewChips = useMemo(
     () => [
       ...(isDraft
-        ? draftsViewChips(viewParams).filter((c) => !(gateBroken && c.param === TOPIC_GATE_PARAM))
+        ? draftsViewChips(viewParams).filter(
+            (c) =>
+              !(gateBroken && c.param === TOPIC_GATE_PARAM) &&
+              !(originGateBroken && c.param === ORIGIN_GATE_PARAM),
+          )
         : []),
       ...(isContent ? topicQueueChips(viewParams) : []),
     ],
-    [isDraft, isContent, viewParams, gateBroken],
+    [isDraft, isContent, viewParams, gateBroken, originGateBroken],
   );
 
   // `title` on the topic spine, `story_title` on drafts — see pickTitleAttr.
@@ -246,6 +278,32 @@ export default function TypeRecordsPage() {
     router.replace(qs ? `${pathname}?${qs}` : pathname);
   }
 
+  /**
+   * Everything off: the default halves, the Dashboard queue gate, the Kind/State
+   * facets and the title search — in ONE replace.
+   *
+   * THE WITHHELD COUNT PROMISES THE ROWS IT NAMES, so the control it labels has
+   * to deliver every one of them. `displayCount` is already narrowed by the
+   * facets and the search, which means both feed the "N hidden" figure; a click
+   * that cleared only the view params would state 158 and hand back 3. That is
+   * bd startsim-8hgmq.16 restated inside the one interaction written to fix it.
+   *
+   * One `router.replace`, not `applyViewParams` then `applyFilters` — two
+   * replaces in a row race, and the loser silently wins.
+   */
+  function showEverything() {
+    const sp = new URLSearchParams(searchParams.toString());
+    for (const [k, v] of Object.entries({ ...clearedDraftsView(), ...clearedTopicQueue() })) {
+      sp.set(k, v);
+    }
+    sp.delete(CONTENT_TYPE_ATTR);
+    sp.delete(STATUS_ATTR);
+    setSearch('');
+    setPage(1);
+    const qs = sp.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname);
+  }
+
   function applyFilters(next: Record<string, unknown>) {
     const sp = new URLSearchParams(searchParams.toString());
     for (const key of [CONTENT_TYPE_ATTR, STATUS_ATTR]) {
@@ -270,6 +328,19 @@ export default function TypeRecordsPage() {
     queryFn: () => listAllEntities(typeKey, { filters: serverFilters }),
     enabled: !!type && needAll && gateReady,
   });
+  // HOW MANY DRAFTS EXIST, from a request the default view cannot narrow.
+  //
+  // `allQuery` is already server-narrowed by `attr.topic_ref__in`, so its length
+  // is the size of the GATE'S RESULT, not of the type — deriving "hidden" from
+  // it would leave every topic-less draft (bd startsim-sr38f) uncounted and
+  // state a confidently wrong number, which is bd startsim-8hgmq.16 in mirror
+  // image. One page-1 request carries `count` for the whole type and cannot be
+  // narrowed by anything on this page.
+  const corpusQuery = useQuery({
+    queryKey: ['entities', typeKey, 'corpus'],
+    queryFn: () => listEntities(typeKey, 1),
+    enabled: !!type && isDraft,
+  });
 
   const filteredRecords = useMemo(() => {
     let rows = allQuery.data ?? [];
@@ -282,6 +353,13 @@ export default function TypeRecordsPage() {
       // Recency is client-side because the backend has no filter on created_at
       // (see draftsViewFilters). The topic gate above bounds what reaches it.
       rows = applyDraftsRecency(rows, viewParams);
+      // And the drafts the platform team made while testing this tenant. Client
+      // side for a harder reason than the other two: neither `owner_sub` (a row
+      // column) nor `_triggered_by` (an undeclared attribute) can be asked of
+      // the server without re-running bd startsim-8hgmq.4.
+      if (!originGateBroken && originGateActive(viewParams)) {
+        rows = applyOriginGate(rows, operatorSubList);
+      }
     }
     // Where the Dashboard's "needs a human" cards land. The gate re-runs the
     // SAME predicate the card counted (lib/health-data.ts QUEUE_ROWS), so the
@@ -294,7 +372,18 @@ export default function TypeRecordsPage() {
         ([k, v]) => String(readData(r.data, k) ?? '') === v,
       ),
     );
-  }, [allQuery.data, filterState, isContent, isDraft, gateBroken, viewParams, approvedIds, type]);
+  }, [
+    allQuery.data,
+    filterState,
+    isContent,
+    isDraft,
+    gateBroken,
+    originGateBroken,
+    operatorSubList,
+    viewParams,
+    approvedIds,
+    type,
+  ]);
 
   // The content spine (topic) shows a stacked Title + subtitle (the split-off
   // `subtitle`, else `angle`) as its primary column and folds the now-redundant
@@ -501,6 +590,18 @@ export default function TypeRecordsPage() {
   // branches never overlap.
   const displayCount = needAll ? visibleRecords.length : (pagedQuery.data?.count ?? 0);
 
+  // WHAT THE VIEW WITHHELD, said in the same breath as what it shows
+  // (bd startsim-onrb7, bd startsim-sr38f). The Drafts queue narrows hard — three
+  // default halves — and until this bead the header said "36 total" standing over
+  // a type of 156. A count that describes something other than the corpus, with
+  // no disclosure of the difference, is what a reviewer reads as "the pipeline is
+  // empty" rather than as "a filter is on".
+  //
+  // Drafts only: the topic table already names its withheld pile as "N rejected"
+  // below, and two disclosures on one header would say the same thing twice.
+  const withheldCount =
+    isDraft && needAll && corpusQuery.data ? Math.max(corpusQuery.data.count - displayCount, 0) : 0;
+
   // Naming what was withheld is the other half. The rejected pile is kept, not
   // deleted, and expandable below — but that disclosure is under the table, and
   // a reviewer who reads a count has no reason to scroll looking for rows the
@@ -558,6 +659,22 @@ export default function TypeRecordsPage() {
                   {rejectedRecords.length} rejected
                 </button>
               </>
+            ) : withheldCount > 0 ? (
+              <>
+                {displayCount} shown{' · '}
+                {/* The disclosure IS the way out of it — one click clears all
+                    three halves at once. Clearing the topic gate alone surfaces
+                    none of the 38 topic-less drafts, because every one of them
+                    is older than the recency window (bd startsim-sr38f). */}
+                <button
+                  type="button"
+                  onClick={showEverything}
+                  className="underline underline-offset-2 hover:text-gray-700"
+                  title={`This view is hiding ${withheldCount} of ${corpusQuery.data?.count ?? 0} drafts — show all of them`}
+                >
+                  {withheldCount} hidden
+                </button>
+              </>
             ) : (
               `${displayCount} total`
             )}
@@ -606,7 +723,7 @@ export default function TypeRecordsPage() {
           {viewChips.length > 0 ? (
             <button
               type="button"
-              onClick={() => applyViewParams({ ...clearedDraftsView(), ...clearedTopicQueue() })}
+              onClick={showEverything}
               className="text-xs font-medium text-primary-700 underline underline-offset-2 hover:text-primary-800"
             >
               Show everything
