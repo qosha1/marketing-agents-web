@@ -208,8 +208,11 @@ describe('the guard rails on the alias index', () => {
     expect(lastWire()).toEqual({ widget1: 'x', source_1: 'y' });
   });
 
-  it('does not stall a write when the schema cannot be fetched', async () => {
-    resetDeclaredAliasIndex();
+  it('degrades for ONE write when the schema cannot be fetched, not for the session', async () => {
+    // A memoised failure would switch the net off for the life of the tab — and
+    // this net is the only thing stopping the corruption until the shared package
+    // is published and bumped here. So: fail, write, RESTORE, write again WITHOUT
+    // resetting the cache. The second write must be repaired.
     const api = (await import('../api')).api as unknown as {
       client: { get: (p: string) => Promise<unknown> };
     };
@@ -223,7 +226,9 @@ describe('the guard rails on the alias index', () => {
       expect(lastWire()).toEqual({ source1: 'x' });
     } finally {
       api.client.get = real;
-      resetDeclaredAliasIndex();
     }
+
+    await updateEntity('topic-8', { data: { source1: 'y' } });
+    expect(lastWire()).toEqual({ source_1: 'y' });
   });
 });

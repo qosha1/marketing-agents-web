@@ -310,6 +310,14 @@ let aliasIndex: Promise<Map<string, string>> | null = null;
  * Fetched once and cached. A schema fetch that FAILS yields an empty index, so
  * the write goes out unchanged — no worse than the behaviour this replaces, and
  * never a blocked save.
+ *
+ * A FAILURE IS NOT CACHED, and that distinction is the whole guard. This net is
+ * the only thing standing between a decision and a renamed attribute until the
+ * shared package is published and bumped here; memoising one transient 500 would
+ * switch it off for the life of the tab and every write after it would corrupt
+ * exactly as before — silently, which is how this defect got a four-day head
+ * start in the first place. So the cached promise is CLEARED on the way out of
+ * the catch and the next write tries again.
  */
 async function declaredAliasIndex(): Promise<Map<string, string>> {
   aliasIndex ??= (async () => {
@@ -331,6 +339,10 @@ async function declaredAliasIndex(): Promise<Map<string, string>> {
         if (!res.next) break;
       }
     } catch {
+      // The assignment above has already landed (this runs after an await), so
+      // clearing it here is what makes the next write retry instead of inheriting
+      // a permanently-empty index.
+      aliasIndex = null;
       return new Map<string, string>();
     }
     for (const camel of ambiguous) index.delete(camel);
