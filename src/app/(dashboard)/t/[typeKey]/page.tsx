@@ -278,6 +278,32 @@ export default function TypeRecordsPage() {
     router.replace(qs ? `${pathname}?${qs}` : pathname);
   }
 
+  /**
+   * Everything off: the default halves, the Dashboard queue gate, the Kind/State
+   * facets and the title search — in ONE replace.
+   *
+   * THE WITHHELD COUNT PROMISES THE ROWS IT NAMES, so the control it labels has
+   * to deliver every one of them. `displayCount` is already narrowed by the
+   * facets and the search, which means both feed the "N hidden" figure; a click
+   * that cleared only the view params would state 158 and hand back 3. That is
+   * bd startsim-8hgmq.16 restated inside the one interaction written to fix it.
+   *
+   * One `router.replace`, not `applyViewParams` then `applyFilters` — two
+   * replaces in a row race, and the loser silently wins.
+   */
+  function showEverything() {
+    const sp = new URLSearchParams(searchParams.toString());
+    for (const [k, v] of Object.entries({ ...clearedDraftsView(), ...clearedTopicQueue() })) {
+      sp.set(k, v);
+    }
+    sp.delete(CONTENT_TYPE_ATTR);
+    sp.delete(STATUS_ATTR);
+    setSearch('');
+    setPage(1);
+    const qs = sp.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname);
+  }
+
   function applyFilters(next: Record<string, unknown>) {
     const sp = new URLSearchParams(searchParams.toString());
     for (const key of [CONTENT_TYPE_ATTR, STATUS_ATTR]) {
@@ -642,7 +668,7 @@ export default function TypeRecordsPage() {
                     is older than the recency window (bd startsim-sr38f). */}
                 <button
                   type="button"
-                  onClick={() => applyViewParams({ ...clearedDraftsView(), ...clearedTopicQueue() })}
+                  onClick={showEverything}
                   className="underline underline-offset-2 hover:text-gray-700"
                   title={`This view is hiding ${withheldCount} of ${corpusQuery.data?.count ?? 0} drafts — show all of them`}
                 >
@@ -697,7 +723,7 @@ export default function TypeRecordsPage() {
           {viewChips.length > 0 ? (
             <button
               type="button"
-              onClick={() => applyViewParams({ ...clearedDraftsView(), ...clearedTopicQueue() })}
+              onClick={showEverything}
               className="text-xs font-medium text-primary-700 underline underline-offset-2 hover:text-primary-800"
             >
               Show everything

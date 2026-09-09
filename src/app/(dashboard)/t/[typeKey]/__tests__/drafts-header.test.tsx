@@ -22,7 +22,7 @@
  */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ReactNode } from 'react';
 
@@ -70,9 +70,11 @@ vi.mock('next/link', async () => {
 });
 
 const replace = vi.fn();
+/** The URL the page is standing on. Mutable so a test can land on a facet. */
+let SEARCH = '';
 vi.mock('next/navigation', () => ({
   useParams: () => ({ typeKey: 'draft' }),
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => new URLSearchParams(SEARCH),
   usePathname: () => '/t/draft',
   useRouter: () => ({ replace, push: vi.fn() }),
 }));
@@ -108,7 +110,13 @@ const ago = (days: number) => new Date(Date.now() - days * 86_400_000).toISOStri
  * account's sub) and one is outside the 7-day window.
  */
 const NARROWED_DRAFTS: EntityRecord[] = [
-  { id: 1, name: 'Dubai duty threshold', data: { topic_ref: 'T1' }, ownerSub: 'svc:n8n-ogmc', createdAt: ago(1) },
+  {
+    id: 1,
+    name: 'Dubai duty threshold',
+    data: { topic_ref: 'T1', status: 'approved' },
+    ownerSub: 'svc:n8n-ogmc',
+    createdAt: ago(1),
+  },
   { id: 2, name: 'Oman e-invoicing', data: { topic_ref: 'T1' }, ownerSub: 'svc:n8n-ogmc', createdAt: ago(2) },
   { id: 3, name: '阿联酋数字化许可工具', data: { topic_ref: 'T1' }, ownerSub: 'sub-qa', createdAt: ago(1) },
   { id: 4, name: 'Qatar market entry', data: { topic_ref: 'T1' }, ownerSub: 'svc:n8n-ogmc', createdAt: ago(40) },
@@ -132,6 +140,11 @@ vi.mock('@/lib/foundry-api', () => ({
 }));
 
 import TypeRecordsPage from '../page';
+
+beforeEach(() => {
+  SEARCH = '';
+  replace.mockClear();
+});
 
 function renderPage() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -187,5 +200,33 @@ describe('the Drafts queue names what its default view withheld', () => {
     expect(url).toContain('topic=all');
     expect(url).toContain('since=all');
     expect(url).toContain('made=all');
+  });
+});
+
+describe('the hidden count under an active facet', () => {
+  it('counts the facet’s rows as hidden AND clears the facet when clicked', async () => {
+    // A Kind/State facet narrows `displayCount` too, so it feeds the hidden
+    // figure. A click that cleared only the three view params would state a
+    // number and hand back a smaller list — bd startsim-8hgmq.16 restated inside
+    // the one control written to fix it.
+    SEARCH = 'status=approved';
+    renderPage();
+    const table = await screen.findByTestId('table-records-draft');
+    await waitFor(() => expect(table.dataset.loading).toBe('false'));
+    await waitFor(() => expect(table.dataset.rows).toBe('1'));
+
+    const header = screen.getByTestId('record-count');
+    expect(header).toHaveTextContent('1 shown');
+    expect(header).toHaveTextContent('155 hidden');
+
+    fireEvent.click(screen.getByRole('button', { name: /155 hidden/i }));
+    await waitFor(() => expect(replace).toHaveBeenCalled());
+    // ONE replace, not a view-params call racing a filters call.
+    expect(replace).toHaveBeenCalledTimes(1);
+    const url = String(replace.mock.calls[0][0]);
+    expect(url).toContain('topic=all');
+    expect(url).toContain('since=all');
+    expect(url).toContain('made=all');
+    expect(url).not.toContain('status=approved');
   });
 });
