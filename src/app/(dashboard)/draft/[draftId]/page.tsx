@@ -86,12 +86,7 @@ import {
 import { useAuth } from '@startsimpli/auth';
 
 import { readData, typeRoute } from '@/lib/board';
-import {
-  EDIT_HISTORY_PATCH_KEY,
-  readEditHistory,
-  recordEdit,
-  type EditEntry,
-} from '@/lib/edit-history';
+import { readEditHistory, withEditStamp, type EditEntry } from '@/lib/edit-history';
 import { declaredLangChoices, pendingTranslation, translatableTargets } from '@/lib/draft-translation';
 import { getRegisteredToken } from '@/infrastructure/auth';
 import { wordCount } from '@startsimpli/ui';
@@ -686,30 +681,30 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
     // in-flight save fold onto a stale base and write a blob that erases the first.
     // Over-counting a save is the cheaper of the two lies.
     //
-    // `EDIT_HISTORY_PATCH_KEY` is the CAMEL spelling on purpose — the same reason
+    // `withEditStamp` writes the CAMEL spelling on purpose — the same reason
     // `sourceMeta` below is: the spread above carries the client's camelCased blob,
-    // so writing the snake form would leave both keys to collide on the wire.
-    const nextHistory = recordEdit(
+    // so writing the snake form would leave both keys to collide on the wire. It is
+    // the SAME helper the record drawer stamps through, so the two surfaces cannot
+    // drift apart again (bd startsim-m7fdm.3).
+    const stamped = withEditStamp(
+      {
+        ...draft.data,
+        ...recordPatchFromSections(sectionsRef.current),
+        // Sources are re-serialized to their ORIGINAL container so the pipeline reader
+        // stays intact; unchanged rows round-trip verbatim. `sourceMeta` (camel — matches
+        // the read shape so it overrides cleanly) carries the reviewer-only verified flags.
+        sources: serializeSources(sourceItemsRef.current, sourcesContainer),
+        sourceMeta: sourceMetaRef.current,
+        review: reviewRef.current,
+        notes: notesRef.current,
+      },
       editHistoryRef.current,
       editorEmailRef.current,
-      new Date().toISOString(),
     );
-    editHistoryRef.current = nextHistory;
-    setEditHistory(nextHistory);
+    editHistoryRef.current = stamped.history;
+    setEditHistory(stamped.history);
 
-    return {
-      ...draft.data,
-      ...recordPatchFromSections(sectionsRef.current),
-      // Sources are re-serialized to their ORIGINAL container so the pipeline reader
-      // stays intact; unchanged rows round-trip verbatim. `sourceMeta` (camel — matches
-      // the read shape so it overrides cleanly) carries the reviewer-only verified flags.
-      sources: serializeSources(sourceItemsRef.current, sourcesContainer),
-      sourceMeta: sourceMetaRef.current,
-      review: reviewRef.current,
-      notes: notesRef.current,
-      [EDIT_HISTORY_PATCH_KEY]: nextHistory,
-      ...overrides,
-    };
+    return { ...stamped.data, ...overrides };
   };
   // `saveEntity`, not a bare `updateEntity`: the PATCH response is the freshest
   // copy of this row that exists, and dropping it left ['entity', <id>] holding

@@ -8,10 +8,12 @@
  * here in camelCase (entityType, dataType, ...) and the client speaks the
  * Django wire format (entity_type, data_type, ...) for us.
  *
- * CAVEAT: this transform also recurses into the Entity `data` blob. User-chosen
- * attribute keys that aren't plain snake/camel (e.g. with digits or odd casing)
- * can round-trip imperfectly. Keep attribute `name`s simple (snake_case), or
- * lift to a transformKeys:false client if richer keys are needed later.
+ * THE TRANSFORM ALSO RECURSES INTO THE ENTITY `data` BLOB, which is not an API
+ * contract but whatever attribute names the tenant declared — and the pair is not
+ * an involution. See the wire-safety section below `listAllEntities`: `source_1`
+ * reaches a component as `source1` and cannot be turned back, so every whole-blob
+ * write used to RENAME the declared attribute. `updateEntity`/`createEntity` now
+ * repair that on the way out; nothing else in the app has to think about it.
  */
 import type { CollectionClient } from '@startsimpli/ui/collection';
 
@@ -228,12 +230,145 @@ export function getEntity(id: number | string) {
   return api.client.get<EntityRecord>(`api/v1/entities/${id}`);
 }
 
-export function createEntity(input: {
+export async function createEntity(input: {
   entityType: string;
   name: string;
   data: Record<string, unknown>;
 }) {
-  return api.client.post<EntityRecord>('api/v1/entities', input);
+  // Same re-keying as updateEntity — a record created through the app must not be
+  // born with a renamed attribute. See the wire-safety section below.
+  const data = await wireSafeData(input.data);
+  return api.client.post<EntityRecord>('api/v1/entities', { ...input, ...(data ? { data } : {}) });
+}
+
+// ---- wire-safe data blobs (bd startsim-8hgmq.18) --------------------------
+//
+// THE DEFECT. The shared client's key transform is not an involution:
+//
+//   snake -> camel: /_([a-z0-9])/ -> uppercase   so  source_1 -> source1
+//   camel -> snake: /[A-Z]/       -> _lowercase  so  source1  -> source1
+//
+// Uppercasing a DIGIT is a no-op, so an underscore that sat before a digit is
+// destroyed on the way IN and there is no hump to split on on the way OUT.
+// `team_verdict` survives only because `teamVerdict` has one. The backend PATCH
+// REPLACES `data`, so EVERY surface here sends the whole blob back — and every
+// one of them therefore renamed the declared topic attribute `source_1` to the
+// undeclared `source1`. Nothing looked broken, because `readData` tries both
+// spellings; what breaks is everything OUTSIDE the browser — `attr.source_1=`
+// server-side filtering (which this tenant answers by matching NOTHING, silently
+// — see EntityFilters above), `redenormalize_attributes`, and the n8n nodes that
+// read the attribute by name. Measured on the live tenant 2026-09-09: 26 of 84
+// topics already renamed, 50 more one write away from it.
+//
+// THE FIX IS NOT TO CAMELISE HARDER. camelToSnake is the IDENTITY on a pure
+// snake_case key — `source_1` -> `source_1`, `team_verdict` -> `team_verdict` —
+// so a blob keyed by the DECLARED names round-trips exactly, with no change to
+// the shared client and no change for any other app.
+//
+// WHY IT IS NETTED HERE rather than at each surface. The surface corrupting rows
+// today is @startsimpli/ui's ReviewDrawer, which this app consumes as a PUBLISHED
+// package: a fix there is not consumable here until it is published and the
+// dependency bumped. This is the one seam every write in this app passes through,
+// including the writes inside @startsimpli/ui, so the corruption stops on this
+// app's next deploy at whatever version of the package is installed. The
+// type-aware fix ships in the package too — this is the layer below it, not a
+// second copy of it.
+
+/** The spelling the shared client produces from a wire key. */
+function toCamelKey(name: string): string {
+  return name.replace(/_+([a-z0-9])/g, (_m, c: string) => c.toUpperCase());
+}
+
+/** The spelling the shared client sends to the wire for a key. */
+function toWireKey(key: string): string {
+  return key.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
+}
+
+let aliasIndex: Promise<Map<string, string>> | null = null;
+
+/**
+ * `camel alias -> declared name`, for every declared attribute in the tenant
+ * whose camel spelling can no longer be turned back into it. On this tenant that
+ * is exactly `{source1: source_1, source2: source_2, source3: source_3}`.
+ *
+ * TWO GUARD RAILS, both deliberate:
+ *
+ *  - ONLY DECLARED NAMES. A key the schema never declared is left exactly as it
+ *    arrived, because there is no wire spelling to restore it to.
+ *  - AMBIGUITY IS SKIPPED. If two declared names collapse onto one camel alias,
+ *    neither is restored: a coin flip between two attributes is worse than the
+ *    rename. Verified 2026-09-09 — no such collision exists on this tenant.
+ *
+ * THE INDEX IS TENANT-WIDE, not per type, because {@link updateEntity} is handed
+ * an id and not a type. That is a real (if narrow) imprecision: an UNDECLARED key
+ * on type B that happens to spell a lossy alias of a declared name on type A
+ * would be renamed. Measured on the live tenant: zero blob keys of that shape
+ * exist outside the topic type, across 5,655 news_item / 156 draft / 55 source /
+ * 1 scope / 1 client rows. @startsimpli/ui does the same restore with the type in
+ * hand and has no such gap.
+ *
+ * Fetched once and cached. A schema fetch that FAILS yields an empty index, so
+ * the write goes out unchanged — no worse than the behaviour this replaces, and
+ * never a blocked save.
+ */
+async function declaredAliasIndex(): Promise<Map<string, string>> {
+  aliasIndex ??= (async () => {
+    const index = new Map<string, string>();
+    const ambiguous = new Set<string>();
+    try {
+      for (let page = 1; page <= 20; page++) {
+        const res = await listTypes(page);
+        for (const type of res.results ?? []) {
+          for (const attr of type.attributes ?? []) {
+            const name = attr.name;
+            const camel = toCamelKey(name);
+            if (toWireKey(camel) === name) continue; // survives the round trip already
+            const seen = index.get(camel);
+            if (seen !== undefined && seen !== name) ambiguous.add(camel);
+            index.set(camel, name);
+          }
+        }
+        if (!res.next) break;
+      }
+    } catch {
+      return new Map<string, string>();
+    }
+    for (const camel of ambiguous) index.delete(camel);
+    return index;
+  })();
+  return aliasIndex;
+}
+
+/** Drop the cached schema index. Tests only — the schema does not change at runtime. */
+export function resetDeclaredAliasIndex(): void {
+  aliasIndex = null;
+}
+
+/**
+ * Re-key an outgoing `data` blob so every declared attribute reaches the tenant
+ * under its declared name — and so a row that was ALREADY renamed is repaired by
+ * the next write rather than having the bad key re-minted.
+ *
+ * The declared spelling wins when a body somehow carries both: two keys that
+ * camelToSnake collapses onto one wire key would otherwise let insertion order
+ * pick the survivor.
+ */
+async function wireSafeData(
+  data: Record<string, unknown> | undefined,
+): Promise<Record<string, unknown> | undefined> {
+  if (!data) return data;
+  const index = await declaredAliasIndex();
+  if (index.size === 0) return data;
+  const out: Record<string, unknown> = { ...data };
+  for (const [camel, name] of index) {
+    const hasCamel = Object.prototype.hasOwnProperty.call(out, camel);
+    const hasDeclared = Object.prototype.hasOwnProperty.call(out, name);
+    if (!hasCamel && !hasDeclared) continue;
+    const value = hasDeclared ? out[name] : out[camel];
+    delete out[camel];
+    out[name] = value;
+  }
+  return out;
 }
 
 /**
@@ -241,12 +376,25 @@ export function createEntity(input: {
  * whole `data` blob with what you send (it does not deep-merge) — so callers must
  * send the FULL merged data, not just the changed keys, or untouched attributes
  * are dropped. (Server-side deep-merge is the /entities/upsert/ endpoint.)
+ *
+ * BECAUSE IT REPLACES, the blob is re-keyed to the declared attribute names on
+ * the way out — see {@link wireSafeData}. That is a repair as well as a guard: a
+ * row already holding `source1` goes back as `source_1`.
+ *
+ * WHAT THIS DOES NOT FIX (bd startsim-m7fdm.2): sending the whole blob is still
+ * last-write-wins over every field, so two reviewers on one draft still overwrite
+ * each other's text. Key spelling and concurrency are separate defects; this
+ * touches only the first.
  */
-export function updateEntity(
+export async function updateEntity(
   id: number | string,
   input: { name?: string; data?: Record<string, unknown> },
 ) {
-  return api.client.patch<EntityRecord>(`api/v1/entities/${id}`, input);
+  const data = await wireSafeData(input.data);
+  return api.client.patch<EntityRecord>(`api/v1/entities/${id}`, {
+    ...input,
+    ...(data ? { data } : {}),
+  });
 }
 
 export function deleteEntity(id: number | string) {
