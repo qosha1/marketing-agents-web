@@ -27,6 +27,12 @@
  *   • Notes — a small ReviewNotes affordance (section notes still feed the revise
  *     loop). TODO 768w.16: true inline paragraph pins need an upstream anchor model.
  *   • Revision history — lineage chips + on-demand blog diff, unchanged.
+ *   • Edit history — WHO touched this draft and WHEN (bd startsim-j9rxf). The
+ *     sibling of the "Created by" column: that one says where the draft came
+ *     from, this one says who has been in it since. Deliberately NOT a diff —
+ *     see lib/edit-history.ts, and bd startsim-b3twa for the tracked-changes
+ *     feature the customer deferred. It renders through the SHARED
+ *     ActivityTimeline / ActorIdentity primitives rather than a second timeline.
  *
  * Presentational — all state + persistence stay in the draft page. Fork-local.
  */
@@ -34,6 +40,7 @@ import * as React from 'react';
 import Link from 'next/link';
 
 import {
+  ActivityTimeline,
   ValidationChecklist,
   ReviewNotes,
   DiffViewer,
@@ -46,12 +53,14 @@ import {
   type ReviewNote,
   type CheckStatus,
   type ReviewDimension,
+  type ActivityTimelineItem,
 } from '@startsimpli/ui';
 
 import { cn } from '@startsimpli/ui/utils';
 import type { EntityRecord } from '@/lib/foundry-api';
 import type { IssueStop } from '@/lib/issue-jump';
 import { DRAFT_DECISIONS, draftDecisionLabel } from '@/lib/review-vocabulary';
+import { editSummary, type EditEntry } from '@/lib/edit-history';
 import { CollapsiblePanel, FLATTEN_CARD } from './CollapsiblePanel';
 
 type Call = NonNullable<ReviewScore['verdict']>;
@@ -93,6 +102,13 @@ export interface QualityRailProps {
   noteSection: string;
   onNoteSectionChange: (section: string) => void;
   noteSections: string[];
+
+  /**
+   * Who has edited this draft and when, newest LAST (bd startsim-j9rxf).
+   * Already collapsed by lib/edit-history — one entry per sitting, not per
+   * autosave — so this renders it as given and folds nothing itself.
+   */
+  editHistory: EditEntry[];
 
   // Revision history
   chain: EntityRecord[];
@@ -188,6 +204,7 @@ export function QualityRail(props: QualityRailProps) {
     noteSection,
     onNoteSectionChange,
     noteSections,
+    editHistory,
     chain,
     currentId,
     parentId,
@@ -396,6 +413,9 @@ export function QualityRail(props: QualityRailProps) {
           </p>
         </div>
       </CollapsiblePanel>
+
+      {/* Edit history — who touched this draft and when (bd startsim-j9rxf). */}
+      <EditHistoryPanel entries={editHistory} />
 
       {/* Revision history — lineage chips + on-demand blog diff. */}
       {hasHistory ? (
@@ -706,5 +726,73 @@ function ScoreAdjust({
         </div>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * "Who has been in this draft" — the interim accountability log the 2026-09-08
+ * call asked for (bd startsim-j9rxf).
+ *
+ * IT SAYS WHO AND WHEN. IT DOES NOT SAY WHAT. That is the whole scope, decided on
+ * the call: real track changes is high-risk work made riskier by the legal content
+ * heading for this pipeline, so it was deferred whole (bd startsim-b3twa) rather
+ * than half-built here. Do not add a diff to this panel — the "Revision history"
+ * panel directly below already owns the AI-revision diff, and conflating the two
+ * is exactly how the deferred feature arrives by accident.
+ *
+ * The rows come in oldest-first (append order) and are shown newest-first, because
+ * "who touched this last" is the question a reviewer actually opens this for.
+ *
+ * EVERY ENTRY SAYS IT IS A COLLAPSE. The editor autosaves on a 1.2s debounce, so a
+ * bare timestamp over a sitting would claim a precision it does not have; the
+ * detail line carries the save count and the span (see `editSummary`).
+ */
+function EditHistoryPanel({ entries }: { entries: EditEntry[] }) {
+  // Shared primitives, not a second timeline (rule 9): `ActivityTimeline` renders
+  // the row and `ActorIdentity` inside it renders the person — the same way every
+  // other attributed surface in the monorepo does. The email is the identity by
+  // design (whoami returns no display name; a `sub` UUID names nobody a reader can
+  // resolve) — see lib/edit-history.ts.
+  const items: ActivityTimelineItem[] = React.useMemo(
+    () =>
+      [...entries].reverse().map((e, i) => ({
+        id: `${e.from}-${i}`,
+        type: 'edit',
+        title: 'Edited',
+        occurredAt: e.at,
+        tone: 'muted' as const,
+        // Absent `by` is "not recorded", never a person with a blank name —
+        // ActorIdentity renders nothing at all rather than a dangling "by".
+        actor: e.by ? { email: e.by } : undefined,
+        detail: editSummary(e),
+      })),
+    [entries],
+  );
+
+  const last = entries[entries.length - 1];
+  return (
+    <CollapsiblePanel
+      title="Edit history"
+      badge={
+        <span className="font-mono text-xs text-neutral-500">
+          {entries.length || ''}
+        </span>
+      }
+    >
+      <div className="space-y-2">
+        <ActivityTimeline
+          activities={items}
+          className="space-y-3"
+          emptyTitle="No edits yet"
+          emptyDescription="Nobody has changed this draft since it was written."
+        />
+        {last ? (
+          <p className="text-[11px] text-neutral-400">
+            Consecutive saves by the same person are shown as one entry. This log
+            records who and when, not what changed.
+          </p>
+        ) : null}
+      </div>
+    </CollapsiblePanel>
   );
 }
