@@ -38,6 +38,7 @@ import {
   applyTopicGate,
   DRAFTS_DEFAULT_DAYS,
   TOPIC_GATE_PARAM,
+  ORIGIN_GATE_PARAM,
 } from '@/lib/drafts-view';
 import type { EntityRecord } from '@/lib/foundry-api';
 
@@ -134,13 +135,14 @@ describe('d0j7d (c) — the Drafts default filter is VISIBLE and CLEARABLE', () 
    *  2026-09-07 — `topic_ref` among them (bd startsim-8hgmq.11). */
   const DECLARED = [{ name: 'status' }, { name: 'topic_ref' }];
 
-  it('opens on "topic approved" + a 5-7 day window, and SAYS SO in two chips', () => {
+  it('opens on "topic approved" + a 5-7 day window + no test drafts, and SAYS SO in a chip each', () => {
     const chips = draftsViewChips({}, now);
-    expect(chips.map((c) => c.param)).toEqual([TOPIC_GATE_PARAM, 'since']);
+    expect(chips.map((c) => c.param)).toEqual([TOPIC_GATE_PARAM, 'since', ORIGIN_GATE_PARAM]);
     // An invisible default filter is worse than no filter: it teaches people the
-    // pipeline is empty. Both halves have to be readable on the page.
+    // pipeline is empty. Every half has to be readable on the page.
     expect(chips[0].label).toMatch(/topic approved/i);
     expect(chips[1].label).toMatch(/7 days/i);
+    expect(chips[2].label).toMatch(/test drafts/i);
     expect(DRAFTS_DEFAULT_DAYS).toBeGreaterThanOrEqual(5);
     expect(DRAFTS_DEFAULT_DAYS).toBeLessThanOrEqual(7);
   });
@@ -152,8 +154,18 @@ describe('d0j7d (c) — the Drafts default filter is VISIBLE and CLEARABLE', () 
   });
 
   it('each half clears on its own', () => {
-    expect(draftsViewChips({ [TOPIC_GATE_PARAM]: 'all' }, now).map((c) => c.param)).toEqual(['since']);
-    expect(draftsViewChips({ since: 'all' }, now).map((c) => c.param)).toEqual([TOPIC_GATE_PARAM]);
+    expect(draftsViewChips({ [TOPIC_GATE_PARAM]: 'all' }, now).map((c) => c.param)).toEqual([
+      'since',
+      ORIGIN_GATE_PARAM,
+    ]);
+    expect(draftsViewChips({ since: 'all' }, now).map((c) => c.param)).toEqual([
+      TOPIC_GATE_PARAM,
+      ORIGIN_GATE_PARAM,
+    ]);
+    expect(draftsViewChips({ [ORIGIN_GATE_PARAM]: 'all' }, now).map((c) => c.param)).toEqual([
+      TOPIC_GATE_PARAM,
+      'since',
+    ]);
   });
 
   // These have now been written three ways, and the history is worth keeping.
