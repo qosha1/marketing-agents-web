@@ -135,16 +135,22 @@
  * NOT optimistic concurrency on the log alone (that would protect the record of
  * the edits while the edits themselves still vanish).
  *
- * AND IT COVERS ONE WRITE PATH, the draft review page. Two other places in this
- * app write an entity and are deliberately NOT stamped:
- *   • the generic record drawer's "Edit fields" (components/entity-detail-drawer)
- *     — a field edit made there is real and goes unlogged. It does not CORRUPT
- *     the log (it starts from `{...record.data}`, so the key survives), it just
- *     does not extend it. bd startsim-m7fdm.3.
- *   • a board lane move (components/entity-board) — deliberately, and not for
- *     lack of effort: `laneMoveData` reasons at length that a drag writes the
- *     status and ONLY the status, because a drag says "put this in that lane",
- *     not "I judge this good". Its effect is already visible in the status.
+ * IT COVERS TWO WRITE PATHS, and both go through {@link withEditStamp}: the
+ * draft review page's `mergedData()`, and the generic record drawer's "Edit
+ * fields" (components/entity-detail-drawer), added for bd startsim-m7fdm.3 — a
+ * reviewer can change a headline or a status from the /t/<type> table without
+ * ever opening /draft/<id>, and that edit used to be invisible in the log.
+ *
+ * THE DRAWER IS GENERIC OVER EVERY ENTITY TYPE, so stamping there means topic,
+ * news_item, scope, client and source rows now carry `_edit_history` too. That is
+ * deliberate and it is the honest shape: the log answers "who touched this record
+ * and when", which is a true and useful fact about any record. Only the draft
+ * review page RENDERS it today; nothing filters on it (see THE SCHEMA TRAP).
+ *
+ * ONE WRITE PATH IS STILL DELIBERATELY UNSTAMPED, do not "fix" it: a board lane
+ * move (components/entity-board). `laneMoveData` reasons at length that a drag
+ * writes the status and ONLY the status, because a drag says "put this in that
+ * lane", not "I judge this good". Its effect is already visible in the status.
  * A documented boundary is not a lie; a silent one is.
  *
  * Generic on purpose (rule 9): it reads a data blob, not a draft. It stays
@@ -280,6 +286,35 @@ export function recordEdit(
     : [...history, { ...(who ? { by: who } : {}), from: when, at: when, saves: 1 }];
 
   return next.length > MAX_EDIT_ENTRIES ? next.slice(next.length - MAX_EDIT_ENTRIES) : next;
+}
+
+/**
+ * Fold one save into a log AND into the blob that is about to be PATCHed.
+ *
+ * THE POINT IS THAT THERE IS EXACTLY ONE OF THESE. Both write paths in this app
+ * stamp through here — the draft review page's `mergedData()` and the generic
+ * record drawer's "Edit fields" — because a second hand-rolled stamp is how the
+ * two surfaces came to disagree in the first place (bd startsim-m7fdm.3: an edit
+ * made from the /t/<type> table never reached the log at all).
+ *
+ * THE CALLER SUPPLIES THE HISTORY rather than having it read out of `data`,
+ * because the two surfaces hold it differently and both are right. The draft page
+ * advances an in-memory log OPTIMISTICALLY across a burst of debounced autosaves,
+ * so re-reading the blob would fold every save of a burst onto the same stale
+ * base. The drawer saves once from a freshly-opened record, so it reads the blob.
+ *
+ * The key is the CAMEL spelling ({@link EDIT_HISTORY_PATCH_KEY}) because `data`
+ * here is the client's camelised blob; writing the snake form alongside it leaves
+ * two keys that collide on the wire. See the header.
+ */
+export function withEditStamp(
+  data: Record<string, unknown>,
+  history: EditEntry[],
+  by: string | null | undefined,
+  at: string = new Date().toISOString(),
+): { data: Record<string, unknown>; history: EditEntry[] } {
+  const next = recordEdit(history, by, at);
+  return { data: { ...data, [EDIT_HISTORY_PATCH_KEY]: next }, history: next };
 }
 
 /** The newest sitting, or undefined when the record has never been edited. */

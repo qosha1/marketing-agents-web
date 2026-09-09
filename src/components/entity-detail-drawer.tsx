@@ -25,6 +25,7 @@ import {
   type RecordField,
 } from '@startsimpli/ui';
 
+import { useAuth } from '@startsimpli/auth';
 import { resolveReviewConfig } from '@startsimpli/ui/collection';
 
 import { AttributeField } from './attribute-field';
@@ -32,6 +33,7 @@ import { getRegisteredToken } from '@/infrastructure/auth';
 import { formatBearer } from '@/lib/bearer';
 import { readData, toCamelKey } from '@/lib/board';
 import { CONTENT_TYPE_KEY } from '@/lib/content';
+import { readEditHistory, withEditStamp } from '@/lib/edit-history';
 import { memberDisplayName, memberSub, normalizeMembers } from '@/lib/roster';
 import { findTag, GOOD_EXAMPLE_LABEL } from '@/lib/tags';
 import {
@@ -243,6 +245,10 @@ export function RecordEditFields({
   const [name, setName] = useState(record.name || '');
   const [values, setValues] = useState<Record<string, unknown>>(() => initialValues(type, record));
   const [saving, setSaving] = useState(false);
+  // WHO IS EDITING — the email, for the same reason lib/edit-history.ts gives:
+  // whoami returns no display name, and a `sub` UUID answers "who?" with a string
+  // no reader can resolve.
+  const { user } = useAuth();
 
   async function save() {
     const nextData: Record<string, unknown> = { ...record.data };
@@ -271,13 +277,20 @@ export function RecordEditFields({
         if (camel !== attr.name) delete nextData[attr.name];
       }
     }
+    // WHO TOUCHED THIS, AND WHEN (bd startsim-m7fdm.3). A field edited from the
+    // /t/<type> table is a real, deliberate edit by a person, and it used to reach
+    // the tenant with no trace in the log the draft page renders. Stamped through
+    // the SAME helper as the draft page so the two surfaces cannot drift apart
+    // again; the history is read from the record because this form saves once from
+    // a freshly-opened blob, not across a burst of autosaves.
+    const stamped = withEditStamp(nextData, readEditHistory(record.data), user?.email);
     setSaving(true);
     try {
       // `saveEntity` also writes the server's answer into ['entity', <id>] — the
       // key the full-page editors read. Invalidating only the LIST left that entry
       // holding the pre-edit blob for five minutes, so opening /draft/<id> right
       // after an "Edit fields" save showed the old values back (bd startsim-mk5qp).
-      await saveEntity(qc, record.id, { name: name.trim() || record.name, data: nextData });
+      await saveEntity(qc, record.id, { name: name.trim() || record.name, data: stamped.data });
       await qc.invalidateQueries({ queryKey: ['entities', type.key] });
       notify.success('Saved.');
       onSaved();
