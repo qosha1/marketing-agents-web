@@ -90,16 +90,62 @@
  *
  * ── TWO LIMITS THIS LOG INHERITS AND CANNOT FIX ─────────────────────────────
  *
- * `EntityRecord.humanEdited` (`{data: {<field>: {at, sub}}}`) is NOT this log and
- * cannot be made into one: it holds only the LATEST touch per field, overwritten
- * on every save, and it names the editor by an unresolvable `sub`. It is a useful
- * cross-check on these timestamps and nothing more.
+ * ── WHY `human_edited` IS NOT THIS, THOUGH IT LOOKS LIKE IT ────────────────
+ *
+ * The backend already maintains `EntityRecord.humanEdited`, shaped
+ * `{data: {<field>: {at, sub}}}` — a timestamp and a user id per field. It reads
+ * like the answer, and lib/draft-origin.ts already parses it (throwing the `at`
+ * and `sub` away and keeping only the field names). It was reconsidered as the
+ * basis for this log and rejected on MEASURED evidence, not preference. Four
+ * separate saves to one live draft (2026-09-09, tenant marketing-agents) left it
+ * looking like this:
+ *
+ *   blog        { at: 18:03:53, sub: 9adeea3b-… }   <- ONE timestamp, not four
+ *   seo         { at: 18:03:45, sub: 9adeea3b-… }
+ *   linkedin    { at: 18:03:45, sub: 9adeea3b-… }
+ *   notes/review/sources/source_meta …  all marked, none of them typed in
+ *
+ * Three things that map says, and each of them breaks an accountability log:
+ *
+ *   • IT KEEPS ONLY THE LATEST. Four saves produced one `at` per field. There is
+ *     no earlier touch to read and no second person to see. A map of last-touch
+ *     per field cannot answer "what happened to this draft", which is the
+ *     question that was asked.
+ *   • IT MARKS FIELDS NOBODY TOUCHED. Only the blog was typed into, yet seo,
+ *     linkedin, notes, review, sources and source_meta are all marked — because
+ *     the PATCH replaces the whole blob and the mark records that the ENDPOINT
+ *     wrote a key. draft-origin.ts already says this out loud: it is an endpoint
+ *     distinction, never a claim that a person typed the value, which is also
+ *     why a machine writing through the same endpoints gets marked.
+ *   • IT NAMES A UUID. `sub` is `9adeea3b-c2db-4c87-9117-6c6f10c24ba9`, which
+ *     answers "who?" with a string no reader can resolve — the very failure the
+ *     email decision above exists to avoid, and it needs a roster lookup that
+ *     does not resolve service identities at all.
+ *
+ * So it is not a duplicate implementation (rule 1) — it is a different fact. It
+ * stays useful as an independent CROSS-CHECK on these timestamps, and nothing
+ * more.
  *
  * The backend PATCH REPLACES the whole `data` blob (no deep merge), so two people
  * editing the same draft at once already overwrite each other's TEXT. This log
  * rides in that same blob and will lose entries the same way. That is
  * pre-existing, not introduced here — but a log whose whole job is accountability
- * has to say so out loud rather than imply a completeness it does not have.
+ * has to say so out loud rather than imply a completeness it does not have. Filed
+ * as bd startsim-m7fdm.2; the fix is a conditional write or a server-side merge,
+ * NOT optimistic concurrency on the log alone (that would protect the record of
+ * the edits while the edits themselves still vanish).
+ *
+ * AND IT COVERS ONE WRITE PATH, the draft review page. Two other places in this
+ * app write an entity and are deliberately NOT stamped:
+ *   • the generic record drawer's "Edit fields" (components/entity-detail-drawer)
+ *     — a field edit made there is real and goes unlogged. It does not CORRUPT
+ *     the log (it starts from `{...record.data}`, so the key survives), it just
+ *     does not extend it. bd startsim-m7fdm.3.
+ *   • a board lane move (components/entity-board) — deliberately, and not for
+ *     lack of effort: `laneMoveData` reasons at length that a drag writes the
+ *     status and ONLY the status, because a drag says "put this in that lane",
+ *     not "I judge this good". Its effect is already visible in the status.
+ * A documented boundary is not a lie; a silent one is.
  *
  * Generic on purpose (rule 9): it reads a data blob, not a draft. It stays
  * fork-local for the same reason lib/draft-origin.ts does — this app consumes
@@ -107,7 +153,7 @@
  * PR + a publish + a version bump before it can be used here. What IS shared is
  * already shared: the panel renders through the `ActivityTimeline` /
  * `ActorIdentity` primitives instead of a second timeline. Extraction when a
- * second tenant wants it — bd startsim-ki7hr.
+ * second tenant wants it — bd startsim-m7fdm.1.
  */
 import { readData } from '@/lib/board';
 import type { EntityRecord } from '@/lib/foundry-api';
