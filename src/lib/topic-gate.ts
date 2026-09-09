@@ -75,6 +75,7 @@ import type { AttributeDef, EntityRecord, EntityTypeDef, Paginated } from '@/lib
 import {
   canGenerateDrafts,
   declaresTopicRef,
+  DRAFT_SCAN,
   DRAFT_TYPE,
   TOPIC_REF_ATTR,
   type GenerateDraftsGate,
@@ -83,10 +84,13 @@ import {
 /** A GET against the tenant backend, by path (see `tenant-fetch.ts`). */
 export type TenantReader = <T>(path: string) => Promise<T>;
 
-/** Pages to walk before giving up. Both lists are small; this is a stop, not a budget. */
-const MAX_PAGES = 5;
-/** Rows per page. Large enough that the realistic case is always one request. */
-const PAGE_SIZE = 200;
+/**
+ * The SCHEMA read's own bound. Six types on the live tenant, one page; this is
+ * a stop, not a budget, and it is deliberately NOT the draft bound below — a
+ * ceiling raised for a 10,000-row corpus has no business being applied to a
+ * list of entity types.
+ */
+const SCHEMA_SCAN = { maxPages: 5, pageSize: 200 } as const;
 
 type Wire = Record<string, unknown>;
 
@@ -135,15 +139,25 @@ export function entityFromWire(raw: unknown): EntityRecord {
   };
 }
 
-/** Walk a paginated list, stopping at MAX_PAGES. Returns the rows and whether more remain. */
+/**
+ * Walk a paginated list to the bound it is GIVEN. Returns the rows and whether
+ * more remain.
+ *
+ * The bound is a parameter, not a module constant, because the two lists this
+ * walks are not the same list: the schema is six rows and the draft corpus is
+ * the one the gate's answer stands on. Handing both the same private number is
+ * how the draft ceiling ended up 10x below the drawer's without anyone
+ * noticing (bd startsim-8hgmq.13).
+ */
 async function readPages(
   read: TenantReader,
   path: string,
+  { maxPages, pageSize }: { maxPages: number; pageSize: number },
 ): Promise<{ rows: Wire[]; truncated: boolean }> {
   const rows: Wire[] = [];
   const join = path.includes('?') ? '&' : '?';
-  for (let page = 1; page <= MAX_PAGES; page++) {
-    const res = await read<Paginated<Wire>>(`${path}${join}page=${page}&page_size=${PAGE_SIZE}`);
+  for (let page = 1; page <= maxPages; page++) {
+    const res = await read<Paginated<Wire>>(`${path}${join}page=${page}&page_size=${pageSize}`);
     rows.push(...(Array.isArray(res?.results) ? res.results : []));
     if (!res?.next) return { rows, truncated: false };
   }
@@ -167,7 +181,7 @@ export async function resolveTopicGate(
   // The topic's OWN type, not a hardcoded 'topic': the review map has to come
   // from the type the record actually declares, the same one the drawer passes.
   const typeKey = topic.entityType || 'topic';
-  const { rows: typeRows } = await readPages(read, 'schema/types');
+  const { rows: typeRows } = await readPages(read, 'schema/types', SCHEMA_SCAN);
   const rawType = typeRows.find((t) => String(t.key ?? '') === typeKey);
   // No matching type -> resolveReviewConfig(undefined) -> approve: null ->
   // refused. Fail closed, exactly as the client does for a type with no pipeline.
@@ -183,7 +197,13 @@ export async function resolveTopicGate(
   if (declaresTopicRef(entityTypeFromWire(draftType ?? null).attributes)) {
     query.set(`attr.${TOPIC_REF_ATTR}`, topicId);
   }
-  const { rows: draftRows, truncated } = await readPages(read, `entities?${query.toString()}`);
+  // DRAFT_SCAN, not a bound of this module's own: this is the same read the
+  // drawer's `fetchTopicDrafts` makes, so it stops in the same place.
+  const { rows: draftRows, truncated } = await readPages(
+    read,
+    `entities?${query.toString()}`,
+    DRAFT_SCAN,
+  );
   // COUNTED HERE, NOT TAKEN FROM THE ENVELOPE, whether or not the filter above
   // was sent — an ignored parameter returns the whole corpus and would refuse
   // every topic.
@@ -193,17 +213,22 @@ export async function resolveTopicGate(
   if (truncated && draftCount === 0) {
     // A COUNT WE COULD NOT ESTABLISH IS NOT A COUNT OF ZERO. The unnarrowed
     // path — the one taken when the draft type does not declare `topic_ref` — is
-    // a listing bounded by MAX_PAGES * PAGE_SIZE (1000; 150 drafts today). Past
-    // that ceiling a topic whose drafts sit beyond the last page read would
-    // count 0 and be waved through — the very defect this function exists to
-    // stop, re-entering through the door the fallback opens.
+    // a listing bounded by DRAFT_SCAN (10,000 rows; 156 drafts today). Past that
+    // ceiling a topic whose drafts sit beyond the last page read would count 0
+    // and be waved through — the very defect this function exists to stop,
+    // re-entering through the door the fallback opens.
+    //
+    // RAISING THE CEILING DID NOT RETIRE THIS THROW and must not be read as
+    // having done so (bd startsim-8hgmq.13 moved where it sits, nothing else).
+    // The ceiling is where the read stops being able to answer; the throw is
+    // what happens there, and it is the same answer at 10,000 rows as at 1,000.
     //
     // So it throws, which the caller turns into "could not verify" (502), the
     // same answer an unreachable tenant gets. Warning and allowing would fail
     // OPEN on an unverifiable read while the paragraph above this function
     // promises the opposite.
     throw new Error(
-      `draft listing was truncated at ${MAX_PAGES * PAGE_SIZE} rows before matching topic ${topicId}`,
+      `draft listing was truncated at ${DRAFT_SCAN.maxPages * DRAFT_SCAN.pageSize} rows before matching topic ${topicId}`,
     );
   }
 

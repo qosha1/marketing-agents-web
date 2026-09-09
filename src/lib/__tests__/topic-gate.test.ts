@@ -12,10 +12,11 @@
  * fixture resolves `approve: 'ready'` through it and `approve: null` without it.
  * If someone ever "simplifies" the mapping away, that is the test that fires.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { resolveReviewConfig } from '@startsimpli/ui/collection';
 
+import { DRAFT_SCAN } from '@/lib/topic-drafts';
 import { entityFromWire, entityTypeFromWire, resolveTopicGate } from '@/lib/topic-gate';
 
 /** The topic type exactly as the tenant backend serializes it. */
@@ -289,5 +290,117 @@ describe('resolveTopicGate', () => {
       allowed: false,
       reason: 'not_approved',
     });
+  });
+});
+
+/**
+ * ONE BOUND FOR BOTH HALVES OF THE GATE (bd startsim-8hgmq.13).
+ *
+ * The gate is asked twice about the same question — "does this topic already
+ * have drafts?" — once by the drawer and once by the route it guards. Both
+ * answer it by paging the draft corpus, and until this suite they paged to
+ * DIFFERENT depths: the client to `listAllEntities`'s 50 x 200, the server to a
+ * private MAX_PAGES 5 x 200. Ten times apart, over the same list, for the same
+ * decision.
+ *
+ * WHAT THE DISAGREEMENT COSTS is not a wrong count — the server half throws
+ * rather than under-count, deliberately (a count that could not be established
+ * is not a count of zero; that is the hole bd startsim-8hgmq.3 came from). It
+ * costs the reviewer a 502 "Could not verify the topic" on a topic the drawer
+ * itself was perfectly able to resolve. The button refuses, the drawer beside
+ * it shows the drafts it counted, and nothing on screen explains the gap.
+ *
+ * THE HONEST SCOPE, said out loud so the next reader does not overestimate this
+ * fix: `topic_ref` is DECLARED now (bd startsim-8hgmq.11), so the server half
+ * narrows and a truncated NARROWED read would mean one topic owns more than the
+ * whole ceiling — at which point the count is not zero and the throw does not
+ * fire. The reachable path is the UNNARROWED fallback, the one taken when the
+ * draft type stops declaring the attribute. That fallback is real, it is the
+ * path that was live for two weeks, and its ceiling should not be a different
+ * number from the one the drawer uses. It is not "the intermittent failure the
+ * bead was filed for" — that symptom needs 1,000 drafts and the tenant holds
+ * 156.
+ */
+describe('the two halves of the drafts gate read to the same depth', () => {
+  /**
+   * A reader whose draft listing actually PAGES.
+   *
+   * The `reader` above answers every listing with `next: null`, which is right
+   * for what it pins and useless here: nothing truncates, so both bounds look
+   * identical. This one honours `page`, reports `next` until the last page, and
+   * records every listing it was asked for — so a test can assert WHERE it
+   * stopped, not merely what it concluded.
+   */
+  function pagingReader({
+    pages,
+    matchOnPage,
+    types,
+  }: {
+    pages: number;
+    /** 1-based page carrying a draft for topic 55; 0 for a corpus with none. */
+    matchOnPage: number;
+    types?: unknown[];
+  }) {
+    const listings: string[] = [];
+    const schema = types ?? [TOPIC_TYPE_WIRE, DRAFT_TYPE_WIRE_UNDECLARED];
+    const read = async <T,>(path: string): Promise<T> => {
+      if (path.startsWith('schema/types')) {
+        return { count: schema.length, next: null, previous: null, results: schema } as T;
+      }
+      if (path.startsWith('entities?')) {
+        listings.push(path);
+        const page = Number(new URLSearchParams(path.slice(path.indexOf('?') + 1)).get('page'));
+        const rows =
+          page === matchOnPage
+            ? [{ id: page * 1000, data: { topic_ref: '55' } }]
+            : [{ id: page * 1000, data: { topic_ref: '999' } }];
+        return {
+          count: rows.length,
+          next: page < pages ? `?page=${page + 1}` : null,
+          previous: null,
+          results: rows,
+        } as T;
+      }
+      return topicWire('ready') as T;
+    };
+    return { read, listings };
+  }
+
+  it('counts a draft that sits past the OLD five-page bound instead of throwing over it', async () => {
+    // Six pages of an UNNARROWED listing — the fallback the gate takes when the
+    // draft type does not declare `topic_ref` — with this topic's only draft on
+    // the last one. The drawer, reading to 50 pages, has always seen it.
+    const r = pagingReader({ pages: 6, matchOnPage: 6 });
+    expect(await resolveTopicGate(r.read, '55')).toMatchObject({
+      allowed: false,
+      reason: 'drafts_exist',
+    });
+  });
+
+  it('stops at the SAME ceiling the drawer stops at, and still refuses to guess', async () => {
+    // A corpus with no end and no match. The throw is the point and must stay:
+    // waving the topic through here would re-open bd startsim-8hgmq.3.
+    const r = pagingReader({ pages: Number.MAX_SAFE_INTEGER, matchOnPage: 0 });
+    await expect(resolveTopicGate(r.read, '55')).rejects.toThrow(/truncated/);
+    // WHERE it stopped, not just that it did: this is the assertion that fails
+    // if either half's bound moves without the other's.
+    expect(r.listings.length).toBe(DRAFT_SCAN.maxPages);
+    expect(r.listings.every((p) => p.includes(`page_size=${DRAFT_SCAN.pageSize}`))).toBe(true);
+  });
+
+  it('names the bound the client half reads, so the two cannot drift apart again', async () => {
+    // `fetchTopicDrafts` used to lean on `listAllEntities`'s DEFAULT maxPages.
+    // A default is not a shared bound: it can be retuned for the news_item board
+    // and silently move the gate's client half out from under its server half.
+    // So the client half names DRAFT_SCAN too, and this pins that it does.
+    const listAllEntities = vi.fn().mockResolvedValue([]);
+    vi.doMock('@/lib/foundry-api', () => ({
+      listAllEntities,
+      listRelationships: vi.fn().mockResolvedValue({ results: [], next: null }),
+    }));
+    const { fetchTopicDrafts } = await import('@/lib/topic-drafts');
+    await fetchTopicDrafts({ id: 55, externalId: null });
+    expect(listAllEntities).toHaveBeenCalledWith('draft', DRAFT_SCAN);
+    vi.doUnmock('@/lib/foundry-api');
   });
 });

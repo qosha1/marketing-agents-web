@@ -53,6 +53,29 @@ export const DRAFT_TYPE = 'draft';
 export const TOPIC_REF_ATTR = 'topic_ref';
 
 /**
+ * How far EITHER half of the drafts gate will page the draft corpus before it
+ * gives up — one bound, named once (bd startsim-8hgmq.13).
+ *
+ * IT LIVES HERE FOR THE SAME REASON `TOPIC_REF_ATTR` DOES. The gate is asked
+ * twice about one question — the drawer asks `fetchTopicDrafts` below, the
+ * route it guards asks `topic-gate.ts` — and both answered by paging, to depths
+ * that had drifted 10x apart: `listAllEntities`'s default 50 x 200, against a
+ * private MAX_PAGES 5 x 200 on the server. Same list, same decision, different
+ * ceilings, so a topic could resolve in the drawer and 502 in the route.
+ *
+ * A DEFAULT IS NOT A SHARED BOUND, which is the specific mistake this replaces.
+ * `listAllEntities`'s 50 pages is tuned for the news_item board (4,116 rows);
+ * retuning it there would have moved this gate's client half and left its server
+ * half where it was, with nothing to notice. Both halves now name THIS.
+ *
+ * The number is deliberately the larger of the two: 10,000 rows against 156 live
+ * drafts. It is a stop, not a budget — see the truncation throw in
+ * `topic-gate.ts`, which stays exactly as it is. Raising a ceiling does not make
+ * a count we could not establish into a count of zero.
+ */
+export const DRAFT_SCAN = { maxPages: 50, pageSize: 200 } as const;
+
+/**
  * Whether a draft type DECLARES `topic_ref`, and therefore whether the tenant
  * can narrow on it.
  *
@@ -312,7 +335,10 @@ export async function fetchTopicDrafts(
   const { listAllEntities } = await import('@/lib/foundry-api');
   const [relationships, drafts] = await Promise.all([
     listAllRelationships(),
-    listAllEntities(DRAFT_TYPE),
+    // DRAFT_SCAN, not `listAllEntities`'s default. The server half of this same
+    // gate reads to this bound by name; leaning on a default here is what let
+    // the two drift 10x apart (bd startsim-8hgmq.13).
+    listAllEntities(DRAFT_TYPE, DRAFT_SCAN),
   ]);
   return matchTopicDrafts(topic.id, relationships, drafts, topic.externalId);
 }
