@@ -46,6 +46,14 @@
  * (chosen + approved) and its parent topic (written) together; once approved, a
  * "Mark sent" hands off (status → sent, posting stays manual).
  *
+ * Edit history (bd startsim-j9rxf): every write this page makes is a person doing
+ * something on purpose, so `mergedData()` — the ONE body every PATCH goes through —
+ * folds the caller into `data._edit_history`. It is a choke point precisely so a
+ * new write path cannot forget it. The log answers "who touched this and when" and
+ * deliberately nothing more; see lib/edit-history.ts for the collapsing window that
+ * keeps a debounced autosave from turning it into noise, and bd startsim-b3twa for
+ * the tracked-changes feature the customer deferred.
+ *
  * Jump-to-issue (P3, bd 768w.16.15.3): the checks now report WHERE they failed, so
  * this page owns the jump — the active channel + pane (both shells took an optional
  * controlled mode for it) and the active issue. The reviewer clicks an issue in the
@@ -75,7 +83,15 @@ import {
   type DocSection,
 } from '@startsimpli/ui/document-editor';
 
+import { useAuth } from '@startsimpli/auth';
+
 import { readData, typeRoute } from '@/lib/board';
+import {
+  EDIT_HISTORY_PATCH_KEY,
+  readEditHistory,
+  recordEdit,
+  type EditEntry,
+} from '@/lib/edit-history';
 import { declaredLangChoices, pendingTranslation, translatableTargets } from '@/lib/draft-translation';
 import { getRegisteredToken } from '@/infrastructure/auth';
 import { wordCount } from '@startsimpli/ui';
@@ -432,6 +448,12 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
     () => parseSources(readData(draft.data, 'sources')).items,
   );
   const [sourceMeta, setSourceMeta] = useState<SourceMetaEntry[]>(() => readSourceMeta(draft.data));
+
+  // Who has been in this draft, and when (bd startsim-j9rxf). Seeded from the
+  // stored blob and advanced locally by `mergedData` on every write — the panel
+  // in the rail reads THIS, so a reviewer sees her own edit appear without a
+  // round trip. Keyed per draft by the `key={draft.id}` remount above.
+  const [editHistory, setEditHistory] = useState<EditEntry[]>(() => readEditHistory(draft.data));
   const today = useMemo(() => new Date(), []);
 
   // Refs mirror the latest local state so any async persist merges the freshest of
@@ -442,6 +464,11 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
   const notesRef = useRef(notes);
   const sourceItemsRef = useRef(sourceItems);
   const sourceMetaRef = useRef(sourceMeta);
+  // The BASE the next edit folds onto. Advanced synchronously inside `mergedData`
+  // rather than by the commit-sync effect below, because two debounced saves can
+  // be in flight at once: folding the second onto the pre-first base would write a
+  // blob that ERASES the first fold. See `mergedData`.
+  const editHistoryRef = useRef(editHistory);
   // Sync the mirrors after each commit. Handlers that persist immediately also set
   // their own ref inline (below) so they never wait on this effect.
   useEffect(() => {
@@ -450,6 +477,17 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
     notesRef.current = notes;
     sourceItemsRef.current = sourceItems;
     sourceMetaRef.current = sourceMeta;
+  });
+
+  // WHO IS EDITING. The email, for the same reason the "Generate drafts" relay
+  // uses it (see app/actions/generate-drafts/route.ts): whoami returns no display
+  // name, so the choice is email or a `sub` UUID, and a UUID answers "who?" with a
+  // string no reader can resolve. Mirrored into a ref so a debounced save fired
+  // from a timer reads the CURRENT session rather than the one it closed over.
+  const { user } = useAuth();
+  const editorEmailRef = useRef<string | undefined>(user?.email ?? undefined);
+  useEffect(() => {
+    editorEmailRef.current = user?.email ?? undefined;
   });
 
   const reviewSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -634,18 +672,45 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
   // The single source of truth for a PATCH body: the full existing blob with the
   // freshest sections + review + notes folded in, plus any explicit status/flag
   // overrides. Every write below goes through this so nothing is ever dropped.
-  const mergedData = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
-    ...draft.data,
-    ...recordPatchFromSections(sectionsRef.current),
-    // Sources are re-serialized to their ORIGINAL container so the pipeline reader
-    // stays intact; unchanged rows round-trip verbatim. `sourceMeta` (camel — matches
-    // the read shape so it overrides cleanly) carries the reviewer-only verified flags.
-    sources: serializeSources(sourceItemsRef.current, sourcesContainer),
-    sourceMeta: sourceMetaRef.current,
-    review: reviewRef.current,
-    notes: notesRef.current,
-    ...overrides,
-  });
+  const mergedData = (overrides: Record<string, unknown> = {}): Record<string, unknown> => {
+    // WHO TOUCHED THIS, AND WHEN (bd startsim-j9rxf). Every write below reaches the
+    // server through this one body, so folding the edit in HERE is what makes the
+    // log complete: a new persist path cannot forget to stamp it. Every caller is a
+    // person doing something deliberate — a typed edit, a verdict, a note, a source,
+    // Accept, Reject, Mark sent — and nothing on this page persists on mount or on a
+    // normalisation, so there is no phantom entry to filter out.
+    //
+    // It is advanced OPTIMISTICALLY, before the PATCH is known to have landed. A
+    // failed save therefore leaves one extra fold in an entry that is already true
+    // about WHO and WHEN — whereas waiting for the response would let a second
+    // in-flight save fold onto a stale base and write a blob that erases the first.
+    // Over-counting a save is the cheaper of the two lies.
+    //
+    // `EDIT_HISTORY_PATCH_KEY` is the CAMEL spelling on purpose — the same reason
+    // `sourceMeta` below is: the spread above carries the client's camelCased blob,
+    // so writing the snake form would leave both keys to collide on the wire.
+    const nextHistory = recordEdit(
+      editHistoryRef.current,
+      editorEmailRef.current,
+      new Date().toISOString(),
+    );
+    editHistoryRef.current = nextHistory;
+    setEditHistory(nextHistory);
+
+    return {
+      ...draft.data,
+      ...recordPatchFromSections(sectionsRef.current),
+      // Sources are re-serialized to their ORIGINAL container so the pipeline reader
+      // stays intact; unchanged rows round-trip verbatim. `sourceMeta` (camel — matches
+      // the read shape so it overrides cleanly) carries the reviewer-only verified flags.
+      sources: serializeSources(sourceItemsRef.current, sourcesContainer),
+      sourceMeta: sourceMetaRef.current,
+      review: reviewRef.current,
+      notes: notesRef.current,
+      [EDIT_HISTORY_PATCH_KEY]: nextHistory,
+      ...overrides,
+    };
+  };
   // `saveEntity`, not a bare `updateEntity`: the PATCH response is the freshest
   // copy of this row that exists, and dropping it left ['entity', <id>] holding
   // the pre-edit blob for five minutes — the reviewer reopened the draft and her
@@ -1220,6 +1285,7 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
       noteSection={noteSection}
       onNoteSectionChange={setNoteSection}
       noteSections={noteSections}
+      editHistory={editHistory}
       chain={chain}
       currentId={String(draft.id)}
       parentId={parentId}
