@@ -335,7 +335,10 @@ export async function fetchTopicDrafts(
   const { listAllEntities } = await import('@/lib/foundry-api');
   const [relationships, drafts] = await Promise.all([
     listAllRelationships(),
-    listAllEntities(DRAFT_TYPE),
+    // DRAFT_SCAN, not `listAllEntities`'s default. The server half of this same
+    // gate reads to this bound by name; leaning on a default here is what let
+    // the two drift 10x apart (bd startsim-8hgmq.13).
+    listAllEntities(DRAFT_TYPE, DRAFT_SCAN),
   ]);
   return matchTopicDrafts(topic.id, relationships, drafts, topic.externalId);
 }
