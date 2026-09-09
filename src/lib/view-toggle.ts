@@ -13,12 +13,19 @@
  * IS /t/topic?content_type=weekly_brief — sent you to a board of all 82 topics
  * with the three kinds mixed into shared status lanes, and the trip back
  * dropped the scope again. The decision is extracted here so it is testable
- * without rendering a component (the harness is vitest `environment: 'node'`,
- * `.test.ts` only — there is no jsdom and no testing-library).
+ * without rendering a component — it is a pure (typeKey, params) -> href
+ * question, and the answer should not need a document to check. (When this was
+ * written the harness could not have rendered one anyway: it was a single
+ * `environment: 'node'` run over `.test.ts`. startsim-edb00 has since added a
+ * second jsdom lane for `.test.tsx`, so that is no longer the CONSTRAINT it
+ * once was — but the node lane is still where a pure decision belongs.)
  *
- * THIS MODULE STILL CARRIES THE BUG. It is a faithful characterization of what
- * the two buttons do today, so the extraction can be proved behaviour-neutral;
- * the fix is startsim-flv2x.3 and lives in TRAVELLING_PARAMS below.
+ * THAT IS FIXED (startsim-flv2x.3, PR #45), and the paragraph above is kept in
+ * the past tense rather than deleted: a one-line array is not self-evidently a
+ * decision, and the next reader to ask "why not just forward the query string?"
+ * needs the answer sitting next to it. Both pages now render their link from
+ * the functions below — table page :686, board page :419 — so there is one
+ * place where the question is answered and no inline spellings left.
  *
  * NOTE ON ENCODING: the table's toggle ran typeKey through encodeURIComponent
  * and the board's did not. Both do here. That is a no-op for every schema key
@@ -34,9 +41,11 @@ export type ToggleParams = Record<string, string | undefined | null>;
  * The params that describe WHICH RECORDS you are looking at, and so must
  * survive a switch between the two presentations.
  *
- * TODAY THIS IS EMPTY, AND THAT IS THE BUG (startsim-flv2x.1). The scope you
- * picked is thrown away by the very control that claims to show you the same
- * records a different way.
+ * THIS WAS ONCE EMPTY, AND THAT WAS THE BUG (startsim-flv2x.1): the scope you
+ * picked was thrown away by the very control that claims to show you the same
+ * records a different way. It stays an ALLOWLIST rather than becoming a
+ * pass-through — the two rulings below are each a param that must NOT travel,
+ * and forwarding the query string wholesale would carry both.
  *
  * `content_type` is the unambiguous member: it names a content KIND, both
  * pages already consume it (the table seeds its Kind facet from it, the board
@@ -44,21 +53,52 @@ export type ToggleParams = Record<string, string | undefined | null>;
  * scoped href for a year — the toggles just never called it.
  *
  * `status` IS DECIDED, AND THE ANSWER IS NO — it must never be added to this
- * list (ruled on startsim-flv2x.2). The board's LANES are status, and
- * lanes.ts:57 applies each lane's own value LAST, so every lane overrides an
- * incoming ?status= and ignores it. But the header chip (board page :314) and
- * the matching count (board page :243, countEntities over baseFilters) do NOT
- * ignore it. Carrying it renders a chip claiming a filter that is not applied,
- * above a header measured live as "41 of 1 records" — a second number smaller
- * than the first. That board bug exists today and is startsim-flv2x.7's;
- * carrying status here would newly expose it on a common path.
+ * list (ruled on startsim-flv2x.2).
+ *
+ * THE REASON, WHICH STANDS ON ITS OWN: carrying it would mean nothing. The
+ * board's LANES are status — lanes.ts:57 builds each lane's query as
+ * `{ ...base, ['attr.' + statusName]: laneId }`, applying the lane's own value
+ * LAST and deliberately — so an incoming ?status= cannot narrow anything a
+ * reader can see. It would be a param in the URL that changes no pixel.
+ * flv2x.2 weighed the only alternative that would give it a meaning, narrowing
+ * the board to the one named lane, and rejected it: a one-lane kanban is a
+ * worse table with none of the table's columns.
+ *
+ * AND THE HISTORICAL REASON, recorded because this comment used to LEAD with it
+ * and a reader checking it against the code will find it describes nothing
+ * (startsim-flv2x.11). Until startsim-flv2x.7 (PR #47) the lane attribute was
+ * refused by the lanes but not by the header chip (board page :314) or the
+ * matching count (board page :243, countEntities over baseFilters), so
+ * ?status= drew a chip claiming a filter that was not applied, above a header
+ * measured live as "41 of 1 records" — a second number smaller than the first.
+ * boardAttrFilters now splits the lane attribute off before it reaches either,
+ * so carrying status would be HARMLESS today. Harmless is not a reason to
+ * carry it. The ruling never rested on the defect and does not lapse with it.
  *
  * `content_type` is safe for the mirror-image reason: it is NOT the status
  * attribute, so laneFilters never overwrites it — it stays in `base`, every
  * lane query carries it, and the count agrees.
  *
- * The board-only params (`since`, `assignee_sub`) do not travel out of the
- * board either: the table has no control to render them into.
+ * `since` AND `assignee_sub` DO NOT TRAVEL EITHER — but the reason once given
+ * for `since`, that the table has no control to render it into, is no longer
+ * true. /t/draft now opens on a recency window and renders it as its own chip
+ * (lib/drafts-view.ts, startsim-f4lac), reusing this exact param name from
+ * lib/board.ts. The two surfaces share a spelling and NOT a default: the
+ * drafts table opens at DRAFTS_DEFAULT_DAYS = 7, a board at
+ * DEFAULT_RECENCY_DAYS = 14. So a flat, direction-SYMMETRIC allowlist cannot
+ * take `since` without also carrying a window the BOARD chose back onto a
+ * table where nobody chose it — trading one silent narrowing for another.
+ * `assignee_sub` is board-only outright; the table has no such control.
+ *
+ * WHAT THAT LEAVES OPEN, measured live 2026-09-09 and filed rather than fixed
+ * here: /t/draft's three-part default (`topic` + `since` + `made`) is dropped
+ * on the way to the board — correctly, since the board applies none of it —
+ * and then the bare return href lets it RE-APPLY. Widen to the whole pipeline
+ * with the "N hidden" disclosure and one round trip through the board puts you
+ * silently back behind the default (156 total -> board -> "36 shown · 120
+ * hidden"). Closing that needs a direction-AWARE seam, which reshapes what
+ * flv2x.2 settled, so it is startsim-flv2x.12 rather than three more strings
+ * in this array.
  */
 const TRAVELLING_PARAMS: readonly string[] = [CONTENT_TYPE_ATTR];
 
