@@ -68,8 +68,14 @@ const TOPIC_TYPE_WIRE = {
 };
 
 /** A topic record as Django sends it. */
-function topicWire(status: string, id: number = TOPIC_ID) {
-  return { id, entity_type: 'topic', external_id: `topic-${id}`, name: 'A Topic', data: { status } };
+function topicWire(status: string, id: number = TOPIC_ID, scopePath?: string) {
+  return {
+    id,
+    entity_type: 'topic',
+    external_id: `topic-${id}`,
+    name: 'A Topic',
+    data: { status, ...(scopePath === undefined ? {} : { scope_path: scopePath }) },
+  };
 }
 
 /** A draft record as Django sends it. */
@@ -438,5 +444,64 @@ describe('the in-flight claim (bd startsim-8hgmq.8)', () => {
 
     expect(res.status).toBe(403);
     expect(((await res.json()) as { reason?: string }).reason).toBe('drafts_exist');
+  });
+});
+
+describe('the scope the writer stamps (bd startsim-0r7ru)', () => {
+  it("relays the TOPIC's scope path, read from the tenant on the way past", async () => {
+    // The tenant gates records by scope, so a draft written for this topic has
+    // to land where the topic lives. The route already reads the topic to gate
+    // the press — the scope comes off that same read, not a second fetch and not
+    // the caller's word for it.
+    stubTenant({ topic: topicWire('ready', TOPIC_ID, '/ogmc-agent-test'), drafts: [] });
+
+    const res = await POST(post({ story: story() }));
+
+    expect(res.status).toBe(202);
+    const [, init] = vi.mocked(global.fetch).mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      topic_ref: String(TOPIC_ID),
+      scope_path: '/ogmc-agent-test',
+    });
+  });
+
+  it('OMITS the key when the topic carries no scope, rather than defaulting one', async () => {
+    // `in`, not a value check (the same reason `triggered_by` is tested this
+    // way): the webhook coerces with `|| ''` and the writer falls back when the
+    // value is empty, so an app that sent `''` would look identical end to end
+    // while having silently decided the scope for everybody.
+    stubTenant({ topic: topicWire('ready'), drafts: [] });
+
+    const res = await POST(post({ story: story() }));
+
+    expect(res.status).toBe(202);
+    const [, init] = vi.mocked(global.fetch).mock.calls[0] as [string, RequestInit];
+    expect('scope_path' in (JSON.parse(String(init.body)) as Record<string, unknown>)).toBe(false);
+  });
+
+  it("takes the tenant's answer over a scope the caller put in the story", async () => {
+    // Same reasoning as the gate this route exists for: the story is a body an
+    // authenticated tab composed, so it cannot be the authority on which scope a
+    // draft is written into. A caller-supplied path would let one tenant's press
+    // write into another's queue — the exact failure the scope gate prevents.
+    stubTenant({ topic: topicWire('ready', TOPIC_ID, '/ogmc'), drafts: [] });
+
+    const res = await POST(post({ story: { ...story(), scope_path: '/somewhere-else' } }));
+
+    expect(res.status).toBe(202);
+    const [, init] = vi.mocked(global.fetch).mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toMatchObject({ scope_path: '/ogmc' });
+  });
+
+  it('drops a caller-supplied scope entirely when the topic has none', async () => {
+    stubTenant({ topic: topicWire('ready'), drafts: [] });
+
+    const res = await POST(post({ story: { ...story(), scopePath: '/somewhere-else' } }));
+
+    expect(res.status).toBe(202);
+    const [, init] = vi.mocked(global.fetch).mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+    expect('scope_path' in body).toBe(false);
+    expect('scopePath' in body).toBe(false);
   });
 });

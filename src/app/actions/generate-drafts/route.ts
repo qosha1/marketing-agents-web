@@ -57,6 +57,12 @@
  * omits `_triggered_by` when it is empty so absence reads as "not known" rather
  * than as a person with a blank name.
  *
+ * WHERE THE DRAFTS LAND (bd startsim-0r7ru). The tenant gates records by scope
+ * and refuses a pathless row of a scoped type, so the writer is told the
+ * TOPIC's `scope_path` — read off the record this route already fetches to gate
+ * the press, never taken from the request body and never defaulted. See the
+ * comment at the relay for why each of those three is load-bearing.
+ *
  * ONE WRITER PER TOPIC AT A TIME (bd startsim-8hgmq.8). The gate above cannot
  * refuse a second press inside the writer's ~100s latency, because the drafts it
  * counts do not exist yet. `lib/generate-claim.ts` holds the in-flight claim —
@@ -75,6 +81,7 @@
 import { NextResponse } from 'next/server';
 
 import { claimGenerateRun, releaseGenerateClaim } from '@/lib/generate-claim';
+import { recordScopePath, SCOPE_PATH_ATTR } from '@/lib/scope';
 import { tenantFetch } from '@/lib/tenant-fetch';
 import { resolveTopicGate } from '@/lib/topic-gate';
 
@@ -139,9 +146,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Missing topic_ref.' }, { status: 400 });
   }
 
-  let gate;
+  let resolved;
   try {
-    gate = await resolveTopicGate(
+    resolved = await resolveTopicGate(
       <T,>(path: string) => tenantFetch<T>(path, auth, { method: 'GET' }),
       topicRef,
     );
@@ -154,6 +161,7 @@ export async function POST(request: Request) {
     });
     return NextResponse.json({ error: 'Could not verify the topic.' }, { status: 502 });
   }
+  const { gate, topic } = resolved;
 
   if (!gate.allowed) {
     // The reason travels with the refusal: the drawer already renders one, and a
@@ -179,17 +187,36 @@ export async function POST(request: Request) {
 
   const triggeredBy = await resolveCaller(auth);
 
+  // WHICH SCOPE THE DRAFTS BELONG IN, from the topic this route already read
+  // (bd startsim-0r7ru). The tenant refuses a pathless row of a scoped type, so
+  // a writer that is told nothing writes drafts nobody can save.
+  //
+  // THE TENANT'S ANSWER, NOT THE CALLER'S, for the same reason the gate above is
+  // re-checked here: `story` is a body an authenticated tab composed, and a tab
+  // that could name the scope could write into a scope its reader does not hold.
+  // So a caller-supplied path is dropped — under either spelling, since the
+  // client camelCases blobs — and replaced by the one the topic carries.
+  //
+  // OMITTED, NEVER DEFAULTED, when the topic has none: n8n's writer falls back
+  // on absence, and an app that sent a guess would be deciding the scope for
+  // everybody from a place no reviewer can see.
+  const relayed: Record<string, unknown> = { ...story };
+  delete relayed[SCOPE_PATH_ATTR];
+  delete relayed.scopePath;
+  const scopePath = recordScopePath(topic.data);
+
   try {
     const res = await fetch(webhookUrl, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        ...story,
+        ...relayed,
         // Explicit, though the webhook defaults to it: the caller that knows it
         // is a button press should say so, and a default is a place a future
         // caller can be silently wrong about.
         trigger: 'generate_button',
         ...(triggeredBy ? { triggered_by: triggeredBy } : {}),
+        ...(scopePath ? { [SCOPE_PATH_ATTR]: scopePath } : {}),
       }),
     });
     if (!res.ok) {
