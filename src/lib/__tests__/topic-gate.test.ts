@@ -174,13 +174,13 @@ const topicWire = (status: string) => ({
 describe('resolveTopicGate', () => {
   it('refuses an unapproved topic and allows an approved one with no drafts', async () => {
     const no = reader({ topic: topicWire('suggested') });
-    expect(await resolveTopicGate(no.read, '55')).toMatchObject({
+    expect((await resolveTopicGate(no.read, '55')).gate).toMatchObject({
       allowed: false,
       reason: 'not_approved',
     });
 
     const yes = reader({ topic: topicWire('ready') });
-    expect(await resolveTopicGate(yes.read, '55')).toEqual({ allowed: true });
+    expect((await resolveTopicGate(yes.read, '55')).gate).toEqual({ allowed: true });
   });
 
   // This assertion has now been written three ways, and the history is the
@@ -216,7 +216,7 @@ describe('resolveTopicGate', () => {
         { id: 3, data: { topic_ref: '55' } },
       ],
     });
-    const gate = await resolveTopicGate(r.read, '55');
+    const { gate } = await resolveTopicGate(r.read, '55');
     const listings = r.paths.filter((p) => p.startsWith('entities?'));
     expect(listings.some((p) => p.includes('attr.'))).toBe(false);
     // …and it still refuses, which is the whole reason the fallback exists.
@@ -245,7 +245,7 @@ describe('resolveTopicGate', () => {
         { id: 3, data: { topic_ref: '55' } },
       ],
     });
-    expect(await resolveTopicGate(r.read, '55')).toMatchObject({
+    expect((await resolveTopicGate(r.read, '55')).gate).toMatchObject({
       allowed: false,
       reason: 'drafts_exist',
     });
@@ -265,7 +265,7 @@ describe('resolveTopicGate', () => {
       },
       'ignored',
     );
-    expect(await resolveTopicGate(r.read, '55')).toEqual({ allowed: true });
+    expect((await resolveTopicGate(r.read, '55')).gate).toEqual({ allowed: true });
   });
 
   it('refuses when this topic’s drafts are among the returned rows', async () => {
@@ -276,7 +276,7 @@ describe('resolveTopicGate', () => {
         { id: 2, data: { topic_ref: '55' } },
       ],
     });
-    expect(await resolveTopicGate(r.read, '55')).toMatchObject({
+    expect((await resolveTopicGate(r.read, '55')).gate).toMatchObject({
       allowed: false,
       reason: 'drafts_exist',
     });
@@ -286,10 +286,28 @@ describe('resolveTopicGate', () => {
     // resolveReviewConfig(null) derives approve: null. A coerced comparison
     // would read that as approved and hand back the ungated relay.
     const r = reader({ topic: topicWire('ready'), types: [{ id: 9, key: 'other', label: 'Other' }] });
-    expect(await resolveTopicGate(r.read, '55')).toMatchObject({
+    expect((await resolveTopicGate(r.read, '55')).gate).toMatchObject({
       allowed: false,
       reason: 'not_approved',
     });
+  });
+
+  it('hands back the topic it read, so the caller needs no second fetch', async () => {
+    // bd startsim-0r7ru. The route has a second question about the same topic —
+    // which SCOPE the drafts it is about to commission belong in — and this read
+    // is the one that can answer it. Returning the record rather than a derived
+    // path keeps the scope rule out of the gate; what is asserted here is only
+    // that the row survives the trip, normalized, with its blob intact.
+    const r = reader({ topic: { ...topicWire('ready'), data: { status: 'ready', scope_path: '/ogmc' } } });
+
+    const { topic } = await resolveTopicGate(r.read, '55');
+
+    expect(String(topic.id)).toBe('55');
+    expect(topic.entityType).toBe('topic');
+    expect(topic.data).toMatchObject({ scope_path: '/ogmc' });
+    // ONE read of the record, not two: the caller is explicitly told not to add
+    // a fetch of its own, so this has to be the read that serves both questions.
+    expect(r.paths.filter((p) => p === 'entities/55')).toHaveLength(1);
   });
 });
 
@@ -371,7 +389,7 @@ describe('the two halves of the drafts gate read to the same depth', () => {
     // draft type does not declare `topic_ref` — with this topic's only draft on
     // the last one. The drawer, reading to 50 pages, has always seen it.
     const r = pagingReader({ pages: 6, matchOnPage: 6 });
-    expect(await resolveTopicGate(r.read, '55')).toMatchObject({
+    expect((await resolveTopicGate(r.read, '55')).gate).toMatchObject({
       allowed: false,
       reason: 'drafts_exist',
     });

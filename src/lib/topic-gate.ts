@@ -165,6 +165,21 @@ async function readPages(
 }
 
 /**
+ * The gate, AND the topic it was resolved from (bd startsim-0r7ru).
+ *
+ * The record is returned rather than dropped because the caller has a second
+ * question about the same topic — which SCOPE a draft written for it belongs in
+ * — and the read that answers it has already happened here. Returning the
+ * record instead of a derived path keeps this module about the gate: it does
+ * not define the scope rule, it just stops throwing away the row that carries
+ * one.
+ */
+export interface TopicGateResolution {
+  gate: GenerateDraftsGate;
+  topic: EntityRecord;
+}
+
+/**
  * Resolve the gate for one topic id, reading the tenant for each input.
  *
  * THROWS when the tenant cannot be read. That is the point: the caller turns a
@@ -175,7 +190,7 @@ async function readPages(
 export async function resolveTopicGate(
   read: TenantReader,
   topicRef: string,
-): Promise<GenerateDraftsGate> {
+): Promise<TopicGateResolution> {
   const topic = entityFromWire(await read(`entities/${encodeURIComponent(topicRef)}`));
 
   // The topic's OWN type, not a hardcoded 'topic': the review map has to come
@@ -232,5 +247,5 @@ export async function resolveTopicGate(
     );
   }
 
-  return canGenerateDrafts(topic, review, draftCount);
+  return { gate: canGenerateDrafts(topic, review, draftCount), topic };
 }

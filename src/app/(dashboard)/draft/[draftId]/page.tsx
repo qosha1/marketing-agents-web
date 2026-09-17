@@ -136,6 +136,7 @@ import {
 } from '@/lib/foundry-api';
 import { entityKey, saveEntity } from '@/lib/entity-cache';
 import { compileFeedback, readNotes, readReview, revisedFrom, revisionChain } from '@/lib/review';
+import { buildRevisionPayload } from '@/lib/revision-request';
 import { unifiedBlogDiff } from '@/lib/blog-diff';
 import {
   coverageSummary,
@@ -984,16 +985,22 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
       const res = await fetch('/actions/request-revision', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          topic_ref: draftStr(draft.data, 'topic_ref'),
-          content_type: contentType,
-          market: topicMarket,
-          feedback,
-          blog,
-          linkedin,
-          sources,
-          parent_draft_id: String(draft.id),
-        }),
+        // The payload is the contract with a workflow that lives outside this
+        // repo, so it is built (and asserted) in lib/revision-request.ts — which
+        // is also where the draft's own SCOPE joins it (bd startsim-0r7ru): a
+        // revision inherits the scope of the draft it revises, or the tenant
+        // refuses it and nobody finds out.
+        body: JSON.stringify(
+          buildRevisionPayload({
+            draft,
+            contentType,
+            market: topicMarket,
+            feedback,
+            blog,
+            linkedin,
+            sources,
+          }),
+        ),
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
