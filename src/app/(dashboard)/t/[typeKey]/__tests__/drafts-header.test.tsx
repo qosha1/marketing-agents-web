@@ -47,6 +47,12 @@ vi.mock('@startsimpli/ui', async () => {
       }),
     Button: ({ children, onClick }: { children?: ReactNode; onClick?: () => void }) =>
       React.createElement('button', { onClick }, children),
+    // Scope absence (bd startsim-44bar) is inert in these fixtures — no probe
+    // reports a gate — but the page imports it, so the mock has to carry it.
+    ABSENCE_DASH: '\u2014',
+    scopeAbsence: () => null,
+    ScopeAbsence: () => null,
+    ScopeNotice: () => null,
     BaseDialog: () => null,
   };
 });
@@ -136,6 +142,9 @@ vi.mock('@/lib/foundry-api', () => ({
     typeKey === 'topic' ? APPROVED_TOPICS : NARROWED_DRAFTS,
   ),
   orgMembers: vi.fn(async () => MEMBERS),
+  // No scope axis on this fixture's tenant: `null` is what every tenant that
+  // gates nothing reports, and it must leave this header exactly as it was.
+  fetchScopeAccess: vi.fn(async () => ({ access: null, readableCount: 156 })),
   collectionClient: { listTypes: vi.fn(), listAllEntities: vi.fn(), updateEntity: vi.fn() },
 }));
 

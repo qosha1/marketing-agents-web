@@ -15,16 +15,26 @@
  * write used to RENAME the declared attribute. `updateEntity`/`createEntity` now
  * repair that on the way out; nothing else in the app has to think about it.
  */
+import { readScopeAccess, type ScopeAccess } from '@startsimpli/ui';
 import type { CollectionClient } from '@startsimpli/ui/collection';
 
 import { api } from './api';
 
 // DRF PageNumberPagination envelope (matches UnifiedTable's page-number model).
+//
+// The tenant ADDS keys to this envelope rather than changing it (tenant-starter
+// `apps/api/pagination.py`), so anything here beyond the DRF four is present
+// only when the backend had something to say about the request. `scopeAccess`
+// is the one this app reads: when the org gates a type by `scope` and the
+// caller is not exempt, it names the gated types and the scopes the caller
+// holds — which is the difference between "there is nothing here" and "you were
+// granted nothing", two answers that are otherwise the same `count: 0`.
 export interface Paginated<T> {
   count: number;
   next: string | null;
   previous: string | null;
   results: T[];
+  scopeAccess?: ScopeAccess;
 }
 
 export type DataType =
@@ -222,6 +232,41 @@ export function listEntities(type: string, page = 1, filters?: EntityFilters) {
 export async function countEntities(type: string, filters?: EntityFilters): Promise<number> {
   const res = await listEntities(type, 1, { ...filters, page_size: '1' });
   return res.count ?? 0;
+}
+
+export interface ScopeProbe {
+  /** The `scope_access` report, or `null` on a tenant that gates nothing. */
+  access: ScopeAccess | null;
+  /**
+   * How many records of `type` this caller may read AT ALL, before any filter
+   * this page applies. `0` alongside a report is the blackout shape.
+   */
+  readableCount: number;
+}
+
+/**
+ * WHY A LIST OF `type` MIGHT BE EMPTY FOR THIS CALLER (bd startsim-44bar).
+ *
+ * Its own unfiltered request, for two reasons that both matter.
+ *
+ * THE REPORT RIDES ON THE ENVELOPE, and the paths that matter here have no
+ * envelope left to read: every view on /t/draft and /t/topic is `needAll`, and
+ * `listAllEntities` walks the pages and returns a bare array. Reading the
+ * report off the list the page already has would fix the types nobody reported
+ * this on and leave the two that were reported exactly as they are.
+ *
+ * AND THE COUNT HAS TO BE UNFILTERED. The question the reader needs answered is
+ * "can I reach any of these at all", not "did this view match" — the second is
+ * a filter's doing and hanging a permissions notice on it is a nag.
+ *
+ * NOT `/api/v1/whoami/`, which also carries the report in tenant-starter's
+ * current source: VERIFIED against the live marketing-agents tenant 2026-09-17,
+ * the DEPLOYED image answers whoami WITHOUT it while its list envelopes carry
+ * it. The envelope is the half that is actually on the fleet.
+ */
+export async function fetchScopeAccess(type: string): Promise<ScopeProbe> {
+  const res = await listEntities(type, 1, { page_size: '1' });
+  return { access: readScopeAccess(res), readableCount: res.count ?? 0 };
 }
 
 /** Fetch a single entity record by id. Path carries no trailing slash (the Next
@@ -520,6 +565,13 @@ export function deleteTag(id: SchemaId) {
 // ---- identity + org directory (proxied from central by the backend, R9) ----
 
 export interface WhoAmI {
+  /**
+   * The same `scope_access` report the list envelope carries, when the backend
+   * is new enough to send it here. Optional in both senses: absent on a tenant
+   * that gates nothing, and absent on a deployed image that predates it — which
+   * is why `fetchScopeAccess` reads the envelope instead of this.
+   */
+  scopeAccess?: ScopeAccess;
   sub: string;
   email: string;
   companyId: string;
