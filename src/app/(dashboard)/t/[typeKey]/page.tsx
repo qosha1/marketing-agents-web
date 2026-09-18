@@ -15,12 +15,22 @@ import Link from 'next/link';
 import { useParams, useSearchParams, useRouter, usePathname } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus, ChevronDown, X } from 'lucide-react';
-import { UnifiedTable, Button, BaseDialog, type FiltersConfig } from '@startsimpli/ui';
+import {
+  UnifiedTable,
+  Button,
+  BaseDialog,
+  ScopeAbsence,
+  ScopeNotice,
+  scopeAbsence,
+  ABSENCE_DASH,
+  type FiltersConfig,
+} from '@startsimpli/ui';
 import { ReviewDrawer, InlineReviewActions } from '@startsimpli/ui/collection';
 import {
   listTypes,
   listEntities,
   listAllEntities,
+  fetchScopeAccess,
   orgMembers,
   collectionClient,
   type EntityFilters,
@@ -342,6 +352,18 @@ export default function TypeRecordsPage() {
     enabled: !!type && isDraft,
   });
 
+  // WHY THIS TABLE MIGHT BE EMPTY, when the org gates the type by scope (bd
+  // startsim-44bar). Its own unfiltered probe rather than a read off the lists
+  // above, because EVERY view here is `needAll` — `listAllEntities` walks the
+  // pages and hands back a bare array, so the envelope carrying the report is
+  // already gone by the time this page sees rows. See `fetchScopeAccess`.
+  const scopeQuery = useQuery({
+    queryKey: ['scope-access', typeKey],
+    queryFn: () => fetchScopeAccess(typeKey),
+    enabled: !!type,
+    staleTime: 5 * 60_000,
+  });
+
   const filteredRecords = useMemo(() => {
     let rows = allQuery.data ?? [];
     if (isDraft) {
@@ -590,6 +612,26 @@ export default function TypeRecordsPage() {
   // branches never overlap.
   const displayCount = needAll ? visibleRecords.length : (pagedQuery.data?.count ?? 0);
 
+  // AN EMPTY TABLE A MISSING SCOPE GRANT EXPLAINS IS AN ABSENCE, not a result
+  // set — bd startsim-4ipm's rule applied to the read gate. Until this bead a
+  // member holding no grant on /ogmc read "0 total", "No results found.", "No
+  // items" and had nothing on screen to point at: the same plausible empty
+  // answer as the 2026-08-20 blackout, and the same wrong conclusion ("the app
+  // lost our content") waiting at the end of it.
+  //
+  // It asks `readableCount` — the UNFILTERED server count — and not
+  // `visibleRecords.length`, because this page's default view narrows hard
+  // (three halves on Drafts) and a permissions banner over a filter's empty
+  // result is a nag. A nag is how a reader learns to ignore the one screen that
+  // means something.
+  const scopeBlocked = scopeAbsence({
+    access: scopeQuery.data?.access,
+    typeKey,
+    typeLabel: type?.label,
+    readableCount: scopeQuery.data?.readableCount ?? 0,
+    loading: scopeQuery.isLoading,
+  });
+
   // WHAT THE VIEW WITHHELD, said in the same breath as what it shows
   // (bd startsim-onrb7, bd startsim-sr38f). The Drafts queue narrows hard — three
   // default halves — and until this bead the header said "36 total" standing over
@@ -647,7 +689,12 @@ export default function TypeRecordsPage() {
         </h1>
         <div className="flex items-center gap-3">
           <span data-testid="record-count" className="text-sm text-gray-500">
-            {rejectedRecords.length > 0 ? (
+            {scopeBlocked ? (
+              // Not "0 total". A zero standing beside the explanation of why it
+              // is a zero is the same unexplained number the explanation is
+              // there to retire.
+              `${ABSENCE_DASH} total`
+            ) : rejectedRecords.length > 0 ? (
               <>
                 {displayCount} shown{' · '}
                 <button
@@ -696,120 +743,146 @@ export default function TypeRecordsPage() {
         </div>
       </div>
 
-      {viewChips.length > 0 || isDraft ? (
-        <div className="flex flex-wrap items-center gap-2 text-sm">
-          <span className="text-gray-500">Showing:</span>
-          {viewChips.length === 0 ? (
-            <span className="text-gray-500">everything in the pipeline</span>
-          ) : (
-            viewChips.map((c) => (
-              <button
-                key={c.param}
-                type="button"
-                onClick={() => applyViewParams({ [c.param]: c.value })}
-                className="inline-flex items-center gap-1 rounded-full border border-primary-200 bg-primary-50 px-2.5 py-1 text-xs font-medium text-primary-700 hover:bg-primary-100"
-                title={`Remove the "${c.label}" filter`}
-              >
-                {c.label}
-                <X className="h-3 w-3" />
-              </button>
-            ))
-          )}
-          {gateBroken ? (
-            <span className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800">
-              Could not check which topics are approved — showing drafts unfiltered
-            </span>
-          ) : null}
-          {viewChips.length > 0 ? (
-            <button
-              type="button"
-              onClick={showEverything}
-              className="text-xs font-medium text-primary-700 underline underline-offset-2 hover:text-primary-800"
-            >
-              Show everything
-            </button>
-          ) : null}
-        </div>
-      ) : null}
+      {scopeBlocked ? (
+        /* The view chips go with it. "Topic approved · Last 7 days" standing
+           over an empty table says a FILTER is the reason, and offering "Show
+           everything" to a reader who may read nothing hands them a control
+           that changes nothing. */
+        <ScopeAbsence
+          access={scopeQuery.data?.access}
+          typeKey={typeKey}
+          typeLabel={type?.label}
+          readableCount={scopeQuery.data?.readableCount ?? 0}
+          loading={scopeQuery.isLoading}
+        />
+      ) : (
+        <>
+          {/* The standing disclosure, for the far commoner scoped reading: a
+              member holding one scope of several sees a true count of a
+              narrowed corpus and has no way to tell it from a small workspace.
+              Renders nothing for an exempt or ungated reader. */}
+          <ScopeNotice
+            access={scopeQuery.data?.access}
+            typeKey={typeKey}
+            typeLabel={type?.label}
+          />
 
-      <UnifiedTable<EntityRecord>
-        key={`records-${typeKey}-${JSON.stringify(filterState)}`}
-        tableId={`records-${typeKey}`}
-        data={visibleRecords}
-        columns={columns}
-        getRowId={(row) => String(row.id)}
-        loading={recordsLoading}
-        onRowClick={handleRowClick}
-        // The shared debounced search box (@startsimpli/ui UnifiedTable toolbar).
-        // It is a CONTROLLED input and filters nothing itself, so the narrowing
-        // is ours to do — and it is done server-side, in `serverFilters`.
-        search={{
-          // Offered for EVERY type: a type with a declared title attribute is
-          // searched on that attribute, and one without (like `draft`) falls back
-          // to the backend's full-text `?search=` over the entity name. Gating the
-          // box on a declared attribute left /t/draft — the surface startsim-f4lac
-          // names — with no search at all.
-          enabled: true,
-          placeholder: `Search ${type.label.toLowerCase()} titles…`,
-          value: search,
-          onChange: (v) => {
-            setSearch(v);
-            setPage(1);
-          },
-          debounceMs: 300,
-          preserveFocus: true,
-        }}
-        filters={filtersConfig}
-        columnVisibility={columnVisibility}
-        sorting={{
-          // Client-side sort over whatever set is loaded; picking a sort flips
-          // `needAll` on (above), so it always sorts the FULL bounded set, not
-          // just the current server page.
-          enabled: true,
-          serverSide: false,
-          value: { sortBy: sort.sortBy ?? '', sortDirection: sort.sortDirection ?? 'asc' },
-          onChange: (s) => {
-            setSort(s);
-            setPage(1);
-          },
-        }}
-        pagination={{
-          // A sorted/filtered view holds the whole (bounded) set, so it paginates
-          // client-side; the default view stays server-paginated.
-          enabled: true,
-          serverSide: !needAll,
-          pageSize: PAGE_SIZE,
-          totalCount: displayCount,
-          currentPage: page,
-          onPageChange: setPage,
-        }}
-      />
-
-      {collapseRejected && rejectedRecords.length > 0 ? (
-        <div ref={rejectedRef} className="rounded-lg border border-border">
-          <button
-            type="button"
-            onClick={() => setShowRejected((v) => !v)}
-            className="flex w-full items-center justify-between rounded-lg px-4 py-2.5 text-sm font-medium text-muted-foreground hover:bg-muted/50"
-            aria-expanded={showRejected}
-          >
-            <span>Rejected ({rejectedRecords.length})</span>
-            <ChevronDown className={`h-4 w-4 transition-transform ${showRejected ? 'rotate-180' : ''}`} />
-          </button>
-          {showRejected ? (
-            <div className="border-t border-border">
-              <UnifiedTable<EntityRecord>
-                tableId={`records-${typeKey}-rejected`}
-                data={rejectedRecords}
-                columns={columns}
-                getRowId={(row) => String(row.id)}
-                onRowClick={handleRowClick}
-                columnVisibility={columnVisibility}
-              />
+          {viewChips.length > 0 || isDraft ? (
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <span className="text-gray-500">Showing:</span>
+              {viewChips.length === 0 ? (
+                <span className="text-gray-500">everything in the pipeline</span>
+              ) : (
+                viewChips.map((c) => (
+                  <button
+                    key={c.param}
+                    type="button"
+                    onClick={() => applyViewParams({ [c.param]: c.value })}
+                    className="inline-flex items-center gap-1 rounded-full border border-primary-200 bg-primary-50 px-2.5 py-1 text-xs font-medium text-primary-700 hover:bg-primary-100"
+                    title={`Remove the "${c.label}" filter`}
+                  >
+                    {c.label}
+                    <X className="h-3 w-3" />
+                  </button>
+                ))
+              )}
+              {gateBroken ? (
+                <span className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800">
+                  Could not check which topics are approved — showing drafts unfiltered
+                </span>
+              ) : null}
+              {viewChips.length > 0 ? (
+                <button
+                  type="button"
+                  onClick={showEverything}
+                  className="text-xs font-medium text-primary-700 underline underline-offset-2 hover:text-primary-800"
+                >
+                  Show everything
+                </button>
+              ) : null}
             </div>
           ) : null}
-        </div>
-      ) : null}
+
+          <UnifiedTable<EntityRecord>
+            key={`records-${typeKey}-${JSON.stringify(filterState)}`}
+            tableId={`records-${typeKey}`}
+            data={visibleRecords}
+            columns={columns}
+            getRowId={(row) => String(row.id)}
+            loading={recordsLoading}
+            onRowClick={handleRowClick}
+            // The shared debounced search box (@startsimpli/ui UnifiedTable toolbar).
+            // It is a CONTROLLED input and filters nothing itself, so the narrowing
+            // is ours to do — and it is done server-side, in `serverFilters`.
+            search={{
+              // Offered for EVERY type: a type with a declared title attribute is
+              // searched on that attribute, and one without (like `draft`) falls back
+              // to the backend's full-text `?search=` over the entity name. Gating the
+              // box on a declared attribute left /t/draft — the surface startsim-f4lac
+              // names — with no search at all.
+              enabled: true,
+              placeholder: `Search ${type.label.toLowerCase()} titles…`,
+              value: search,
+              onChange: (v) => {
+                setSearch(v);
+                setPage(1);
+              },
+              debounceMs: 300,
+              preserveFocus: true,
+            }}
+            filters={filtersConfig}
+            columnVisibility={columnVisibility}
+            sorting={{
+              // Client-side sort over whatever set is loaded; picking a sort flips
+              // `needAll` on (above), so it always sorts the FULL bounded set, not
+              // just the current server page.
+              enabled: true,
+              serverSide: false,
+              value: { sortBy: sort.sortBy ?? '', sortDirection: sort.sortDirection ?? 'asc' },
+              onChange: (s) => {
+                setSort(s);
+                setPage(1);
+              },
+            }}
+            pagination={{
+              // A sorted/filtered view holds the whole (bounded) set, so it paginates
+              // client-side; the default view stays server-paginated.
+              enabled: true,
+              serverSide: !needAll,
+              pageSize: PAGE_SIZE,
+              totalCount: displayCount,
+              currentPage: page,
+              onPageChange: setPage,
+            }}
+          />
+
+          {collapseRejected && rejectedRecords.length > 0 ? (
+            <div ref={rejectedRef} className="rounded-lg border border-border">
+              <button
+                type="button"
+                onClick={() => setShowRejected((v) => !v)}
+                className="flex w-full items-center justify-between rounded-lg px-4 py-2.5 text-sm font-medium text-muted-foreground hover:bg-muted/50"
+                aria-expanded={showRejected}
+              >
+                <span>Rejected ({rejectedRecords.length})</span>
+                <ChevronDown className={`h-4 w-4 transition-transform ${showRejected ? 'rotate-180' : ''}`} />
+              </button>
+              {showRejected ? (
+                <div className="border-t border-border">
+                  <UnifiedTable<EntityRecord>
+                    tableId={`records-${typeKey}-rejected`}
+                    data={rejectedRecords}
+                    columns={columns}
+                    getRowId={(row) => String(row.id)}
+                    onRowClick={handleRowClick}
+                    columnVisibility={columnVisibility}
+                  />
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </>
+      )}
 
       {typeKey === CONTENT_TYPE_KEY ? (
         // Topic = the editorial spine → the fast review-first drawer (verdict /
