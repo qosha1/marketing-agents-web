@@ -205,6 +205,46 @@ export function topicEditChanges(
 }
 
 /**
+ * The record's `name` when a title edit should carry it along, else undefined.
+ *
+ * FOUND IN THE BROWSER, on the deployed build of the first half of this bead
+ * (PR #79): the edit saved, the panel showed it, and the TOPICS TABLE still read
+ * the old words. `titleSubtitleCell` (components/record-columns.ts) renders
+ * `row.name` as the leading column and FOLDS `title`/`subtitle`/`angle` into it,
+ * so `data.title` has no column of its own on the content spine. Editing only
+ * the attribute therefore changed a heading the reviewer was looking at and left
+ * the list she was about to go back to — which is a successful-looking save that
+ * does not show up where she looks next.
+ *
+ * THE RULE IS CONDITIONAL, and measured rather than assumed. Of 100 live topics
+ * read 2026-09-23, 98 have `record.name` byte-identical to `data.title` and one
+ * more has no title at all — so for practically every row the two ARE one thing
+ * and a reviewer editing "Title" means both. The remaining rows have a name that
+ * genuinely says something else, and lib/board-card.ts already takes the
+ * position that "a `title` that has genuinely DRIFTED from the name survives,
+ * which is exactly when it is worth reading". So:
+ *
+ *   rename when the stored title EQUALS the name (they were one thing), or when
+ *   there is no stored title (the name WAS the title);
+ *   otherwise leave the name alone.
+ *
+ * A blank new title never renames — {@link topicEditError} refuses it first, and
+ * a record with no name at all is worse than a stale one.
+ */
+export function topicEditName(
+  currentName: string | undefined,
+  storedTitle: string,
+  nextTitle: string,
+): string | undefined {
+  const name = (currentName ?? '').trim();
+  const stored = storedTitle.trim();
+  const next = nextTitle.trim();
+  if (next === '' || next === name) return undefined;
+  if (stored !== '' && stored !== name) return undefined; // deliberately different — leave it
+  return next;
+}
+
+/**
  * What is wrong with the form, in words, or null.
  *
  * ONE RULE, AND IT IS THIS FORM'S OPINION RATHER THAN THE SCHEMA'S: a blank
