@@ -34,6 +34,7 @@ import { formatBearer } from '@/lib/bearer';
 import { readData, toCamelKey } from '@/lib/board';
 import { CONTENT_TYPE_KEY } from '@/lib/content';
 import { readEditHistory, withEditStamp } from '@/lib/edit-history';
+import { draftHref } from '@/lib/story-nav';
 import { memberDisplayName, memberSub, normalizeMembers } from '@/lib/roster';
 import { findTag, GOOD_EXAMPLE_LABEL } from '@/lib/tags';
 import {
@@ -440,7 +441,30 @@ function DrawerInner({
  * rendered for the content-spine (topic) type; every other type's drawer is
  * untouched.
  */
-export function TopicDrafts({ topic, type }: { topic: EntityRecord; type: EntityTypeDef }) {
+export function TopicDrafts({
+  topic,
+  type,
+  from,
+  onDrafts,
+}: {
+  topic: EntityRecord;
+  type: EntityTypeDef;
+  /**
+   * Where a reader of one of these drafts should be sent BACK to, threaded into
+   * every link (bd startsim-z384k). Absent in the drawer, which never left the
+   * table in the first place.
+   */
+  from?: string | null;
+  /**
+   * Reported on every settled fetch, so a host can act on the RESULT rather than
+   * re-running `fetchTopicDrafts` itself. The story page uses it to step into
+   * the single draft; the drawer does not pass it and nothing changes there.
+   * `loading` is false only once the count is actually known — an errored query
+   * never learns it, and an absence that was never measured must not be read as
+   * "no drafts" (the same rule `draftCountKnown` enforces for the gate below).
+   */
+  onDrafts?: (drafts: EntityRecord[], loading: boolean) => void;
+}) {
   const qc = useQueryClient();
   const topicId = topic.id;
   // SEEDED FROM THE RUN STORE, not from `false` (bd startsim-ozpjw.9). This
@@ -503,6 +527,14 @@ export function TopicDrafts({ topic, type }: { topic: EntityRecord; type: Entity
   const gate = canGenerateDrafts(topic, review, drafts.length);
 
   const { dataUpdatedAt } = draftsQuery;
+
+  // Hand the settled list to a host that wants to act on it (the story page
+  // steps into a lone draft). Keyed on `dataUpdatedAt` rather than on the array
+  // identity so it fires once per fetch, not once per render.
+  useEffect(() => {
+    onDrafts?.(drafts, !draftCountKnown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dataUpdatedAt, draftCountKnown, drafts.length]);
 
   // (0) Join this topic's run, and let go of it without ending it. The clock
   // used to be a `useRef` here, which is exactly why the run died on every
@@ -658,7 +690,7 @@ export function TopicDrafts({ topic, type }: { topic: EntityRecord; type: Entity
             return (
               <li key={d.id}>
                 <Link
-                  href={`/draft/${d.id}`}
+                  href={draftHref(d.id, from)}
                   className="flex w-full items-center justify-between gap-3 rounded border px-3 py-2 text-left text-sm hover:bg-neutral-50"
                 >
                   <span className="flex min-w-0 items-center gap-2">

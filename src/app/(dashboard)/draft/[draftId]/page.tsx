@@ -91,7 +91,7 @@ import { declaredLangChoices, pendingTranslation, translatableTargets } from '@/
 import { getRegisteredToken } from '@/infrastructure/auth';
 import { wordCount } from '@startsimpli/ui';
 import { formatBearer } from '@/lib/bearer';
-import { CONTENT_TYPE_KEY, contentBoardHref, contentCategoryLabel } from '@/lib/content';
+import { CONTENT_TYPE_KEY } from '@/lib/content';
 import { draftStatusLabel } from '@/lib/draft-status';
 import {
   draftCandidateIndex,
@@ -103,6 +103,11 @@ import {
   DRAFT_TYPE,
 } from '@/lib/topic-drafts';
 import { DraftReviewLayout, type Pane } from '@/components/draft-review/DraftReviewLayout';
+import {
+  TopicBackLink,
+  TopicContextHeader,
+} from '@/components/draft-review/TopicContextHeader';
+import { draftHref, FROM_PARAM, returnTarget, safeReturnPath } from '@/lib/story-nav';
 import { QualityRail } from '@/components/draft-review/QualityRail';
 import { BlogSection } from '@/components/draft-review/BlogSection';
 import { ContentChannels } from '@/components/draft-review/ContentChannels';
@@ -397,9 +402,6 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
   const qc = useQueryClient();
 
   const contentType = draftStr(draft.data, 'content_type');
-  // startsim-uhmk: was contentTabHref (the TABLE) while the label read "…
-  // board" — pointed at the wrong view. Now goes where it says it goes.
-  const backHref = contentBoardHref(contentType);
   const topicRef = draftStr(draft.data, 'topic_ref');
 
   const topicQuery = useQuery({
@@ -420,6 +422,25 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
     return isChannelId(q) ? q : 'brief';
   });
   const [pane, setPane] = useState<Pane>('content');
+
+  // WHERE "BACK" GOES (bd startsim-z384k). The 2026-09-08 meeting asked for back
+  // navigation to return to the TOPIC TABLE with its scope intact, so the
+  // reviewer's own location rides along in `?from=` and is used verbatim when it
+  // validates. Falling back to the content-kind table rather than to the board
+  // is the meeting's answer; before this the link went to the BOARD.
+  //
+  // The label travels WITH the href, from one function, because startsim-uhmk
+  // was exactly this link saying "... board" while pointing somewhere else.
+  const back = useMemo(
+    () => returnTarget(safeReturnPath(searchParams.get(FROM_PARAM)), contentType),
+    [searchParams, contentType],
+  );
+  const backHref = back.href;
+
+  // The topic's own schema, for the context header's field map. Same ['types']
+  // key as the translation query below, so it is one request either way.
+  const schemaQuery = useQuery({ queryKey: ['types'], queryFn: () => listTypes() });
+  const topicType = (schemaQuery.data?.results ?? []).find((t) => t.key === CONTENT_TYPE_KEY);
 
   const [sections, setSections] = useState<DocSection[]>(() => draftSections(draft));
   const [review, setReview] = useState<ReviewScore>(() => readReview(draft.data));
@@ -524,7 +545,10 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
   const nextDraft =
     queueIndex >= 0 && queueIndex + 1 < allDrafts.length ? allDrafts[queueIndex + 1] : null;
   function goToDraft(d: EntityRecord | null) {
-    if (d) router.push(`/draft/${d.id}`);
+    // Carry the return path along the queue (bd startsim-z384k) — stepping to
+    // the next draft must not quietly lose the table scope the reviewer came
+    // from, or "back" lands somewhere they never were.
+    if (d) router.push(draftHref(d.id, safeReturnPath(searchParams.get(FROM_PARAM))));
   }
 
   const chain = useMemo(() => revisionChain(draft, allDrafts), [draft, allDrafts]);
@@ -1076,21 +1100,22 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
     [allDrafts, topicRef],
   );
 
+  // ONE PAGE, NO MODAL (bd startsim-z384k). The topic context a reviewer needs
+  // while judging the draft — what the story was meant to be, which market and
+  // kind it belongs to, and the note that asked for it — sits ABOVE the
+  // workspace instead of in a drawer the reviewer had to leave behind. The
+  // two-pane workspace below is untouched and keeps its full width, which is the
+  // whole reason design gate startsim-w4txa chose full-page over a drawer.
   const header = (
-    <div className="flex flex-wrap items-start justify-between gap-3">
+    <div className="space-y-3">
+      <TopicContextHeader
+        topic={topic}
+        type={topicType}
+        backLink={<TopicBackLink href={back.href} label={back.label} />}
+      />
+      <div className="flex flex-wrap items-start justify-between gap-3">
       <div className="min-w-0 space-y-1">
-        <Link
-          href={backHref}
-          className="inline-flex items-center gap-1 text-sm text-neutral-500 hover:text-neutral-900"
-        >
-          ← Back to {contentCategoryLabel(contentType)} board
-        </Link>
         <h1 className="text-xl font-semibold">{draft.name || draftTitle(draft)}</h1>
-        {topic ? (
-          <p className="truncate text-sm text-neutral-500">
-            Topic: {topic.name || draftTitle(topic)}
-          </p>
-        ) : null}
         <LanguageSwitcher draft={draft} />
       </div>
       <div className="flex shrink-0 flex-wrap items-center gap-2">
@@ -1145,6 +1170,7 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
             {siblingCount > 1 ? ` of ${siblingCount}` : ''}
           </span>
         ) : null}
+      </div>
       </div>
     </div>
   );

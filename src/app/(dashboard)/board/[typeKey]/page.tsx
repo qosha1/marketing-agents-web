@@ -69,10 +69,12 @@ import {
   contentBoardHref,
   contentCategoryLabel,
 } from '@/lib/content';
+import { resolveReviewConfig } from '@startsimpli/ui/collection';
 import { NEWS_REVIEW_CONFIG, TOPIC_REVIEW_CONFIG } from '@/lib/review-vocabulary';
 import { tableViewHref } from '@/lib/view-toggle';
 import { DRAFT_TYPE, listAllRelationships, topicIdForDraft } from '@/lib/topic-drafts';
 import {
+  collectionClient,
   countEntities,
   getEntity,
   listAllEntities,
@@ -81,6 +83,9 @@ import {
   whoami,
   type EntityRecord,
 } from '@/lib/foundry-api';
+import { createApproveWatch } from '@/lib/approve-watch';
+import { currentReturnPath, storyHref } from '@/lib/story-nav';
+import { primeEntity } from '@/lib/entity-cache';
 import {
   assembleLanes,
   LANE_PAGE_SIZE,
@@ -333,9 +338,37 @@ export default function BoardPage() {
    * a stale card wherever the search missed. Same reasoning as the drawer's
    * onSaved below.
    */
-  const onDecided = useCallback(() => {
-    void qc.invalidateQueries({ queryKey: ['entities', typeKey] });
-  }, [qc, typeKey]);
+  /**
+   * APPROVING A TOPIC LANDS IN THE SAME PLACE FROM EVERY SURFACE
+   * (bd startsim-z384k) — the card's cluster, the table's cluster and the review
+   * drawer all go to /story/<topicId>. The shared `InlineReviewActions` reports
+   * only "a save happened", so the watch reads WHICH decision it was off the
+   * record the server returned; see lib/approve-watch.ts.
+   *
+   * Only the content spine navigates: news curation ends at its decision.
+   */
+  const topicReview = useMemo(
+    () => resolveReviewConfig(type, isTopicBoard ? TOPIC_REVIEW_CONFIG : undefined),
+    [type, isTopicBoard],
+  );
+  const approveWatch = useMemo(
+    () =>
+      createApproveWatch(collectionClient, topicReview.statusName, (saved) =>
+        primeEntity(qc, saved.id, saved),
+      ),
+    [topicReview.statusName, qc],
+  );
+  const returnPath = currentReturnPath(pathname, searchParams.toString());
+
+  const onDecided = useCallback(
+    (record: EntityRecord) => {
+      void qc.invalidateQueries({ queryKey: ['entities', typeKey] });
+      if (!isTopicBoard) return;
+      if (!approveWatch.tookApproval(record, topicReview.transitions.approve)) return;
+      router.push(storyHref(record.id, returnPath));
+    },
+    [qc, typeKey, isTopicBoard, approveWatch, topicReview.transitions.approve, router, returnPath],
+  );
 
   return (
     <div className="space-y-4">
@@ -473,6 +506,7 @@ export default function BoardPage() {
           rollupById={rollupById}
           rollupLabel={isTopicBoard ? rollupLabel : undefined}
           review={review}
+          client={approveWatch.client}
           // The facets the board is scoped by — the SAME list the header chips
           // and the count are taken over. A card under the Evergreen tab does
           // not print "Content Type: lead_magnet" back at the reader

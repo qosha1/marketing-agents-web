@@ -60,10 +60,20 @@ vi.mock('@startsimpli/ui', async () => {
     BaseDialog: () => null,
   };
 });
-vi.mock('@startsimpli/ui/collection', () => ({
-  ReviewDrawer: () => null,
-  InlineReviewActions: () => null,
-}));
+// The two review COMPONENTS are inert here; `resolveReviewConfig` is not. The
+// page resolves the topic field map through it to learn which status counts as
+// an approval (bd startsim-z384k), and a stubbed resolver would be a second,
+// hand-written answer to the question this module exists to answer once.
+vi.mock('@startsimpli/ui/collection', async () => {
+  const actual = await vi.importActual<typeof import('@startsimpli/ui/collection')>(
+    '@startsimpli/ui/collection',
+  );
+  return {
+    ...actual,
+    ReviewDrawer: () => null,
+    InlineReviewActions: () => null,
+  };
+});
 vi.mock('@/components/entity-detail-drawer', () => ({
   EntityDetailDrawer: () => null,
   GoodExampleToggle: () => null,

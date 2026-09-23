@@ -41,7 +41,11 @@ import {
   notify,
 } from '@startsimpli/ui';
 
-import { InlineReviewActions, type ReviewConfig } from '@startsimpli/ui/collection';
+import {
+  InlineReviewActions,
+  type CollectionClient,
+  type ReviewConfig,
+} from '@startsimpli/ui/collection';
 
 import {
   boardColumns,
@@ -119,6 +123,14 @@ interface Props {
    * and only the server knows where it landed — see the board page's handler.
    */
   onDecided?: (record: EntityRecord) => void;
+  /**
+   * The tenant client the decision cluster saves through. Defaults to the app's
+   * own; a page overrides it to WRAP that client — the board page hands in an
+   * approve-watch so it can tell which decision a save was and send the reviewer
+   * to the topic's story (bd startsim-z384k). Injected rather than read here so
+   * the board keeps knowing nothing about routing.
+   */
+  client?: CollectionClient;
 }
 
 /**
@@ -176,6 +188,7 @@ export function EntityBoard({
   review,
   pinned,
   onDecided,
+  client = collectionClient,
 }: Props) {
   const qc = useQueryClient();
   const statusAttr = useMemo(() => pickStatusAttr(type), [type]);
@@ -408,7 +421,7 @@ export function EntityBoard({
                 */}
                 {review ? (
                   <InlineReviewActions
-                    client={collectionClient}
+                    client={client}
                     type={type}
                     record={record}
                     config={review}

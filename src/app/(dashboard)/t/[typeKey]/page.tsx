@@ -10,7 +10,7 @@
  * The board is still one click away via the "Board view" toggle. Reusable across
  * tenants/types — nothing here is OGMC-specific beyond the shared content taxonomy.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useSearchParams, useRouter, usePathname } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -25,7 +25,7 @@ import {
   ABSENCE_DASH,
   type FiltersConfig,
 } from '@startsimpli/ui';
-import { ReviewDrawer, InlineReviewActions } from '@startsimpli/ui/collection';
+import { ReviewDrawer, InlineReviewActions, resolveReviewConfig } from '@startsimpli/ui/collection';
 import {
   listTypes,
   listEntities,
@@ -88,6 +88,9 @@ import {
   topicQueueChips,
 } from '@/lib/health-data';
 import { boardViewHref } from '@/lib/view-toggle';
+import { createApproveWatch } from '@/lib/approve-watch';
+import { currentReturnPath, storyHref } from '@/lib/story-nav';
+import { primeEntity } from '@/lib/entity-cache';
 import {
   NEWS_ACTIONS_HEADER,
   NEWS_REVIEW_CONFIG,
@@ -175,6 +178,41 @@ export default function TypeRecordsPage() {
 
   const anyFilter = Object.keys(filterState).length > 0;
   const isContent = typeKey === CONTENT_TYPE_KEY;
+
+  // ---- approving a topic goes to its story (bd startsim-z384k) ----
+  //
+  // The three shared review surfaces (this table's inline cluster, the drawer's
+  // decision bar and its `a` shortcut, the board card's cluster) all report a
+  // save through a bare `onSaved?: () => void`, so nothing tells us WHICH
+  // decision fired. The watch wraps the collection client and reads the answer
+  // off the record the server sent back — see lib/approve-watch.ts for why it
+  // gates on the TRANSITION and not on the value (a note saved on an already
+  // approved topic must not navigate).
+  //
+  // Only the content spine navigates. News curation ends at the decision and the
+  // generic types have nowhere to go.
+  const topicReview = useMemo(
+    () => resolveReviewConfig(type, isContent ? TOPIC_REVIEW_CONFIG : undefined),
+    [type, isContent],
+  );
+  const approveWatch = useMemo(
+    () => createApproveWatch(collectionClient, topicReview.statusName, (saved) => primeEntity(qc, saved.id, saved)),
+    [topicReview.statusName, qc],
+  );
+  // Where "back" returns to — the reviewer's own location, scope and all. Read
+  // at click time rather than baked into a memo so a filter change between
+  // render and decision still comes back correctly.
+  const returnPath = currentReturnPath(pathname, searchParams.toString());
+  const approveNav = useCallback(
+    (row: EntityRecord): boolean => {
+      if (!isContent) return false;
+      if (!approveWatch.tookApproval(row, topicReview.transitions.approve)) return false;
+      router.push(storyHref(row.id, returnPath));
+      return true;
+    },
+    [isContent, approveWatch, topicReview.transitions.approve, router, returnPath],
+  );
+
   const isNews = typeKey === NEWS_TYPE_KEY;
   const isDraft = typeKey === DRAFT_TYPE_KEY;
 
@@ -433,11 +471,17 @@ export default function TypeRecordsPage() {
               <div className="flex items-center justify-end gap-2">
                 <JustActed acted={acted} id={row.id} />
                 <InlineReviewActions
-                  client={collectionClient}
+                  client={approveWatch.client}
                   type={type}
                   record={row}
                   config={TOPIC_REVIEW_CONFIG}
-                  onSaved={() => remember(row)}
+                  // Remember the row EITHER WAY. Approving navigates away, but
+                  // the reviewer comes back — and finding the row held where
+                  // they left it is the whole point of startsim-azyag.
+                  onSaved={() => {
+                    remember(row);
+                    approveNav(row);
+                  }}
                 />
               </div>
             )
@@ -474,7 +518,7 @@ export default function TypeRecordsPage() {
       return [...buildRecordColumns(attrs), originColumn()];
     }
     return buildRecordColumns(attrs);
-  }, [type, isContent, isNews, isDraft, typeKey, qc, acted]);
+  }, [type, isContent, isNews, isDraft, typeKey, qc, acted, approveWatch, approveNav]);
 
   const hasStatusBoard = !!statusAttr;
 
@@ -889,7 +933,7 @@ export default function TypeRecordsPage() {
         // approve / reject / note, ↑↓/j-k to the next, deep field-edit behind
         // "Edit fields"). Walks the currently-visible list for prev/next.
         <ReviewDrawer
-          client={collectionClient}
+          client={approveWatch.client}
           type={type}
           // Same vocabulary as the inline cluster on this table: the drawer's
           // Approve is the same decision, so it must not say a different word.
@@ -913,6 +957,14 @@ export default function TypeRecordsPage() {
               );
             }
             void qc.invalidateQueries({ queryKey: ['entities', typeKey] });
+            // Approving in the drawer lands in exactly the same place as
+            // approving from the row, and from the board (bd startsim-z384k).
+            // This supersedes what `holdAfter: ['approve']` was buying: the
+            // drawer held still so the control the approval unlocked did not
+            // appear under the NEXT topic. It now takes you TO that control, so
+            // the hold is still right and is deliberately left in place — a
+            // reject or a needs-work still keeps its triage rhythm.
+            if (row) approveNav(row);
           }}
           renderEditFields={({ record: r, type: t, back, saved }) => (
             <RecordEditFields type={t} record={r} onSaved={saved} onCancel={back} />
