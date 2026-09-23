@@ -154,7 +154,7 @@ export function TopicContextHeader({
 
   async function save() {
     if (!topic || !type) return;
-    const problem = topicEditError(fields, values);
+    const problem = topicEditError(changes, values);
     if (problem) {
       notify.error(problem);
       return;
@@ -182,11 +182,12 @@ export function TopicContextHeader({
       // the panel saying one thing and the Topics table the reviewer goes back
       // to still saying the old one. `topicEditName` carries the name along
       // when the two were one thing, and leaves a name that genuinely differs.
-      const nextName = topicEditName(
-        fresh.name,
-        str(fresh.data, cfg.titleAttr),
-        values[cfg.titleAttr] ?? '',
-      );
+      // ONLY when the title itself moved — the name follows the same diff rule
+      // as every other field, or an angle-only save would write a name derived
+      // from a title this reviewer never touched.
+      const nextName = changes.some((f) => f.attr === cfg.titleAttr)
+        ? topicEditName(fresh.name, str(fresh.data, cfg.titleAttr), values[cfg.titleAttr] ?? '')
+        : undefined;
       // `saveEntity`, not a bare `updateEntity`: it writes the server's answer
       // into ['entity', <id>], which is the key both host pages read this topic
       // from — invalidation alone leaves the pre-edit blob on screen for the

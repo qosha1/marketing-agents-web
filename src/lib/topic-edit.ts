@@ -230,6 +230,14 @@ export function topicEditChanges(
  *
  * A blank new title never renames — {@link topicEditError} refuses it first, and
  * a record with no name at all is worse than a stale one.
+ *
+ * ONLY CALL THIS WHEN THE TITLE FIELD IS ONE OF THE CHANGED ONES. Everything
+ * else here is written from the DIFF (see {@link topicEditChanges}); the name
+ * has to follow the same rule or it reintroduces the very divergence it exists
+ * to prevent. The case: Jurga opens the form, Malin renames the topic, Jurga
+ * saves an ANGLE edit — `changes` correctly leaves the title alone, so the blob
+ * keeps Malin's, and a name derived from the form's stale title would put the
+ * old words back in the table while the panel showed the new ones.
  */
 export function topicEditName(
   currentName: string | undefined,
@@ -247,21 +255,28 @@ export function topicEditName(
 /**
  * What is wrong with the form, in words, or null.
  *
- * ONE RULE, AND IT IS THIS FORM'S OPINION RATHER THAN THE SCHEMA'S: a blank
- * title is refused. No attribute on this tenant's topic type is `required`
- * (read off the live schema 2026-09-23), so the tenant would accept the save —
- * and `writeData` treats a blank value as a DELETE, so `title` would be removed
- * and every surface would silently fall back to `record.name`, a string nobody
- * edits and which still holds the original. That is a worse outcome than a
- * refusal, and a reviewer who genuinely wants a topic with no title still has
- * the record drawer. Nothing else is refused: clearing a subtitle, an angle or a
- * note means clearing it, exactly as the drawer already does.
+ * ONE RULE, AND IT IS THIS FORM'S OPINION RATHER THAN THE SCHEMA'S: CLEARING a
+ * title is refused. No attribute on this tenant's topic type is `required` (read
+ * off the live schema 2026-09-23), so the tenant would accept the save — and
+ * `writeData` treats a blank value as a DELETE, so `title` would be removed and
+ * every surface would fall back to `record.name`, a string this form keeps in
+ * step but which a reviewer did not mean to promote. A refusal is the better
+ * outcome, and someone who genuinely wants a topic with no title still has the
+ * record drawer.
+ *
+ * IT IS SCOPED TO THE CHANGED FIELDS, deliberately. One of 100 live topics
+ * already carries no title; a reviewer who opens that row to fix its ANGLE must
+ * not be blocked by a box she never touched. So this refuses an act — emptying
+ * the title — rather than a state.
+ *
+ * Nothing else is refused: clearing a subtitle, an angle or a note means
+ * clearing it, exactly as the drawer already does.
  */
 export function topicEditError(
-  fields: TopicEditField[],
+  changed: TopicEditField[],
   values: Record<string, string>,
 ): string | null {
-  for (const f of fields) {
+  for (const f of changed) {
     if (f.mandatory && (values[f.attr] ?? '').trim() === '') return EMPTY_TITLE_ERROR;
   }
   return null;
