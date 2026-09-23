@@ -34,6 +34,7 @@ import { formatBearer } from '@/lib/bearer';
 import { readData, toCamelKey } from '@/lib/board';
 import { CONTENT_TYPE_KEY } from '@/lib/content';
 import { readEditHistory, withEditStamp } from '@/lib/edit-history';
+import { draftHref } from '@/lib/story-nav';
 import { memberDisplayName, memberSub, normalizeMembers } from '@/lib/roster';
 import { findTag, GOOD_EXAMPLE_LABEL } from '@/lib/tags';
 import {
@@ -430,6 +431,23 @@ function DrawerInner({
 
 
 /**
+ * Everything a host needs to know about a topic's drafts at one moment — the
+ * list, whether the count is known yet, and whether a writer is in flight.
+ * Reported as ONE object because the members are only meaningful together: an
+ * empty list means "not yet" under a running writer and "none is linked" after
+ * one (bd startsim-z384k).
+ */
+export interface TopicDraftsState {
+  drafts: EntityRecord[];
+  /** True until the count is actually known — an errored query never learns it. */
+  loading: boolean;
+  /** A writer is running for this topic right now. */
+  generating: boolean;
+  /** Why the last wait ended, once it has ('idle' when nothing has run). */
+  stopped: string;
+}
+
+/**
  * A topic's candidate drafts + the write→review→edit→confirm loop (bd 768w.16.9.4/.5).
  *
  * Fires the n8n writer ("Generate drafts" → /actions/generate-drafts — NOT /api,
@@ -440,7 +458,37 @@ function DrawerInner({
  * rendered for the content-spine (topic) type; every other type's drawer is
  * untouched.
  */
-export function TopicDrafts({ topic, type }: { topic: EntityRecord; type: EntityTypeDef }) {
+export function TopicDrafts({
+  topic,
+  type,
+  from,
+  onDrafts,
+}: {
+  topic: EntityRecord;
+  type: EntityTypeDef;
+  /**
+   * Where a reader of one of these drafts should be sent BACK to, threaded into
+   * every link (bd startsim-z384k). Absent in the drawer, which never left the
+   * table in the first place.
+   */
+  from?: string | null;
+  /**
+   * The whole settled state of this topic's drafts, reported to a host that
+   * needs to act on it rather than re-run `fetchTopicDrafts` itself. The story
+   * page uses it to step into a lone draft, and to decide what an EMPTY list
+   * means. The drawer does not pass it and nothing changes there.
+   *
+   * `loading` is false only once the count is actually known — an errored query
+   * never learns it, and an absence that was never measured must not be read as
+   * "no drafts" (the same rule `draftCountKnown` enforces for the gate below).
+   *
+   * `generating` is why the two are reported TOGETHER. An empty list under a
+   * running writer and an empty list after one are the same array and mean
+   * opposite things: "nothing yet, ~2 min" versus "nothing is linked to this
+   * topic". A host that saw only the array would say both at once.
+   */
+  onDrafts?: (state: TopicDraftsState) => void;
+}) {
   const qc = useQueryClient();
   const topicId = topic.id;
   // SEEDED FROM THE RUN STORE, not from `false` (bd startsim-ozpjw.9). This
@@ -503,6 +551,15 @@ export function TopicDrafts({ topic, type }: { topic: EntityRecord; type: Entity
   const gate = canGenerateDrafts(topic, review, drafts.length);
 
   const { dataUpdatedAt } = draftsQuery;
+
+  // Hand the settled state to a host that wants to act on it (the story page
+  // steps into a lone draft, and words an empty list differently while the
+  // writer runs). Keyed on the scalars rather than on the array identity so it
+  // fires once per change, not once per render.
+  useEffect(() => {
+    onDrafts?.({ drafts, loading: !draftCountKnown, generating, stopped });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dataUpdatedAt, draftCountKnown, drafts.length, generating, stopped]);
 
   // (0) Join this topic's run, and let go of it without ending it. The clock
   // used to be a `useRef` here, which is exactly why the run died on every
@@ -658,7 +715,7 @@ export function TopicDrafts({ topic, type }: { topic: EntityRecord; type: Entity
             return (
               <li key={d.id}>
                 <Link
-                  href={`/draft/${d.id}`}
+                  href={draftHref(d.id, from)}
                   className="flex w-full items-center justify-between gap-3 rounded border px-3 py-2 text-left text-sm hover:bg-neutral-50"
                 >
                   <span className="flex min-w-0 items-center gap-2">
