@@ -342,6 +342,37 @@ describe('TopicContextHeader editing', () => {
     expect(name).toBeUndefined();
   });
 
+  it('does NOT rename when the reviewer changed something other than the title', async () => {
+    // Malin renamed the topic while this form was open; Jurga edits only the
+    // angle. The blob keeps Malin's title (it is not in the diff), so a name
+    // derived from the form's stale title would put the old words back in the
+    // table — the bug #80 fixed, arriving from the other side.
+    const synced = topic({ ...FULL.data, title: "Malin's title" });
+    (synced as unknown as { name: string }).name = "Malin's title";
+    getEntity.mockImplementation(async () => synced);
+    const { name, data } = await saveAfter(() => {
+      fireEvent.change(screen.getByDisplayValue('Lead with the $137 fee and what it replaces.'), {
+        target: { value: 'A different angle entirely.' },
+      });
+    }, FULL);
+    expect(name).toBeUndefined();
+    expect(data.title).toBe("Malin's title");
+    expect(data.angle).toBe('A different angle entirely.');
+  });
+
+  it('lets a reviewer fix a titleless topic\u2019s angle without being blocked by the empty title', async () => {
+    // One of 100 live topics carries no title. The refusal is on CLEARING a
+    // title, not on a row that never had one.
+    const untitled = topic({ angle: 'Needs a sharper angle.', scope_path: '/ogmc-agent-test' });
+    getEntity.mockImplementation(async () => untitled);
+    const { data } = await saveAfter(() => {
+      fireEvent.change(screen.getByDisplayValue('Needs a sharper angle.'), {
+        target: { value: 'A sharper angle.' },
+      });
+    }, untitled);
+    expect(data.angle).toBe('A sharper angle.');
+  });
+
   it('returns to the read view showing what was saved', async () => {
     await saveAfter(() =>
       fireEvent.change(screen.getByDisplayValue('angle too broad; needs a 2026 source'), {
