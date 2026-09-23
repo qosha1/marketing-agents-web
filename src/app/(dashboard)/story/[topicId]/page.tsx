@@ -137,19 +137,23 @@ export default function StoryPage() {
             are ONE component — the same one the drawer renders — so the poll,
             the stall window and the "why did the wait end" copy cannot drift
             into a second implementation on the surface that now matters most. */}
-        <TopicDrafts topic={topic} type={topicType} from={from} onDrafts={onDrafts} />
+        <TopicDrafts topic={topic} type={topicType} from={from} onDrafts={onDrafts} bare />
 
         {unlinked ? (
           // Never assert absence as fact: a draft with no `topic_ref` is
           // invisible to this query and very much not missing (startsim-sr38f).
+          // Worded as the LIST's limitation rather than as a verdict on this
+          // topic — a reviewer who approved four seconds ago must not read it as
+          // "your approval did nothing", which is what a flat "nothing is
+          // linked to this topic" said when it led the paragraph.
           <p className="mt-3 border-t border-border pt-3 text-xs text-neutral-500">
-            Nothing is <em>linked</em> to this topic. A draft written before
-            drafts carried a <code>{TOPIC_REF_ATTR}</code> cannot appear here
-            even though it exists —{' '}
+            One thing this list cannot see: a draft written before drafts carried
+            a <code>{TOPIC_REF_ATTR}</code> has no link to a topic, so it would
+            not appear here even though it exists. If this topic is an old one,{' '}
             <Link href={`/t/${DRAFT_TYPE}`} className="underline hover:text-neutral-800">
               search the drafts table
             </Link>{' '}
-            before concluding one was never written.
+            before concluding nothing was ever written for it.
           </p>
         ) : null}
       </div>

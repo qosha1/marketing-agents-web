@@ -172,6 +172,10 @@ describe('the story page', () => {
       'href',
       '/t/draft',
     );
+    // Worded as what the LIST cannot see, never as a verdict on this topic — a
+    // reviewer who approved four seconds ago must not read it as "your approval
+    // did nothing".
+    expect(screen.queryByText(/nothing is linked to this topic/i)).toBeNull();
   });
 
   it('does NOT tell a reviewer to go hunt while the writer is still running', async () => {

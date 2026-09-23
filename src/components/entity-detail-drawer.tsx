@@ -463,6 +463,7 @@ export function TopicDrafts({
   type,
   from,
   onDrafts,
+  bare = false,
 }: {
   topic: EntityRecord;
   type: EntityTypeDef;
@@ -488,6 +489,13 @@ export function TopicDrafts({
    * topic". A host that saw only the array would say both at once.
    */
   onDrafts?: (state: TopicDraftsState) => void;
+  /**
+   * Drop the divider + top margin. In the drawer this section hangs BELOW the
+   * record's fields and the rule is what separates the two; on the story page
+   * it is the only thing in its card, so the rule renders as a stray line over
+   * empty space.
+   */
+  bare?: boolean;
 }) {
   const qc = useQueryClient();
   const topicId = topic.id;
@@ -677,7 +685,7 @@ export function TopicDrafts({
   }
 
   return (
-    <section className="mt-6 border-t pt-4">
+    <section className={bare ? '' : 'mt-6 border-t pt-4'}>
       <div className="flex items-center justify-between gap-2">
         <h3 className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
           Drafts{drafts.length ? ` (${drafts.length})` : ''}
