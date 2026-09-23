@@ -93,6 +93,11 @@ vi.mock('@/lib/foundry-api', () => ({
   getEntity: vi.fn(async () => TOPIC),
   listTypes: vi.fn(async () => ({ count: 1, next: null, previous: null, results: [TOPIC_TYPE] })),
 }));
+// The topic panel can now EDIT the topic (bd startsim-m7fdm.7), so it resolves
+// who is editing. Nothing here presses Save; this is the provider, not the test.
+vi.mock('@startsimpli/auth', () => ({
+  useAuth: () => ({ user: { email: 'qa+ma@startsimpli.com' } }),
+}));
 
 const StoryPage = (await import('../page')).default;
 
