@@ -83,6 +83,7 @@ import {
   topicEditData,
   topicEditError,
   topicEditFields,
+  topicEditName,
   topicEditValues,
 } from '@/lib/topic-edit';
 
@@ -175,11 +176,25 @@ export function TopicContextHeader({
         values,
         user?.email,
       );
+      // THE TITLE THE TABLE SHOWS IS `record.name`, not `data.title` — the
+      // content spine folds title/subtitle/angle into one cell keyed off the
+      // name (components/record-columns.ts). Editing only the attribute left
+      // the panel saying one thing and the Topics table the reviewer goes back
+      // to still saying the old one. `topicEditName` carries the name along
+      // when the two were one thing, and leaves a name that genuinely differs.
+      const nextName = topicEditName(
+        fresh.name,
+        str(fresh.data, cfg.titleAttr),
+        values[cfg.titleAttr] ?? '',
+      );
       // `saveEntity`, not a bare `updateEntity`: it writes the server's answer
       // into ['entity', <id>], which is the key both host pages read this topic
       // from — invalidation alone leaves the pre-edit blob on screen for the
       // next render (bd startsim-mk5qp).
-      await saveEntity(qc, topic.id, { data: body });
+      await saveEntity(qc, topic.id, {
+        ...(nextName ? { name: nextName } : {}),
+        data: body,
+      });
       await qc.invalidateQueries({ queryKey: ['entities', type.key] });
       notify.success('Topic saved.');
       setEditing(false);

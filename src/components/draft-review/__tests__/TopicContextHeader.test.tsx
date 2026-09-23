@@ -203,9 +203,9 @@ describe('TopicContextHeader editing', () => {
     const [, id, input] = saveEntity.mock.calls[0] as unknown as [
       unknown,
       unknown,
-      { data: Record<string, unknown> },
+      { name?: string; data: Record<string, unknown> },
     ];
-    return { id, data: input.data };
+    return { id, name: input.name, data: input.data };
   }
 
   it('turns the topic’s text into a form, seeded from the record', () => {
@@ -315,6 +315,31 @@ describe('TopicContextHeader editing', () => {
     fireEvent.click(screen.getByRole('button', { name: /save topic/i }));
     await waitFor(() => expect(screen.getByRole('button', { name: /save topic/i })).toBeEnabled());
     expect(saveEntity).not.toHaveBeenCalled();
+  });
+
+  it('carries the record NAME with the title, so the topics table agrees', async () => {
+    // The table's leading column is `record.name` (components/record-columns.ts
+    // folds title/subtitle/angle into it), and 98 of 100 live topics have the
+    // two byte-identical. Editing the attribute alone left the list stale.
+    const synced = topic({ ...FULL.data, title: 'Synced title' });
+    (synced as unknown as { name: string }).name = 'Synced title';
+    getEntity.mockImplementation(async () => synced);
+    const { name } = await saveAfter(() => {
+      fireEvent.change(screen.getByDisplayValue('Synced title'), {
+        target: { value: 'Retitled in place' },
+      });
+    }, synced);
+    expect(name).toBe('Retitled in place');
+  });
+
+  it('leaves a record name that genuinely says something else', async () => {
+    // FULL.name is 'fallback name', which is not its title — the 2-in-100 case.
+    const { name } = await saveAfter(() =>
+      fireEvent.change(screen.getByDisplayValue('Qatar Market Entry Guide 2026'), {
+        target: { value: 'A new title' },
+      }),
+    );
+    expect(name).toBeUndefined();
   });
 
   it('returns to the read view showing what was saved', async () => {

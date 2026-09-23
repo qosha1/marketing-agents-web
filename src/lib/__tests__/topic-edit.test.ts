@@ -38,6 +38,7 @@ import {
   topicEditError,
   topicEditChanges,
   topicEditFields,
+  topicEditName,
   topicEditValues,
 } from '@/lib/topic-edit';
 
@@ -317,5 +318,46 @@ describe('a save writes the DIFF, not the whole form (bd startsim-m7fdm.2)', () 
     const fresh = { ...STORED, title: 'Malin\u2019s title' };
     const { wire } = saveWith(STORED, { title: 'Her title' }, 'jurga@ogmc.example', fresh);
     expect(wire.title).toBe('Her title');
+  });
+});
+
+/**
+ * THE TITLE THE TABLE SHOWS IS `record.name` (found in the browser on the
+ * deployed build of PR #79). `titleSubtitleCell` in components/record-columns.ts
+ * renders `row.name` and folds title/subtitle/angle into that one cell, so a
+ * topic whose `data.title` was edited and whose name was not keeps showing the
+ * old words in the list the reviewer goes back to.
+ */
+describe('a title edit carries the record name when the two were one thing', () => {
+  const TITLE = 'Qatar market entry, 2026';
+
+  it('renames when the name and the stored title are the same string', () => {
+    expect(topicEditName(TITLE, TITLE, 'Qatar market entry, revised')).toBe(
+      'Qatar market entry, revised',
+    );
+  });
+
+  it('renames when the row has no stored title at all — the NAME was the title', () => {
+    expect(topicEditName('Qatar customs timelines', '', 'Qatar customs, rewritten')).toBe(
+      'Qatar customs, rewritten',
+    );
+  });
+
+  it('leaves a name that genuinely says something else', () => {
+    // 2 of 100 live topics; lib/board-card.ts already treats a drifted title as
+    // the case worth reading rather than as something to reconcile.
+    expect(topicEditName('[AGENT TEST yvi57] Qatar licence', TITLE, 'A new title')).toBeUndefined();
+  });
+
+  it('does not rename when the title did not move', () => {
+    expect(topicEditName(TITLE, TITLE, `  ${TITLE}  `)).toBeUndefined();
+  });
+
+  it('never writes an empty name', () => {
+    expect(topicEditName(TITLE, TITLE, '   ')).toBeUndefined();
+  });
+
+  it('tolerates a record with no name', () => {
+    expect(topicEditName(undefined, '', 'First title')).toBe('First title');
   });
 });
