@@ -50,7 +50,7 @@ import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 
-import { TopicDrafts } from '@/components/entity-detail-drawer';
+import { TopicDrafts, type TopicDraftsState } from '@/components/entity-detail-drawer';
 import {
   TopicBackLink,
   TopicContextHeader,
@@ -58,7 +58,7 @@ import {
 import { entityKey } from '@/lib/entity-cache';
 import { readData } from '@/lib/board';
 import { CONTENT_TYPE_ATTR, CONTENT_TYPE_KEY } from '@/lib/content';
-import { getEntity, listTypes, type EntityRecord } from '@/lib/foundry-api';
+import { getEntity, listTypes } from '@/lib/foundry-api';
 import { draftHref, FROM_PARAM, returnTarget, safeReturnPath } from '@/lib/story-nav';
 import { DRAFT_TYPE, TOPIC_REF_ATTR } from '@/lib/topic-drafts';
 
@@ -84,13 +84,15 @@ export default function StoryPage() {
   // landing, not a destination, and a history entry here would make the browser
   // Back button bounce the reviewer straight back into the redirect.
   const stepped = useRef(false);
-  const [drafts, setDrafts] = useState<EntityRecord[]>([]);
-  const [countKnown, setCountKnown] = useState(false);
-
-  const onDrafts = useCallback((next: EntityRecord[], loading: boolean) => {
-    setDrafts(next);
-    setCountKnown(!loading);
-  }, []);
+  const [state, setState] = useState<TopicDraftsState>({
+    drafts: [],
+    loading: true,
+    generating: false,
+    stopped: 'idle',
+  });
+  const onDrafts = useCallback((next: TopicDraftsState) => setState(next), []);
+  const { drafts, loading, generating } = state;
+  const countKnown = !loading;
 
   useEffect(() => {
     if (stepped.current || !countKnown || drafts.length !== 1) return;
@@ -112,7 +114,14 @@ export default function StoryPage() {
     );
   }
 
-  const unlinked = countKnown && drafts.length === 0;
+  // WHAT AN EMPTY LIST MEANS depends on whether a writer is running, and getting
+  // that wrong is this page's own failure mode in a new costume. A topic
+  // approved three seconds ago settles its query IMMEDIATELY with zero drafts:
+  // saying "nothing is linked to this topic, go search the drafts table" under
+  // the words "Generating… (~2 min)" is false in every clause and sends the
+  // reviewer hunting for something that is being written as they read it.
+  // So the startsim-sr38f notice waits until nothing is in flight.
+  const unlinked = countKnown && drafts.length === 0 && !generating;
 
   return (
     <div className="mx-auto max-w-4xl space-y-4">

@@ -16,7 +16,9 @@
  *
  * `TopicDrafts` is stubbed because it is tested where it lives and because what
  * is under test here is what this page DOES with a settled list. The stub is the
- * contract: it reports `(drafts, loading)` exactly as the real one does.
+ * contract: it reports the same {drafts, loading, generating, stopped} the real
+ * one does — and `generating` is in there because an empty list means opposite
+ * things with and without a writer in flight.
  */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor } from '@testing-library/react';
@@ -28,7 +30,13 @@ import type { EntityRecord } from '@/lib/foundry-api';
 const replace = vi.fn();
 const push = vi.fn();
 
-let reported: { drafts: EntityRecord[]; loading: boolean } = { drafts: [], loading: true };
+interface Reported {
+  drafts: EntityRecord[];
+  loading: boolean;
+  generating: boolean;
+  stopped: string;
+}
+let reported: Reported = { drafts: [], loading: true, generating: false, stopped: 'idle' };
 let searchString = '';
 
 vi.mock('next/navigation', () => ({
@@ -46,13 +54,9 @@ vi.mock('next/link', async () => {
 vi.mock('@/components/entity-detail-drawer', async () => {
   const React = await import('react');
   return {
-    TopicDrafts: ({
-      onDrafts,
-    }: {
-      onDrafts?: (d: EntityRecord[], loading: boolean) => void;
-    }) => {
+    TopicDrafts: ({ onDrafts }: { onDrafts?: (s: Reported) => void }) => {
       React.useEffect(() => {
-        onDrafts?.(reported.drafts, reported.loading);
+        onDrafts?.(reported);
       }, [onDrafts]);
       return React.createElement('div', { 'data-testid': 'topic-drafts' });
     },
@@ -109,7 +113,7 @@ beforeEach(() => {
   replace.mockClear();
   push.mockClear();
   searchString = '';
-  reported = { drafts: [], loading: true };
+  reported = { drafts: [], loading: true, generating: false, stopped: 'idle' };
 });
 
 describe('the story page', () => {
@@ -120,7 +124,7 @@ describe('the story page', () => {
   });
 
   it('steps straight into the draft when there is exactly one', async () => {
-    reported = { drafts: [draft('d1')], loading: false };
+    reported = { drafts: [draft('d1')], loading: false, generating: false, stopped: 'idle' };
     renderPage();
     await waitFor(() => expect(replace).toHaveBeenCalledWith('/draft/d1'));
     // `replace`, never `push`: a history entry here would bounce the browser
@@ -130,7 +134,7 @@ describe('the story page', () => {
 
   it('carries the return path into the draft so "back" still finds the table', async () => {
     searchString = 'from=%2Ft%2Ftopic%3Fcontent_type%3Dgeneral';
-    reported = { drafts: [draft('d1')], loading: false };
+    reported = { drafts: [draft('d1')], loading: false, generating: false, stopped: 'idle' };
     renderPage();
     await waitFor(() =>
       expect(replace).toHaveBeenCalledWith('/draft/d1?from=%2Ft%2Ftopic%3Fcontent_type%3Dgeneral'),
@@ -139,13 +143,13 @@ describe('the story page', () => {
 
   it('refuses to follow a return path that would leave the app', async () => {
     searchString = 'from=https%3A%2F%2Fevil.example';
-    reported = { drafts: [draft('d1')], loading: false };
+    reported = { drafts: [draft('d1')], loading: false, generating: false, stopped: 'idle' };
     renderPage();
     await waitFor(() => expect(replace).toHaveBeenCalledWith('/draft/d1'));
   });
 
   it('never picks for the reviewer when a legacy topic carries three candidates', async () => {
-    reported = { drafts: [draft('d1'), draft('d2'), draft('d3')], loading: false };
+    reported = { drafts: [draft('d1'), draft('d2'), draft('d3')], loading: false, generating: false, stopped: 'idle' };
     renderPage();
     await screen.findByTestId('topic-drafts');
     await new Promise((r) => setTimeout(r, 20));
@@ -153,7 +157,7 @@ describe('the story page', () => {
   });
 
   it('waits rather than redirecting while the count is still unknown', async () => {
-    reported = { drafts: [draft('d1')], loading: true };
+    reported = { drafts: [draft('d1')], loading: true, generating: false, stopped: 'idle' };
     renderPage();
     await screen.findByTestId('topic-drafts');
     await new Promise((r) => setTimeout(r, 20));
@@ -161,7 +165,7 @@ describe('the story page', () => {
   });
 
   it('does not assert absence — an empty list offers the drafts table', async () => {
-    reported = { drafts: [], loading: false };
+    reported = { drafts: [], loading: false, generating: false, stopped: 'idle' };
     renderPage();
     expect(await screen.findByText(/search the drafts table/i)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /search the drafts table/i })).toHaveAttribute(
@@ -170,8 +174,25 @@ describe('the story page', () => {
     );
   });
 
+  it('does NOT tell a reviewer to go hunt while the writer is still running', async () => {
+    // The query settles instantly on a topic approved three seconds ago — with
+    // zero drafts, because none exists yet. Rendering the sr38f notice there
+    // would print "nothing is linked to this topic, search the drafts table"
+    // directly under "Generating… (~2 min)": false in every clause.
+    reported = { drafts: [], loading: false, generating: true, stopped: 'idle' };
+    renderPage();
+    await screen.findByTestId('topic-drafts');
+    expect(screen.queryByText(/search the drafts table/i)).toBeNull();
+  });
+
+  it('says it once the writer has stopped and still nothing is linked', async () => {
+    reported = { drafts: [], loading: false, generating: false, stopped: 'gave_up' };
+    renderPage();
+    expect(await screen.findByText(/search the drafts table/i)).toBeInTheDocument();
+  });
+
   it('says nothing about unlinked drafts while the list is still loading', async () => {
-    reported = { drafts: [], loading: true };
+    reported = { drafts: [], loading: true, generating: false, stopped: 'idle' };
     renderPage();
     await screen.findByTestId('topic-drafts');
     expect(screen.queryByText(/search the drafts table/i)).toBeNull();
