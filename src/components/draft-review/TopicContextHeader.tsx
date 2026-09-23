@@ -1,7 +1,8 @@
 'use client';
 
 /**
- * The topic, at the top of its draft (bd startsim-z384k).
+ * The topic, at the top of its draft (bd startsim-z384k), and — since
+ * bd startsim-m7fdm.7 — the place its text is edited.
  *
  * WHAT IT REPLACES. Until now a reviewer read the topic in a modal — the shared
  * ReviewDrawer over /t/topic — and then left it behind to judge the draft. Quinn
@@ -32,25 +33,58 @@
  * too broad; needs a 2026 source" — and it is the thing the draft was supposed
  * to satisfy. It appeared nowhere on the draft page before.
  *
+ * ── EDITING (bd startsim-m7fdm.7) ──────────────────────────────────────────
+ *
+ * Quinn: "for the draft detail view even if we 'approve' the topic whatever we
+ * need to be able to edit the text and description should we want to change it
+ * right now we cant." The panel was read-only, so the only way to fix a title
+ * was to go back to the table and open the drawer — the round trip this page
+ * exists to remove. "Edit topic" turns the same four text fields into a form;
+ * WHICH four, and why not status or the kind chips, is argued in lib/topic-edit.ts
+ * beside the save path rather than here.
+ *
+ * WHY THE SAVE LIVES IN THIS COMPONENT and not in a callback the two host pages
+ * each implement: /draft/<id> and /story/<id> render this same header, and a
+ * `onSave` prop would be two copies of one whole-blob write — which is exactly
+ * how the drawer and the draft page came to stamp the edit log differently
+ * (bd startsim-m7fdm.3). The draft page still owns all DRAFT persistence; this
+ * owns the TOPIC's, because it is the only surface that edits a topic here.
+ *
+ * COLLAPSING IS DISABLED WHILE EDITING. The panel's one existing control hides
+ * its body; hiding a form mid-edit would either drop what was typed or leave it
+ * invisibly pending. So the Show/Hide toggle steps aside until Save or Cancel.
+ *
  * FORK-LOCAL, like the rest of src/components/draft-review/*. Rule 9 asks
  * whether another foundry fork would want it; the honest answer is "probably,
  * once one exists", which is the same answer startsim-m7fdm.1 gave about the
  * edit log and resolved by extracting it when a second tenant actually wanted
- * it. The reusable half — the field map — is ALREADY shared; what is left here
- * is this tenant's arrangement of it.
+ * it. The reusable half is ALREADY shared and the edit path leans harder on it
+ * than the read path did — `writeData` and `declaredBlob` from
+ * `@startsimpli/ui/collection` are the shared package's own wire-safety rules,
+ * not a second copy of them. What is left here is this tenant's arrangement.
  */
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, Pencil } from 'lucide-react';
 import { resolveReviewConfig } from '@startsimpli/ui/collection';
 import type { EntityRecord, EntityTypeDef } from '@startsimpli/ui/collection';
+import { useQueryClient } from '@tanstack/react-query';
+import { Button, Input, Label, Textarea, notify } from '@startsimpli/ui';
+import { useAuth } from '@startsimpli/auth';
 
 import { readData } from '@/lib/board';
 import { contentCategoryLabel } from '@/lib/content';
+import { saveEntity } from '@/lib/entity-cache';
+import { getEntity } from '@/lib/foundry-api';
 import { TOPIC_REVIEW_CONFIG } from '@/lib/review-vocabulary';
-
-/** The attribute holding the one-line sub-heading, when the type declares one. */
-const SUBTITLE_ATTR = 'subtitle';
+import {
+  SUBTITLE_ATTR,
+  topicEditChanges,
+  topicEditData,
+  topicEditError,
+  topicEditFields,
+  topicEditValues,
+} from '@/lib/topic-edit';
 
 function str(data: Record<string, unknown> | undefined, name: string): string {
   const v = readData(data, name);
@@ -81,6 +115,11 @@ export function TopicContextHeader({
 }: TopicContextHeaderProps) {
   const [open, setOpen] = useState(defaultOpen);
   const cfg = useMemo(() => resolveReviewConfig(type ?? undefined, TOPIC_REVIEW_CONFIG), [type]);
+  const qc = useQueryClient();
+  // WHO IS EDITING — the email, for the same reason lib/edit-history.ts gives:
+  // whoami returns no display name, and a `sub` UUID answers "who?" with a
+  // string no reader can resolve.
+  const { user } = useAuth();
 
   const data = topic?.data;
   const title = str(data, cfg.titleAttr) || topic?.name || '';
@@ -92,7 +131,66 @@ export function TopicContextHeader({
     .map((a) => ({ attr: a, value: str(data, a) }))
     .filter((c) => c.value !== '');
 
-  const showBody = alwaysOpen || open;
+  // The editable fields exist only once the schema has loaded: their spelling,
+  // their control and the re-key pass all come off the declared attributes.
+  const fields = useMemo(() => topicEditFields(cfg, type), [cfg, type]);
+  const [editing, setEditing] = useState(false);
+  const [values, setValues] = useState<Record<string, string>>({});
+  // What the form was seeded with, captured ONCE when it opened. A background
+  // refetch landing mid-edit must not move the line between "she changed this"
+  // and "she left it alone" — see `topicEditChanges`.
+  const [baseline, setBaseline] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+  const canEdit = !!topic && !!type && fields.length > 0;
+  const changes = topicEditChanges(fields, values, baseline);
+
+  function startEditing() {
+    const seed = topicEditValues(data, fields);
+    setValues(seed);
+    setBaseline(seed);
+    setEditing(true);
+  }
+
+  async function save() {
+    if (!topic || !type) return;
+    const problem = topicEditError(fields, values);
+    if (problem) {
+      notify.error(problem);
+      return;
+    }
+    setSaving(true);
+    try {
+      // RE-READ FIRST, and merge onto what comes back (bd startsim-m7fdm.2). The
+      // tenant REPLACES `data` on a PATCH, so a whole-blob write built on the
+      // blob this page loaded would undo every change made to the topic since —
+      // including ones this form does not even show. It does not FIX the race
+      // (startsim-jkkn7 owns the conditional write); it narrows it from "since
+      // this page opened" to "since Save was pressed". `topicEditData` reads the
+      // edit log out of this same response for the same reason.
+      const fresh = await getEntity(topic.id);
+      const { data: body } = topicEditData(
+        fresh.data,
+        type.attributes.map((a) => a.name),
+        changes,
+        values,
+        user?.email,
+      );
+      // `saveEntity`, not a bare `updateEntity`: it writes the server's answer
+      // into ['entity', <id>], which is the key both host pages read this topic
+      // from — invalidation alone leaves the pre-edit blob on screen for the
+      // next render (bd startsim-mk5qp).
+      await saveEntity(qc, topic.id, { data: body });
+      await qc.invalidateQueries({ queryKey: ['entities', type.key] });
+      notify.success('Topic saved.');
+      setEditing(false);
+    } catch (err) {
+      notify.error(err instanceof Error ? err.message : 'Could not save the topic.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const showBody = alwaysOpen || open || editing;
 
   return (
     <section
@@ -122,7 +220,18 @@ export function TopicContextHeader({
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
           {actions}
-          {topic && !alwaysOpen ? (
+          {canEdit && !editing ? (
+            <button
+              type="button"
+              onClick={startEditing}
+              className="inline-flex items-center gap-1 rounded-md border border-border bg-card px-2 py-1 text-xs text-neutral-600 hover:bg-neutral-100"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+              Edit topic
+            </button>
+          ) : null}
+          {/* No collapse while editing — hiding a form would strand what was typed. */}
+          {topic && !alwaysOpen && !editing ? (
             <button
               type="button"
               onClick={() => setOpen((o) => !o)}
@@ -138,7 +247,50 @@ export function TopicContextHeader({
         </div>
       </div>
 
-      {topic && showBody ? (
+      {topic && showBody && editing ? (
+        <div className="mt-3 space-y-3">
+          {fields.map((f) => (
+            <div key={f.attr} className="space-y-1.5">
+              <Label htmlFor={`topic-${f.attr}`}>{f.label}</Label>
+              {f.multiline ? (
+                <Textarea
+                  id={`topic-${f.attr}`}
+                  rows={4}
+                  value={values[f.attr] ?? ''}
+                  onChange={(e) => setValues((prev) => ({ ...prev, [f.attr]: e.target.value }))}
+                />
+              ) : (
+                <Input
+                  id={`topic-${f.attr}`}
+                  value={values[f.attr] ?? ''}
+                  onChange={(e) => setValues((prev) => ({ ...prev, [f.attr]: e.target.value }))}
+                />
+              )}
+            </div>
+          ))}
+          <div className="flex items-center gap-2 pt-0.5">
+            <Button onClick={save} disabled={saving || changes.length === 0}>
+              {saving ? 'Saving…' : 'Save topic'}
+            </Button>
+            <button
+              type="button"
+              onClick={() => setEditing(false)}
+              disabled={saving}
+              className="rounded border border-border px-3 py-1.5 text-sm hover:bg-neutral-100 disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            {/* The kinds, the market and the decision are edited where they are
+                decided — see lib/topic-edit.ts. Say so rather than leaving a
+                reviewer hunting this form for them. */}
+            <p className="text-xs text-neutral-500">
+              Kind, market and status are changed from the topics table.
+            </p>
+          </div>
+        </div>
+      ) : null}
+
+      {topic && showBody && !editing ? (
         <div className="mt-2 space-y-2">
           {subtitle ? <p className="text-sm text-neutral-600">{subtitle}</p> : null}
           {summary && summary !== subtitle ? (
