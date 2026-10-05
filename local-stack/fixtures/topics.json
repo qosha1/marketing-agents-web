@@ -1,0 +1,249 @@
+{
+  "$note": "TWELVE TOPICS: all three content types crossed with all four declared statuses. `scope` is passed as a PATH and the server stamps it onto scope_path (apps/api/views.py::_upsert_one), so renaming the attribute needs no fixture edit. Statuses are the declared enum and nothing else — an undeclared value is refused at the write, which makes this fixture a test of the schema as well as data for the UI. THERE IS DELIBERATELY NO ROW WITHOUT A SCOPE, and that is not a gap: the tenant REFUSES one. `topic` declares scope_path as its scope path, and upsert answers 400 — \"this row would carry none, so no scoped read would ever return it - invisible rather than broken\". So the scope-ABSENCE state that src/app/(dashboard)/t/[typeKey]/__tests__/scope-absence.test.tsx renders an explanation for is reachable only as LEGACY data: rows written before the type declared a scope axis. It cannot be seeded through the API by design, and the only honest ways to get one locally are to declare the type unscoped, write the row, then re-declare it scoped — or to write the row straight into sqlite. Neither belongs in a fixture that claims to be the product's own write path. What IS exercisable here is the EMPTY SCOPE: /ogmc/empty-campaign holds no rows at all (see scopes.json). THE THREE OFF-/ogmc ROWS ARE SPREAD ACROSS STATUSES ON PURPOSE: putting the child, the sibling and the prefix-trap scope all on `suggested` left /ogmc's own intake lane empty, so the first browser check of the Topics table showed three topics none of which belonged to the primary scope — a fixture that made the product look broken.",
+  "rows": [
+    {
+      "entity_type": "topic",
+      "external_id": "topic-seed-01",
+      "name": "Weekly Brief 01: suggested in /ogmc",
+      "scope": "/ogmc",
+      "data": {
+        "title": "Weekly Brief 01: suggested in /ogmc",
+        "subtitle": "A seeded weekly_brief topic, status suggested.",
+        "angle": "Seeded angle for topic 01. Status suggested, kind weekly_brief.",
+        "market": "GCC",
+        "content_type": "weekly_brief",
+        "status": "suggested",
+        "ai_rank": 0.95,
+        "source_1": "https://example.gov.local/a",
+        "source_2": "https://example.press.local/b",
+        "assignee_sub": "",
+        "assignee_name": ""
+      }
+    },
+    {
+      "entity_type": "topic",
+      "external_id": "topic-seed-02",
+      "name": "Weekly Brief 02: ready in /ogmc/gcc-weekly",
+      "scope": "/ogmc/gcc-weekly",
+      "data": {
+        "title": "Weekly Brief 02: ready in /ogmc/gcc-weekly",
+        "subtitle": "A seeded weekly_brief topic, status ready.",
+        "angle": "Seeded angle for topic 02. Status ready, kind weekly_brief.",
+        "market": "KSA",
+        "content_type": "weekly_brief",
+        "status": "ready",
+        "ai_rank": 0.9,
+        "team_verdict": "accept",
+        "team_notes": "Looks fine.",
+        "source_1": "https://example.gov.local/a",
+        "source_2": "https://example.press.local/b",
+        "scheduled_for": "2026-10-10",
+        "assignee_sub": "",
+        "assignee_name": ""
+      }
+    },
+    {
+      "entity_type": "topic",
+      "external_id": "topic-seed-03",
+      "name": "Weekly Brief 03: written in /ogmc",
+      "scope": "/ogmc",
+      "data": {
+        "title": "Weekly Brief 03: written in /ogmc",
+        "subtitle": "A seeded weekly_brief topic, status written.",
+        "angle": "Seeded angle for topic 03. Status written, kind weekly_brief.",
+        "market": "GCC",
+        "content_type": "weekly_brief",
+        "status": "written",
+        "ai_rank": 0.85,
+        "team_verdict": "accept",
+        "team_notes": "Looks fine.",
+        "source_1": "https://example.gov.local/a",
+        "source_2": "https://example.press.local/b",
+        "delivered_at": "2026-09-20"
+      }
+    },
+    {
+      "entity_type": "topic",
+      "external_id": "topic-seed-04",
+      "name": "Weekly Brief 04: rejected in /ogmc",
+      "scope": "/ogmc",
+      "data": {
+        "title": "Weekly Brief 04: rejected in /ogmc",
+        "subtitle": "A seeded weekly_brief topic, status rejected.",
+        "angle": "Seeded angle for topic 04. Status rejected, kind weekly_brief.",
+        "market": "KSA",
+        "content_type": "weekly_brief",
+        "status": "rejected",
+        "ai_rank": 0.8,
+        "team_verdict": "reject",
+        "team_notes": "Off-brief.",
+        "source_1": "https://example.gov.local/a",
+        "source_2": "https://example.press.local/b",
+        "assignee_sub": "",
+        "assignee_name": ""
+      }
+    },
+    {
+      "entity_type": "topic",
+      "external_id": "topic-seed-05",
+      "name": "Lead Magnet 05: suggested in /sandbox",
+      "scope": "/sandbox",
+      "data": {
+        "title": "Lead Magnet 05: suggested in /sandbox",
+        "subtitle": "A seeded lead_magnet topic, status suggested.",
+        "angle": "Seeded angle for topic 05. Status suggested, kind lead_magnet.",
+        "market": "GCC",
+        "content_type": "lead_magnet",
+        "status": "suggested",
+        "ai_rank": 0.75,
+        "source_1": "https://example.gov.local/a",
+        "source_2": "https://example.press.local/b",
+        "assignee_sub": "",
+        "assignee_name": ""
+      }
+    },
+    {
+      "entity_type": "topic",
+      "external_id": "topic-seed-06",
+      "name": "Lead Magnet 06: ready in /ogmc",
+      "scope": "/ogmc",
+      "data": {
+        "title": "Lead Magnet 06: ready in /ogmc",
+        "subtitle": "A seeded lead_magnet topic, status ready.",
+        "angle": "Seeded angle for topic 06. Status ready, kind lead_magnet.",
+        "market": "KSA",
+        "content_type": "lead_magnet",
+        "status": "ready",
+        "ai_rank": 0.7,
+        "team_verdict": "accept",
+        "team_notes": "Looks fine.",
+        "source_1": "https://example.gov.local/a",
+        "source_2": "https://example.press.local/b",
+        "scheduled_for": "2026-10-10"
+      }
+    },
+    {
+      "entity_type": "topic",
+      "external_id": "topic-seed-07",
+      "name": "Lead Magnet 07: written in /ogmc",
+      "scope": "/ogmc",
+      "data": {
+        "title": "Lead Magnet 07: written in /ogmc",
+        "subtitle": "A seeded lead_magnet topic, status written.",
+        "angle": "Seeded angle for topic 07. Status written, kind lead_magnet.",
+        "market": "GCC",
+        "content_type": "lead_magnet",
+        "status": "written",
+        "ai_rank": 0.65,
+        "team_verdict": "accept",
+        "team_notes": "Looks fine.",
+        "source_1": "https://example.gov.local/a",
+        "source_2": "https://example.press.local/b",
+        "delivered_at": "2026-09-20",
+        "assignee_sub": "",
+        "assignee_name": ""
+      }
+    },
+    {
+      "entity_type": "topic",
+      "external_id": "topic-seed-08",
+      "name": "Lead Magnet 08: rejected in /ogmc",
+      "scope": "/ogmc",
+      "data": {
+        "title": "Lead Magnet 08: rejected in /ogmc",
+        "subtitle": "A seeded lead_magnet topic, status rejected.",
+        "angle": "Seeded angle for topic 08. Status rejected, kind lead_magnet.",
+        "market": "KSA",
+        "content_type": "lead_magnet",
+        "status": "rejected",
+        "ai_rank": 0.6,
+        "team_verdict": "reject",
+        "team_notes": "Off-brief.",
+        "source_1": "https://example.gov.local/a",
+        "source_2": "https://example.press.local/b",
+        "assignee_sub": "",
+        "assignee_name": ""
+      }
+    },
+    {
+      "entity_type": "topic",
+      "external_id": "topic-seed-09",
+      "name": "General 09: suggested in /ogmc",
+      "scope": "/ogmc",
+      "data": {
+        "title": "General 09: suggested in /ogmc",
+        "subtitle": "A seeded general topic, status suggested.",
+        "angle": "Seeded angle for topic 09. Status suggested, kind general.",
+        "market": "GCC",
+        "content_type": "general",
+        "status": "suggested",
+        "ai_rank": 0.55,
+        "source_1": "https://example.gov.local/a",
+        "source_2": "https://example.press.local/b"
+      }
+    },
+    {
+      "entity_type": "topic",
+      "external_id": "topic-seed-10",
+      "name": "General 10: ready in /ogmc",
+      "scope": "/ogmc",
+      "data": {
+        "title": "General 10: ready in /ogmc",
+        "subtitle": "A seeded general topic, status ready.",
+        "angle": "Seeded angle for topic 10. Status ready, kind general.",
+        "market": "KSA",
+        "content_type": "general",
+        "status": "ready",
+        "ai_rank": 0.5,
+        "team_verdict": "accept",
+        "team_notes": "Looks fine.",
+        "source_1": "https://example.gov.local/a",
+        "source_2": "https://example.press.local/b",
+        "scheduled_for": "2026-10-10",
+        "assignee_sub": "",
+        "assignee_name": ""
+      }
+    },
+    {
+      "entity_type": "topic",
+      "external_id": "topic-seed-11",
+      "name": "General 11: written in /ogmc",
+      "scope": "/ogmc",
+      "data": {
+        "title": "General 11: written in /ogmc",
+        "subtitle": "A seeded general topic, status written.",
+        "angle": "Seeded angle for topic 11. Status written, kind general.",
+        "market": "GCC",
+        "content_type": "general",
+        "status": "written",
+        "ai_rank": 0.45,
+        "team_verdict": "accept",
+        "team_notes": "Looks fine.",
+        "source_1": "https://example.gov.local/a",
+        "source_2": "https://example.press.local/b",
+        "delivered_at": "2026-09-20",
+        "assignee_sub": "",
+        "assignee_name": ""
+      }
+    },
+    {
+      "entity_type": "topic",
+      "external_id": "topic-seed-12",
+      "name": "General 12: rejected in /ogmc-old",
+      "scope": "/ogmc-old",
+      "data": {
+        "title": "General 12: rejected in /ogmc-old",
+        "subtitle": "A seeded general topic, status rejected.",
+        "angle": "Seeded angle for topic 12. Status rejected, kind general.",
+        "market": "KSA",
+        "content_type": "general",
+        "status": "rejected",
+        "ai_rank": 0.4,
+        "team_verdict": "reject",
+        "team_notes": "Off-brief.",
+        "source_1": "https://example.gov.local/a",
+        "source_2": "https://example.press.local/b"
+      }
+    }
+  ]
+}

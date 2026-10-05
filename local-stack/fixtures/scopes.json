@@ -1,0 +1,69 @@
+{
+  "$note": "THE SCOPE TREE, and it is the fixture the rest depend on — list it FIRST in STACK_FIXTURES. Four rows chosen to make the scope-gated UI exercisable rather than merely present: a root (/ogmc), a CHILD under it (/ogmc/gcc-weekly, so `?scope=/ogmc` has to be a subtree read and not a prefix match), an unrelated SIBLING (/sandbox, so isolation is visible — a scope switcher that leaks shows /ogmc's topics here), and /ogmc-old, which is the documented trap: `startswith=/ogmc` matches it and `attr.path__under` must not. /ogmc/empty-campaign holds NO rows on purpose — it is what the scope-gated empty state has to explain, and a tenant whose every scope has content cannot tell 'this scope is empty' apart from 'the filter is broken'. `path` and `parent` are written DIRECTLY rather than via the upsert `scope` key, because a scope's own path is new by definition and must not be required to name a container that already exists (scripts/schemas/scope.json). A root's `parent` is the EMPTY STRING, not '/': denormalize_attributes writes a row for an empty declared value, so `?attr.parent=` is the real 'list the clients' query.",
+  "rows": [
+    {
+      "entity_type": "scope",
+      "external_id": "scope:/ogmc",
+      "name": "OGMC",
+      "data": {
+        "name": "OGMC",
+        "kind": "client",
+        "path": "/ogmc",
+        "parent": "",
+        "active": true,
+        "brand_voice": "Measured, plain, no superlatives. Cite the primary source.",
+        "priority_framework": "Regulatory change first; funding second; personnel last.",
+        "guardrails": "Never name an unnamed official. No unattributed numbers."
+      }
+    },
+    {
+      "entity_type": "scope",
+      "external_id": "scope:/ogmc/gcc-weekly",
+      "name": "GCC Weekly",
+      "data": {
+        "name": "GCC Weekly",
+        "kind": "project",
+        "path": "/ogmc/gcc-weekly",
+        "parent": "/ogmc",
+        "active": true
+      }
+    },
+    {
+      "entity_type": "scope",
+      "external_id": "scope:/sandbox",
+      "name": "Sandbox",
+      "data": {
+        "name": "Sandbox",
+        "kind": "client",
+        "path": "/sandbox",
+        "parent": "",
+        "active": true,
+        "brand_voice": "Anything. This scope exists to be broken."
+      }
+    },
+    {
+      "entity_type": "scope",
+      "external_id": "scope:/ogmc-old",
+      "name": "OGMC (archived 2025)",
+      "data": {
+        "name": "OGMC (archived 2025)",
+        "kind": "client",
+        "path": "/ogmc-old",
+        "parent": "",
+        "active": false
+      }
+    },
+    {
+      "entity_type": "scope",
+      "external_id": "scope:/ogmc/empty-campaign",
+      "name": "Empty Campaign",
+      "data": {
+        "name": "Empty Campaign",
+        "kind": "campaign",
+        "path": "/ogmc/empty-campaign",
+        "parent": "/ogmc",
+        "active": true
+      }
+    }
+  ]
+}

@@ -30,3 +30,6 @@ yarn-error.log*
 
 # Next.js App Router route dir named "build" — keep it (the generic build/ ignore would eat it)
 !/src/app/(dashboard)/build/
+
+# offline local stack: sqlite db, logs, pids, the devauth signing key
+/.local-stack/

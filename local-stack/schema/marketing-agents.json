@@ -1,0 +1,371 @@
+{
+  "$schema_note": "THE marketing-agents (OGMC) TENANT SCHEMA, RECONSTRUCTED FROM COMMITTED SOURCE FOR A FULLY-OFFLINE LOCAL DEV STACK (bd startsim-768w.69). NOT a delta like scripts/schemas/ogmc.json and not a hand-guess: the spine of this payload is a COMMITTED, READ-ONLY CAPTURE of the live declaration. start-simpli-api/tenant-starter/apps/api/tests/test_agent_account_isolation.py carries LIVE_TYPES / LIVE_RELATIONSHIPS, described in its own module docstring as 'the LIVE marketing-agents declaration, read with a read-only GET /api/v1/schema/{types,attributes,relationships}/ on 2026-09-16 and replayed here through the same public endpoints a foundry uses'. Every type key, attribute name, data_type, enum choice list, required flag, config.scope block and relationship end below is taken from that capture unless its own note says otherwise. Nothing here was read from the network: the live tenant was never contacted (no QA credential exists for it and its AWS secret is marked for deletion), so this file is reconstruction from the tree alone.",
+
+  "corroboration_note": "THE CAPTURE IS NOT THE ONLY WITNESS, and the second ones matter because they were taken on DIFFERENT DAYS through a different route — so an attribute present in both is not one capture's typo. (1) marketing-agents-web/src/components/__tests__/record-columns.test.ts holds TOPIC_ATTRS (17), DRAFT_ATTRS (15) and NEWS_ATTRS (19) 'in the order the tenant API returns it (read off GET /api/v1/schema/types on the live tenant 2026-09-07)' — name and ORDER only, no data types. (2) marketing-agents-web/src/lib/__tests__/topic-edit.test.ts holds 'the live marketing-agents `topic` type (GET /api/v1/schema/types/, 2026-09-23)' WITH data types, and it matches the 2026-09-16 capture attribute for attribute. (3) marketing-agents-web/src/lib/__tests__/draft-translation.test.ts and approval-translation.test.ts both record the draft type 'read off the LIVE marketing-agents tenant on 2026-08-19 (ECS exec, inside org_scope(\"marketing-agents\"))' with data types, plus 'rel defs — grounded_by, for_client, written_for, translation_of'. The three draft readings agree, and the one difference between them is accounted for: the 2026-08-19 and 2026-09-07 readings carry 15 draft attributes and the 2026-09-16 one carries 16, the extra being `topic_ref` — exactly the attribute scripts/schemas/ogmc.json declared on 2026-09-07 while saying it 'leaves the other fifteen attributes exactly as they are'. ATTRIBUTE ORDER HERE IS THE CAPTURED ORDER, which is load-bearing beyond cosmetics: record-columns.ts caps a table's default columns at six in the type's own attribute order (DEFAULT_ATTR_CAP), and health-data.ts::intakeStage is choicesOf(status)[0], so reordering silently changes which columns open and which stage counts as intake.",
+
+  "org_note": "Schema rows are per-org and org_id comes from the JWT claim, so this applies to whichever org the token acts as; there is no --org flag. Apply to a LOCAL stack with:  python3 scripts/declare_tenant_schema.py --schema <this file> --base-url http://127.0.0.1:<port> --token \"$TOKEN\"  . AND THEN RUN  manage.py redenormalize_attributes --org <org> --type <each type>  IF ANY ROWS ALREADY EXIST: denormalize_attributes runs on WRITE, so rows already on disk carry no core_attribute row for a newly declared name and every attr.<name> filter answers count: 0 over a corpus full of matches — indistinguishable from not having declared it at all. That silence is what produced three production defects in one day on this tenant (scripts/schemas/ogmc.json, bd startsim-8hgmq.3/.4/.11). On a freshly seeded local stack there is nothing to backfill and the step is a no-op.",
+
+  "access_note": "`access: {}` ON EVERY TYPE IS A DELIBERATE DIVERGENCE FROM THE CAPTURE, and it is the one place this payload is not a transcription. The 2026-09-16 capture carries `access` on `scope` ALONE; the other five types declare no access key and therefore resolve, per tenant-starter/apps/schema_registry/access.py step 3, to the org baseline — any member of the org reads them. For a single-user local dev stack `{}` resolves to the SAME read (org-wide, no row scope) and additionally PINS it, so a later org-wide `*` posture cannot narrow a type the dev stack depends on. It is also below the policy-admin gate: access.py::declares_policy tests TRUTHINESS, so `{\"access\": {}}` does not need TENANT_POLICY_ADMIN_MIN_ROLE and a plain token can apply this file. WHAT IS DELIBERATELY ABSENT IS `row_scope`. The same test file's isolate() PATCHes `access: {\"row_scope\": \"scope\", ...}` onto draft/topic/scope — that is the TEST'S CONFIGURATION UNDER TEST (bd startsim-rjl3b), not part of the live declaration it replays, and copying it here would hide every row from the single local dev user unless that user held a core_grant on each scope container. A local stack that opens empty is worse than no stack. ONE CONDITION ON APPLYING THIS TO A STACK THAT IS NOT FRESH: access.py::declaration_widens_reads refuses a declaration 'by EFFECT rather than by spelling' when an empty policy would replace an org default that declares a row_scope — but it asks 'would declaring this let some role read records that ALREADY EXIST and that it cannot read today?', so it is a check on the TRANSITION over EXISTING ROWS. On a fresh offline stack with no reserved `*` type and no rows it cannot fire. Against an already-seeded stack that has given `*` a row_scope, these five `access: {}` blocks are the thing that would be refused; drop the `access` key from those five types (leaving `scope` alone, which the live tenant declares) and the payload reverts to the capture exactly.",
+
+  "views_note": "NO `config.views` BLOCK ON ANY TYPE, and that is a finding rather than a gap. The 2026-09-16 capture carries exactly two reserved config keys — `scope` and (on the scope type) `access` — and no `views` on any of the six types, so declaring one would be inventing presentation this tenant has never declared. It also is not needed: marketing-agents-web INFERS presentation from data types today (src/lib/board.ts::pickStatusAttr / typeRoute, pinned by src/lib/__tests__/nav-active.test.ts, whose fixture comments read 'Declares status, so typeRoute makes its nav href the BOARD, not the table' and 'no enum -> table'), which is precisely the inference tenant-starter/apps/schema_registry/type_views.py was written to replace on tenants that opt in. marketing-agents has not opted in. Nothing in the app source names which type would hold `board.primary`, and that key is capped at one per org, so guessing it would plant a dashboard pipeline nobody asked for. No views block was dropped for failing validation — none was written.",
+
+  "underscore_keys_note": "THE `_`-PREFIXED KEYS ARE DATA-BLOB-ONLY AND ARE NOT DECLARED HERE. `_origin`, `_trigger`, `_triggered_by`, `_run_id` (marketing-agents-web/src/lib/draft-origin.ts) and `_edit_history` (src/lib/edit-history.ts) are stamped INSIDE Entity.data by the n8n writer and by this app, and all three modules say in words that they are rendered and never filtered: draft-origin.ts — 'THESE ARE RENDERED, NOT FILTERABLE... `_trigger` is not a declared attribute on the draft type... NEVER add ?attr._trigger='; edit-history.ts — '`_edit_history` is not a declared attribute on the draft type... NEVER add ?attr._edit_history='; drafts-view.ts — '`_triggered_by` is not a declared attribute on the draft type'. The 2026-09-16 capture confirms it: not one of the five appears in LIVE_TYPES. They also do not appear in the 2026-09-07 or 2026-08-19 readings. So they are blob keys, not AttributeDefs, and declaring them would make each a generated column and spend a slot in record-columns.ts's six-column default cap for a value no filter may use.",
+
+  "dropped": {
+    "story_title": "NOT DECLARED, DELIBERATELY. It is present on 150 of 150 live drafts and is read by marketing-agents-web/src/lib/topic-drafts.ts::draftTitle, and scripts/schemas/ogmc.json states exactly why it must not be declared without a second decision: 'marketing-agents-web's pickTitleAttr prefers a declared title-ish attribute over the backend's full-text ?search=, so declaring it would silently narrow the Drafts search from \"anywhere in the record, blog body included\" to \"the headline only\"'. It is absent from all three live readings, so not declaring it is also the faithful reconstruction.",
+    "topic_title": "NOT DECLARED. 144 of 150 live drafts carry it (scripts/schemas/ogmc.json) and topic-drafts.ts::buildStoryFromTopic puts it on the writer wire, but nothing filters on it, it is absent from every live reading, and ogmc.json leaves it alone on the stated ground that 'declaring an attribute is not free: it becomes a generated column in the fork's records table and enters its default-visible cap'.",
+    "angle_on_draft": "NOT DECLARED ON `draft`. Present on 150 of 150 live drafts per scripts/schemas/ogmc.json, undeclared there for the same reason as topic_title, and absent from every draft reading. `angle` IS declared on `topic`, where all three readings show it.",
+    "brief": "THERE IS NO `brief` ENTITY TYPE. The brief for this task named `brief` as one of six type keys; it is not one. In marketing-agents-web `brief` is a ChannelId — src/lib/issue-jump.ts: `export type ChannelId = 'brief' | 'linkedin' | 'seo' | 'sources'` — i.e. a tab on the draft review page, mapped from the `blog` and `headline` FIELDS. No route, query key, listAllEntities call or fixture treats it as a type, and it is absent from the 2026-09-16 capture. The sixth live type is `client`, declared below.",
+    "region": "NOT DECLARED. `attr.region` appears twice in the tree but only in fixtures for a hypothetical `deal` type (src/lib/__tests__/board-status-facet.test.ts, board-card.test.ts), exercising generic facet code. No marketing-agents type declares it in any live reading.",
+    "team_notes_on_draft": "NOT DECLARED ON `draft`. The draft page writes `notes`, `review`, `source_meta`, `revised_from` and `human_edited` into the data blob (src/lib/edit-history.ts, src/app/(dashboard)/draft/[draftId]/page.tsx), and none of them is in any live draft reading. Blob keys, left as blob keys."
+  },
+
+  "types": [
+    {
+      "key": "client",
+      "label": "Client",
+      "note": "THE SIXTH LIVE TYPE, and the one the task brief mis-named `brief`. It exists in the 2026-09-16 capture and is the target end of the live `for_client` reldef (topic -> client), which is why it is declared here rather than quietly dropped: scripts/declare_tenant_schema.py::validate refuses a relationship whose source_type or target_type is not a type declared in the same payload, so dropping `client` would mean dropping a live edge. IT IS SUPERSEDED, NOT USED. Its six attributes are byte-for-byte the per-client config fields of the generic `scope` type (name/brand_voice/priority_framework/services/guardrails/active), and scripts/schemas/scope.json opens by saying the replacement is deliberate: 'ONE GENERIC SELF-NESTING TYPE, not client-and-project as two'. marketing-agents-web never reads it — the app's only listAllEntities calls are for topic, draft, news_item and source. Declared so the local stack matches the tenant it stands in for; a reader reaching for per-client config should reach for `scope`.",
+      "config": {
+        "access": {},
+        "note": "No `scope` key at all, exactly as the capture has it. Per tenant-starter/apps/schema_registry/scoping.py that is the UNDECLARED state: ?scope= against this type FAILS CLOSED with a 400 saying the declaration is missing, which is the honest answer for a type nobody has modelled for scoping and is a different message from the deliberate UNSCOPED state news_item and source carry."
+      },
+      "attributes": [
+        {"name": "name", "data_type": "text", "required": false, "config": {},
+         "note": "LIVE_TYPES in tenant-starter/apps/api/tests/test_agent_account_isolation.py (2026-09-16 capture)."},
+        {"name": "brand_voice", "data_type": "longtext", "required": false, "config": {},
+         "note": "Same capture. Same field, same type, as scope.brand_voice in scripts/schemas/scope.json."},
+        {"name": "priority_framework", "data_type": "longtext", "required": false, "config": {},
+         "note": "Same capture; mirrors scope.priority_framework in scripts/schemas/scope.json."},
+        {"name": "services", "data_type": "longtext", "required": false, "config": {},
+         "note": "Same capture; mirrors scope.services in scripts/schemas/scope.json."},
+        {"name": "guardrails", "data_type": "longtext", "required": false, "config": {},
+         "note": "Same capture; mirrors scope.guardrails in scripts/schemas/scope.json."},
+        {"name": "active", "data_type": "boolean", "required": false, "config": {},
+         "note": "Same capture; mirrors scope.active in scripts/schemas/scope.json."}
+      ]
+    },
+
+    {
+      "key": "draft",
+      "label": "Draft",
+      "note": "SIXTEEN ATTRIBUTES, IN THE TENANT'S OWN ORDER. The first fifteen are the 2026-08-19 ECS-exec reading (quoted verbatim in marketing-agents-web/src/lib/__tests__/draft-translation.test.ts and approval-translation.test.ts) in the order marketing-agents-web/src/components/__tests__/record-columns.test.ts::DRAFT_ATTRS records from GET /api/v1/schema/types on 2026-09-07; the sixteenth is `topic_ref`, declared 2026-09-07 by scripts/schemas/ogmc.json. All sixteen are in the 2026-09-16 capture. The order is load-bearing: record-columns.ts fills six default columns from PREFERRED_ATTRS then the type's own order.",
+      "config": {
+        "access": {},
+        "scope": {
+          "path_attribute": "scope_path",
+          "edge": "draft_in_scope"
+        },
+        "note": "SCOPED, which is the one of scoping.py's four states that makes ?scope= work. A non-empty string names the path attribute and the filter is applied; UNDECLARED (no key), UNSCOPED (null/\"\"/{}) and MALFORMED all FAIL CLOSED with a 400. `scope_path` is the name marketing-agents-web/src/lib/scope.ts exports as SCOPE_PATH_ATTR ('Declared on the topic and draft types, and named ONCE here'), and the capture declares the same. `edge: draft_in_scope` is in the capture too and is why the reldef of that name is declared below: scoping.py's EDGE_KEY is OPTIONAL — a type with a path and no edge can still be READ by ?scope= but cannot be STAMPED on upsert, because there is no container type to resolve the path against — so omitting it would leave every locally-created draft unstampable and silently invisible to the scope-gated UI."
+      },
+      "attributes": [
+        {"name": "content_type", "data_type": "enum", "required": false,
+         "config": {"choices": ["weekly_brief", "lead_magnet", "general"]},
+         "note": "2026-09-16 capture; choices corroborated three ways. marketing-agents-web/src/lib/content.ts::CONTENT_CATEGORIES lists the same three keys and explains why `lead_magnet` must keep its STORED spelling even though OGMC calls it 'Evergreen': the value is written by LLM prose in two active n8n agents (one of which says 'use these EXACT values'), branched on by three code nodes and a no-fallback Switch, and enforced by the Content Judge's LEAD-MAGNET DEPTH guardrail. src/__tests__/foundry.nav.test.ts fixtures the same three, and tenant-starter/apps/core/tests/test_backfill_draft_content_type.py uses all three as live-shaped values."},
+        {"name": "candidate_index", "data_type": "integer", "required": false, "config": {},
+         "note": "2026-09-16 capture ('integer'); the 2026-08-19 reading records it as 'int'. Read by src/lib/topic-drafts.ts::draftCandidateIndex as the writer's 1-based candidate ordinal, and filled on 150 of 153 live drafts per src/app/(dashboard)/t/[typeKey]/page.tsx."},
+        {"name": "blog", "data_type": "longtext", "required": false, "config": {},
+         "note": "2026-09-16 capture. The 400-500 word body: src/lib/content-checks.ts maps the `blog` editor section into ContentFields, src/components/record-columns.ts lists it in WIDE_FIELDS so it never opens as a default column, and src/components/__tests__/drawer-edit-stamp.test.tsx fixtures it as longtext."},
+        {"name": "linkedin", "data_type": "longtext", "required": false, "config": {},
+         "note": "2026-09-16 capture. The LinkedIn channel body; src/lib/content-checks.ts reads it alongside `blog`, src/lib/issue-jump.ts makes it one of the four review channels."},
+        {"name": "seo", "data_type": "json", "required": false, "config": {},
+         "note": "2026-09-16 capture. A structured object, not prose: src/lib/content-checks.ts reads `tags` and `meta_description` out of it, and src/lib/__tests__/draft-translation.test.ts fixtures it as {meta_description, tags}."},
+        {"name": "sources", "data_type": "json", "required": false, "config": {},
+         "note": "2026-09-16 capture. json and not text because the stored container is EITHER a newline-delimited string OR an array of entry strings and both must round-trip — src/lib/sources.ts::parseSources / serializeSources exist for exactly that ('a lossless round-trip... the pipeline never sees a token it can't parse')."},
+        {"name": "judge_verdict", "data_type": "json", "required": false, "config": {},
+         "note": "2026-09-16 capture. The Content Judge object; src/lib/topic-drafts.ts::draftJudgeVerdict reads its `verdict` field, and src/components/record-columns.ts::formatCell special-cases an object cell to surface `verdict` rather than dumping the blob. Filled on 150 of 153 live drafts (src/app/(dashboard)/t/[typeKey]/page.tsx)."},
+        {"name": "auto_checks", "data_type": "json", "required": false, "config": {},
+         "note": "2026-09-16 capture; fixtured as json in src/lib/__tests__/board-card.test.ts and listed in record-columns.ts::WIDE_FIELDS."},
+        {"name": "chosen", "data_type": "boolean", "required": false, "config": {},
+         "note": "2026-09-16 capture ('chosen(bool)' in the 2026-08-19 reading). The flag the draft page sets when a reviewer picks one of three candidates — src/app/(dashboard)/draft/[draftId]/page.tsx flips it 'to chosen+approved in one' save."},
+        {"name": "sent_at", "data_type": "date", "required": false, "config": {},
+         "note": "2026-09-16 capture. src/app/(dashboard)/draft/[draftId]/page.tsx: 'status says a human signed it off, `sent_at` says when it went out'. src/lib/drafts-view.ts records that exactly one of 77 live drafts carries it, which is why src/app/(dashboard)/t/[typeKey]/page.tsx::DRAFT_SPARSE_ATTRS keeps it out of the default columns — a fact about the DATA, not a reason to leave it undeclared. src/lib/__tests__/board-recency.test.ts fixtures it as date."},
+        {"name": "assignee_sub", "data_type": "text", "required": false, "config": {},
+         "note": "2026-09-16 capture. The board's 'assigned to me' quick filter is gated on this declaration: src/app/(dashboard)/board/[typeKey]/page.tsx computes hasAssigneeAttr from `(type?.attributes ?? []).some(a => a.name === 'assignee_sub' && a.dataType !== 'enum')` and only then calls whoami(), and the filter goes out as attr.assignee_sub."},
+        {"name": "assignee_name", "data_type": "text", "required": false, "config": {},
+         "note": "2026-09-16 capture. Rendered as an initials chip by src/components/record-columns.ts (ASSIGNEE_NAME_ATTR), which also records it blank in 152 of 153 drafts and 82 of 84 topics — hence DRAFT_SPARSE_ATTRS, not a reason to drop the declaration."},
+        {"name": "lang", "data_type": "enum", "required": false,
+         "config": {"choices": ["en", "ar", "zh"]},
+         "note": "2026-09-16 capture, three choices. The 2026-08-19 reading recorded 'lang(enum: en|ar)' and approval-translation.test.ts annotates it '`zh` added since, and both an `ar` and a `zh` translation were produced live on 2026-08-19'; src/lib/__tests__/draft-translation.test.ts fixtures the enum as ['en','ar','zh']. ENUM is load-bearing: src/lib/draft-translation.ts::declaredLangChoices offers a language only if the type declares it, so src/app/actions/translate-draft/route.ts can say 'adding `zh` for the WeChat channel is a schema change and no code change at all'. src/lib/draft-translation.ts filters existing translations with attr.lang."},
+        {"name": "status", "data_type": "enum", "required": false,
+         "config": {"choices": ["ready_for_review", "under_review", "approved", "published", "rejected", "not_for_publication", "for_repurpose", "drafting", "ready", "needs_revision", "sent"]},
+         "note": "2026-09-16 capture, ELEVEN choices, and the shape is not an accident. The first seven are the team's live vocabulary and are exactly marketing-agents-web/src/lib/draft-status.ts::STATUSES in its declared pipeline order (ready_for_review, under_review, approved, published, rejected, not_for_publication, for_repurpose). The last four are the RETIRED pre-wn2p.2 values, still declared: src/lib/lanes.ts says so in words — 'the four retired draft values are still declared (so they still get lanes of their own)' — and draft-status.ts records the migration that mapped ready/sent -> approved and drafting/blank -> ready_for_review, warning that `ready` is the dangerous overlap because it used to mean 'approved' while the team's `ready for review` means the opposite. KEEPING THEM IS NOT TIDINESS LOST: a row carrying a value the schema does not declare has no lane at all and would vanish from the board into src/lib/lanes.ts::unaccountedFor. src/app/(dashboard)/board/[typeKey]/page.tsx names `approved` as DRAFT_DONE_STATUS and src/lib/approval-translation.ts as APPROVED_STATUS."},
+        {"name": "scope_path", "data_type": "text", "required": false, "config": {},
+         "note": "2026-09-16 capture, and named by this type's own config.scope.path_attribute above. marketing-agents-web/src/lib/scope.ts exports SCOPE_PATH_ATTR = 'scope_path' and states it is 'Declared on the topic and draft types'. TEXT and never json or longtext: the __under subtree operator is a range scan on value_text and refuses any other column (scripts/schemas/scope.json's note on scope.path). src/lib/__tests__/topic-edit.test.ts records what happens when a whole-blob PATCH drops it — 'a PATCH that drops it returns 200 and the row goes invisible to every non-exempt reader', because tenant-starter's perform_update never calls _require_scope_stamped. src/components/record-columns.ts keeps it out of default columns ('always \"/ogmc\" on this tenant — one value'), which is a column decision and not a declaration one."},
+        {"name": "topic_ref", "data_type": "text", "required": false, "config": {},
+         "note": "TEXT, NOT json, AND THE REASON IS WRITTEN DOWN. Copied from scripts/schemas/ogmc.json, which declared it live on 2026-09-07 and explains: 'the value is a uuid STRING, and value_column() sends json-typed attributes to value_json where an exact text match would never land'. It was written on 147 of 150 drafts by the n8n writer (buildStoryFromTopic, `topic_ref: String(topic.id)`) and declared on none of them, and the tenant answers a filter on an undeclared attribute by APPLYING it and matching nothing — count: 0, named in applied_filters and absent from ignored_filters. That silence produced three defects in one day: /t/draft opened empty for every user under a chip reading 'Topic approved' (startsim-8hgmq.4) and the server-side 'already has drafts' guard had a structurally zero count, so it relayed the writer twice for one topic 79 seconds apart (startsim-8hgmq.3). marketing-agents-web/src/lib/topic-drafts.ts names it ONCE as TOPIC_REF_ATTR; src/lib/drafts-view.ts and src/lib/topic-gate.ts both narrow with it only when declaresTopicRef() says the type declares it, which is why an offline stack that omits it is slow rather than silently empty. Present in the 2026-09-16 capture."}
+      ]
+    },
+
+    {
+      "key": "news_item",
+      "label": "News item",
+      "note": "NINETEEN ATTRIBUTES. Names and order are marketing-agents-web/src/components/__tests__/record-columns.test.ts::NEWS_ATTRS, 'read off GET /api/v1/schema/types on the live tenant 2026-09-07'; the data types and the status choices are the 2026-09-16 capture. The two agree on all nineteen names in the same order. This is the ingest corpus — 4,116 rows on 2026-08-24 per src/lib/foundry-api.ts — and the gate BEFORE the editorial spine: src/lib/content.ts::NEWS_TYPE_KEY, 'only `acceptable` news is fed to the n8n topic strategist'.",
+      "config": {
+        "access": {},
+        "scope": {
+          "path_attribute": null
+        },
+        "note": "DELIBERATELY UNSCOPED, and saying so is the point — copied from the capture, and the same spelling scripts/schemas/scope.json's worked example gives its `shared_corpus_item`. Per scoping.py this is the UNSCOPED state, not UNDECLARED: ?scope= against it is a 400 that says the type declares itself unscoped and points at the judgment read, never an unfiltered list and never merely a line in ignored_filters. One corpus, subscribed to by many scopes (epic startsim-ux39t decision 2): gulfnews is fetched once and cited by two clients rather than ingested twice. The invariants in test_agent_account_isolation.py check that 'the shared news_item corpus stays shared'."
+      },
+      "attributes": [
+        {"name": "url", "data_type": "text", "required": false, "config": {},
+         "note": "2026-09-16 capture. src/components/record-columns.ts measures it at 106 chars average / 171 max on the live tenant and keeps it out of default columns as a long single-line value; src/components/__tests__/record-columns.test.ts asserts it is still OFFERED in the Columns menu."},
+        {"name": "title", "data_type": "text", "required": false, "config": {},
+         "note": "2026-09-16 capture; fixtured as text in src/lib/__tests__/board-recency.test.ts. src/components/record-columns.ts::NAME_DUPLICATE_ATTRS drops it from default columns because 'on news_item `data.title` was byte-identical to `record.name` in 146 of 150 live rows (2026-09-07)'. Filtered with attr.title__icontains by src/lib/board.ts, verified live there ('?type=topic&attr.title__icontains=qatar -> count 4')."},
+        {"name": "snippet", "data_type": "longtext", "required": false, "config": {},
+         "note": "2026-09-16 capture. longtext and not text: src/components/record-columns.ts measured it at 313 characters average and 6,374 max on the live tenant, which is why WIDE_FIELDS keeps it off the default row."},
+        {"name": "domain", "data_type": "text", "required": false, "config": {},
+         "note": "2026-09-16 capture. The join key between the corpus and the approved-source list: src/lib/health-data.ts::ingestionSummary matches news_item.domain against source.domain case-insensitively, and src/lib/__tests__/health-data.test.ts fixtures both sides on it. One of the six columns the News table opens with (src/components/__tests__/record-columns.test.ts)."},
+        {"name": "source_name", "data_type": "text", "required": false, "config": {},
+         "note": "2026-09-16 capture. Declared and deliberately NOT default-visible: src/components/__tests__/record-columns.test.ts records it 'identical to domain in 150/150 rows' on the live tenant, which is a column decision, not a reason to leave it undeclared."},
+        {"name": "tier", "data_type": "integer", "required": false, "config": {},
+         "note": "2026-09-16 capture ('integer'). The source-quality band; src/components/__tests__/record-columns.test.ts records it 'null in 150/150 rows' here, while src/lib/__tests__/approved-sources.test.ts shows it populated on the `source` type (tier: 1, tier: 4)."},
+        {"name": "approved", "data_type": "boolean", "required": false, "config": {},
+         "note": "2026-09-16 capture, and independently pinned as BOOLEAN by behaviour: src/components/__tests__/record-columns.test.ts says the cell 'renders \"Yes\"' on the live rows, and src/components/record-columns.ts::formatCell renders Yes/No only when attr.dataType === 'boolean'. True in 150/150 live rows."},
+        {"name": "adapter", "data_type": "text", "required": false, "config": {},
+         "note": "2026-09-16 capture. Which ingest adapter produced the row; the same attribute name and type appear on the `source` type below."},
+        {"name": "query", "data_type": "text", "required": false, "config": {},
+         "note": "2026-09-16 capture. The search that surfaced the article (the Tavily/news-site fetcher's own term)."},
+        {"name": "market", "data_type": "text", "required": false, "config": {},
+         "note": "2026-09-16 capture. One of the six columns the News table opens with (src/components/__tests__/record-columns.test.ts: 'Name | Created | Domain | Market | State | Curation'); the same attribute name and type appear on `topic`, where src/lib/topic-drafts.ts::buildStoryFromTopic puts it on the writer wire."},
+        {"name": "lang", "data_type": "text", "required": false, "config": {},
+         "note": "2026-09-16 capture — TEXT here, where the same name is an ENUM on `draft`. The difference is in the capture and is kept rather than harmonised: an ingested article's language is observed, a draft's is chosen from a declared set (src/lib/draft-translation.ts::declaredLangChoices offers only declared choices). A text `lang` also cannot be mistaken for a board lane, since src/lib/board.ts::pickStatusAttr only considers enum attributes with choices."},
+        {"name": "published_at", "data_type": "date", "required": false, "config": {},
+         "note": "2026-09-16 capture, and independently pinned as DATE by behaviour: src/lib/board.ts::pickRecencyAttr returns a RECENCY_ATTR_NAMES entry only when `a.dataType === 'date'`, and src/lib/__tests__/board-recency.test.ts asserts pickRecencyAttr(newsType) === 'published_at'. The board's recency window filters on attr.published_at__gte, verified live in src/lib/foundry-api.ts ('attr.published_at__gte=2026-08-10 returns 1,135 of 4,116') and in src/lib/lanes.ts. board.ts also records that 167 of the 4,116 live rows have no published_at, which is why recencyDate falls back per record to createdAt."},
+        {"name": "first_seen", "data_type": "date", "required": false, "config": {},
+         "note": "2026-09-16 capture ('date')."},
+        {"name": "last_seen", "data_type": "date", "required": false, "config": {},
+         "note": "2026-09-16 capture ('date')."},
+        {"name": "times_seen", "data_type": "integer", "required": false, "config": {},
+         "note": "2026-09-16 capture ('integer'), corroborated by tenant-starter/apps/api/tests/test_upsert.py, which declares `times_seen` as data_type='integer' on a news_item type and upserts it as 1/2/5/9."},
+        {"name": "used_in", "data_type": "text", "required": false, "config": {},
+         "note": "2026-09-16 capture ('text'). Named by the watch declaration's `news-cited` bucket territory (the topic strategist's sink); text rather than json per the capture, so an exact attr.used_in match lands on value_text."},
+        {"name": "notes", "data_type": "longtext", "required": false, "config": {},
+         "note": "2026-09-16 capture ('longtext'); same name and type on the `source` type below."},
+        {"name": "content", "data_type": "longtext", "required": false, "config": {},
+         "note": "2026-09-16 capture ('longtext'). The fetched article body; src/components/record-columns.ts lists `content` in WIDE_FIELDS so it never opens as a default column."},
+        {"name": "status", "data_type": "enum", "required": false,
+         "config": {"choices": ["new", "surfaced", "acceptable", "cited", "ignored", "rejected", "preview_only"]},
+         "note": "2026-09-16 capture, seven choices, and six of the seven are corroborated by the committed pipeline watches: start-simpli-api/backend/apps/foundry/watch_declarations/ogmc.json declares one watch per bucket — news-new (status=new), news-surfaced, news-acceptable, news-cited, news-ignored, news-rejected — and names the stage that drains each ('Classifier backlog', 'Acceptance-agent backlog', 'Topic-strategist pool'). `preview_only` is in the capture and in no watch. src/lib/review-vocabulary.ts::NEWS_REVIEW_CONFIG pins the two a human writes (approveStatus 'acceptable', rejectStatus 'rejected', verdicts [], omitNeedsWork true — 'that type declares no team_verdict'), and src/lib/lanes.ts records live counts against attr.status=rejected (808) and attr.status=new (23). ORDER IS THE PIPELINE ORDER the capture returned, which is also the lane order src/lib/board.ts::boardColumns draws."}
+      ]
+    },
+
+    {
+      "key": "scope",
+      "label": "Scope",
+      "identity": "external_id is `scope:<path>` — the path is the natural key, so an upsert that re-sends a scope lands on the same row. Re-parenting therefore CHANGES the external_id along with the path, and the mover does exactly that (bd startsim-hdtds, tenant-starter/apps/schema_registry/scope_moves.py): a scope row whose external_id ENDS WITH the path it is moving off has that suffix rewritten. Left stale it would be worse than cosmetic — the next re-send of the scope resolves on `scope:<new path>`, finds nothing, and creates a DUPLICATE scope at the new path beside the one that moved. The suffix guard is why a corpus row keyed on a URL is never touched by the same rule.",
+      "verbatim_note": "COPIED VERBATIM FROM start-simpli-api/scripts/schemas/scope.json — types, config and all nine attributes with their own notes, plus the `parent_scope` relationship below. That file is the authoritative, already-committed declaration of the scope primitive (bd startsim-mwvwp, under epic startsim-ux39t) and NOTHING HERE WAS INVENTED OR RE-DERIVED. The 2026-09-16 live capture in tenant-starter/apps/api/tests/test_agent_account_isolation.py matches it attribute for attribute, including both `required` flags and the `path_attribute`/`parent_attribute` pair. scope.json's top-level `scoped_corpus_example` block is deliberately NOT lifted: it is documentation the test suite executes (tenant-starter/apps/api/tests/test_scope_primitive.py), spelled with a different path-attribute name on purpose, and merging its two-attribute `news_item` and its `in_scope` reldef would have overwritten this payload's real news_item with a worked example.",
+      "config": {
+        "access": {},
+        "scope": {
+          "path_attribute": "path",
+          "parent_attribute": "parent"
+        }
+      },
+      "scope_key_note": "`parent_attribute` NAMES THE MIRROR SO A MOVE CAN REWRITE IT (bd startsim-hdtds). `parent` is `path` minus its last segment, stored redundantly so `?attr.parent=/ogmc` answers 'the direct children' with no derivation — the first query a scope switcher issues. A rename that rewrote only `path` would leave every descendant's `parent` pointing at a container that no longer exists, and the switcher would draw the tree as it was. NO `edge` HERE, deliberately: a scope's own containment is `parent_scope`, which is a self-edge derived from `parent` rather than from a scope stamp, and a scope's `path` is NEW by definition — it is the one path that must not be required to name a container that already exists, or the first scope in a tenant could never be created.",
+      "config_note": "`access: {}` is DELIBERATE, not a stub, and is the same reasoning scripts/schemas/planning.json states for `focus`: an empty policy means readable by every member of the org, no row scope, and PINNED — a type's own `access` REPLACES the org-wide `*` default wholesale, so a later org-wide posture cannot silently narrow the one type every scoped read resolves through. A tenant that must hide scopes from some members declares row_scope here having read the orphaning warning in access.py; it is NOT the default, because a scope switcher that silently loses half its tree reads as data loss. The SCOPE-AWARE READ GATE — staff see every scope, a client user sees one — is bd startsim-lyqyd and mirrors row_scope_exempt_*; it is not this key.",
+      "attributes": [
+        {
+          "name": "name",
+          "data_type": "text",
+          "required": true,
+          "config": {},
+          "note": "What a person calls it: 'OGMC', 'GCC Weekly'. Duplicates Entity.name on purpose, for the same reason planning.json's `title` does: Entity.name carries display and search, the attribute carries queryability and ordering, and only declared attributes get the core_attribute rows that are filterable at all."
+        },
+        {
+          "name": "kind",
+          "data_type": "enum",
+          "required": false,
+          "config": {
+            "choices": ["client", "project", "campaign"]
+          },
+          "note": "THE LABEL A PERSON USES, and PRESENTATIONAL ONLY — never a query gate. Nothing in the server branches on it: a scope's place in the tree is its `path`, and a filter that read `kind` would reintroduce the client-vs-project split this type exists to remove. A tenant whose vernacular needs a fourth word extends `choices` with a config PATCH; that is a data change, not a migration."
+        },
+        {
+          "name": "path",
+          "data_type": "text",
+          "required": true,
+          "config": {},
+          "note": "THE MATERIALIZED PATH, and the whole query mechanism: `/ogmc`, `/ogmc/gcc-weekly`. Leading separator always; no trailing one (filters.normalize_container corrects a caller's trailing slash, but stored values carry none). TEXT and never longtext or json: `__under` is a range scan on value_text and refuses any other column outright, and values longer than core.search.MAX_FILTERABLE_TEXT_CHARS fall outside the partial index the filter repeats the predicate of. Named by this type's own `config.scope.path_attribute`, which is what makes the scope type navigable by the same `?scope=` every other type uses."
+        },
+        {
+          "name": "parent",
+          "data_type": "text",
+          "required": false,
+          "config": {},
+          "note": "The PARENT's path, or EMPTY for a root. REDUNDANT WITH `path` BY CONSTRUCTION — it is `path` minus its last segment — and stored anyway because a tree UI filters `?attr.parent=/ogmc` for direct children without deriving anything, and because a mismatch between the two is a detectable corruption rather than an invisible one. THE EMPTY SPELLING FOR A ROOT IS LOAD-BEARING AND WAS MEASURED, not assumed: denormalize_attributes writes a core_attribute row for a declared key whose value is the empty string, so `?attr.parent=` is a real filter that returns exactly the top-level scopes — the first query a scope switcher issues. A root storing `/` instead would leave 'list the clients' with no spelling but an anti-join over the whole type. Note that scoping.ancestors() tops out at `/` rather than at `` — the resolution root is not the stored parent value, and the one conversion between them is documented on that function. It is NOT the subtree mechanism either way: a chain of `parent` reads is the depth-capped walk the path exists to replace."
+        },
+        {
+          "name": "active",
+          "data_type": "boolean",
+          "required": false,
+          "config": {},
+          "note": "Whether work still happens here. A boolean and not a status enum, because 'paused', 'churned' and 'archived' are things a person tracks ABOUT a client rather than things the pipeline branches on — and the pipeline needs exactly one bit. Absent means active: a scope nobody has answered the question about is not thereby switched off."
+        },
+        {
+          "name": "brand_voice",
+          "data_type": "longtext",
+          "required": false,
+          "config": {},
+          "note": "INHERITED. How this scope sounds. longtext because it is the paragraph an LLM is actually handed, and it lives on the RECORD rather than in n8n prompt text — which is where OGMC's lived, and is why every other client's copy would have been written in OGMC's voice. Empty means 'ask my parent' (see inheritance_note); it does not mean 'no voice'."
+        },
+        {
+          "name": "priority_framework",
+          "data_type": "longtext",
+          "required": false,
+          "config": {},
+          "note": "INHERITED. What this scope considers worth covering — the rubric the classifier and the judge apply. This is the field whose absence made the whole corpus implicitly OGMC's: a sports client scored against a GCC construction rubric gets a plausible answer to the wrong question, which is the failure that is hardest to see."
+        },
+        {
+          "name": "guardrails",
+          "data_type": "longtext",
+          "required": false,
+          "config": {},
+          "note": "INHERITED. What must never be said or done for this scope. INHERITANCE IS A UNION IN SPIRIT AND A SINGLE VALUE IN STORAGE: a child that declares its own guardrails REPLACES its parent's rather than adding to them, exactly as every other inherited field does, so a child overriding this must restate what it still needs. Stated here because 'the child adds a rule' is the reading a person expects and it is not the one the resolver implements."
+        },
+        {
+          "name": "services",
+          "data_type": "longtext",
+          "required": false,
+          "config": {},
+          "note": "INHERITED. What this scope is actually delivered — the engagement, in the words the deliverable is written against."
+        }
+      ]
+    },
+
+    {
+      "key": "source",
+      "label": "Source",
+      "note": "EIGHT ATTRIBUTES, from the 2026-09-16 capture. THESE RECORDS ARE THE APPROVED-SOURCE LIST, and that is load-bearing rather than descriptive: marketing-agents-web/src/lib/content-checks.ts declares SOURCE_TYPE = 'source' and resolves the review gate's allow-list off these rows, because the hardcoded list it replaced had drifted — 'the overlap between the hardcoded list and n8n's was NINE, so 14 of the domains the pipeline is told to source FROM were domains the reviewer then blocked, and 59 of 59 drafts with sources cited at least one of them. Nothing could be approved.' 55 live rows / 53 distinct active hosts on 2026-08-20 (src/lib/__tests__/approved-sources.test.ts). src/__tests__/foundry.nav.test.ts fixtures it as the plain config type: 'no enum -> table'.",
+      "config": {
+        "access": {},
+        "scope": {
+          "path_attribute": null
+        },
+        "note": "DELIBERATELY UNSCOPED, copied from the capture — the same statement news_item makes, and for the same reason: one shared corpus of outlets, not one per client. Per scoping.py this is the UNSCOPED state (fail closed, and say it is deliberate), distinct from UNDECLARED."
+      },
+      "attributes": [
+        {"name": "domain", "data_type": "text", "required": false, "config": {},
+         "note": "2026-09-16 capture, and THE field the approval gate reads: src/lib/content-checks.ts::approvedHostsFromSources normalises `data.domain` off every record and skips rows with no usable one. src/lib/__tests__/approved-sources.test.ts fixtures it with live-shaped values ('gulfnews.com', 'https://www.Zawya.com/some/path', 'difc.com:443') and src/lib/health-data.ts joins news_item.domain to it."},
+        {"name": "tier", "data_type": "integer", "required": false, "config": {},
+         "note": "2026-09-16 capture ('integer'); fixtured with the values 1, 2 and 4 in src/lib/__tests__/approved-sources.test.ts. Note the gate does NOT read it — src/lib/content-checks.ts keys only on domain and active, and that test asserts a row with a tier and no domain is skipped."},
+        {"name": "adapter", "data_type": "text", "required": false, "config": {},
+         "note": "2026-09-16 capture. Which ingest adapter fetches this outlet; same name and type as news_item.adapter."},
+        {"name": "coverage", "data_type": "text", "required": false, "config": {},
+         "note": "2026-09-16 capture ('text')."},
+        {"name": "feed_url", "data_type": "text", "required": false, "config": {},
+         "note": "2026-09-16 capture ('text')."},
+        {"name": "active", "data_type": "boolean", "required": false, "config": {},
+         "note": "2026-09-16 capture ('boolean'), and its SEMANTICS are pinned by src/lib/content-checks.ts: 'active: false is honoured — a retired source stops being approved without anyone deleting its record and losing its history', while a MISSING flag reads as active ('Most live source rows omit `active`. Defaulting it to false would' break the gate — src/lib/__tests__/approved-sources.test.ts). required stays false precisely so absent keeps meaning active."},
+        {"name": "notes", "data_type": "longtext", "required": false, "config": {},
+         "note": "2026-09-16 capture ('longtext'); same name and type as news_item.notes."},
+        {"name": "source_type", "data_type": "enum", "required": false,
+         "config": {"choices": ["state_wire", "government_body", "independent_press", "institutional", "advisory"]},
+         "note": "2026-09-16 capture, five choices. THE ONE ENUM ON THIS TYPE, and it changes how the app draws the type: src/lib/board.ts::pickStatusAttr takes an attribute named exactly `status` if there is one and otherwise THE FIRST enum with choices, so with no `status` attribute here this is what a board would lane on. src/__tests__/foundry.nav.test.ts nonetheless fixtures `source` with no attributes at all and comments 'no enum -> table' — the fixture is a simplification of the live type, not a contradiction of it, and the real consequence is only that /board/source is reachable."}
+      ]
+    },
+
+    {
+      "key": "topic",
+      "label": "Topic",
+      "note": "SEVENTEEN ATTRIBUTES, AGREED BY THREE INDEPENDENT READINGS. The 2026-09-16 capture, marketing-agents-web/src/components/__tests__/record-columns.test.ts::TOPIC_ATTRS (names + order, GET /api/v1/schema/types 2026-09-07) and src/lib/__tests__/topic-edit.test.ts::TOPIC_TYPE ('the live marketing-agents `topic` type (GET /api/v1/schema/types/, 2026-09-23)', names + data types) list the same seventeen in the same order with the same types. This is the editorial spine: src/lib/content.ts declares CONTENT_TYPE_KEY = 'topic' and says the three 'content types' are NOT separate entity types but values of the `content_type` enum on this one type.",
+      "config": {
+        "access": {},
+        "scope": {
+          "path_attribute": "scope_path",
+          "edge": "topic_in_scope"
+        },
+        "note": "SCOPED — the one of scoping.py's four states under which ?scope= resolves and applies a filter instead of failing closed. `scope_path` is marketing-agents-web/src/lib/scope.ts's SCOPE_PATH_ATTR, declared on topic and draft alike, and the capture declares the same name here. `edge: topic_in_scope` is in the capture and names the reldef below; per scoping.py EDGE_KEY is optional and a type without it can be read by ?scope= but never STAMPED on upsert, so omitting it would make every locally created topic unstampable."
+      },
+      "attributes": [
+        {"name": "title", "data_type": "text", "required": false, "config": {},
+         "note": "2026-09-16 capture and src/lib/__tests__/topic-edit.test.ts (live type, 'text'). It is the default titleAttr of the shared review resolver (packages/ui/src/components/collection/review.ts: `titleAttr: config.titleAttr ?? 'title'`), so src/lib/topic-edit.ts offers it as the one field the form refuses to clear. text, not longtext, is what makes its editor a single-line input: topic-edit.ts takes `multiline` from the attribute's own dataType, 'never guessed'. Folded into the stacked Title cell by src/app/(dashboard)/t/[typeKey]/page.tsx::CONTENT_TITLE_ATTRS rather than given a column of its own."},
+        {"name": "angle", "data_type": "longtext", "required": false, "config": {},
+         "note": "2026-09-16 capture; 'longtext' in the 2026-09-23 live read (src/lib/__tests__/topic-edit.test.ts). The default summaryAttr of the shared resolver (packages/ui review.ts: `summaryAttr: config.summaryAttr ?? 'angle'`). src/lib/topic-edit.ts calls it 'the topic's editorial direction and the thing the n8n writer actually consumes', and src/lib/topic-drafts.ts::buildStoryFromTopic sends it to the writer as `context`. longtext is what makes it a textarea."},
+        {"name": "market", "data_type": "text", "required": false, "config": {},
+         "note": "2026-09-16 capture and the 2026-09-23 live read. One of the shared resolver's DEFAULT_META_ATTRS (packages/ui review.ts: ['content_type','market']), filtered to those the type declares; src/lib/topic-drafts.ts::buildStoryFromTopic puts it on the writer wire; src/components/record-columns.ts gives it a fixed 140px column."},
+        {"name": "content_type", "data_type": "enum", "required": false,
+         "config": {"choices": ["weekly_brief", "lead_magnet", "general"]},
+         "note": "2026-09-16 capture, and the enum THE WHOLE CONTENT TAXONOMY HANGS OFF. src/lib/content.ts::declaredContentTypes reads these choices off the live type rather than off its own CONTENT_CATEGORIES list, 'so a kind added in the schema becomes navigable with no code change' — CONTENT_CATEGORIES stays the LABEL source and the schema is the MEMBERSHIP source. The same three keys appear in src/__tests__/foundry.nav.test.ts and in tenant-starter/apps/core/tests/test_backfill_draft_content_type.py. The STORED value `lead_magnet` must not be renamed to match OGMC's word 'Evergreen' (content.ts: written by LLM prose in two active n8n agents, branched on by three code nodes and a no-fallback Switch, enforced by the Content Judge's LEAD-MAGNET DEPTH guardrail). Order is the capture's order, which is also the order the sidebar lists the three tabs in (foundry.nav.test.ts)."},
+        {"name": "status", "data_type": "enum", "required": false,
+         "config": {"choices": ["suggested", "ready", "rejected", "written"]},
+         "note": "2026-09-16 capture, four choices, AND THE ORDER IS LOAD-BEARING IN THREE PLACES — which is why it is not a free choice. (1) src/lib/health-data.ts::intakeStage is choicesOf(status)[0], and its measured live href is /t/topic?status=suggested, so `suggested` must be FIRST. (2) packages/ui/src/components/collection/review.ts::deriveReviewTransitions comments that its convention 'matches `suggested -> ready -> rejected -> written`' — the exact order used here — and derives reject = first choice matching /reject|declin|archiv|.../ and approve = the first choice that is not the entry stage, not the reject stage and not terminal (TERMINAL_RE includes `written`), which yields approve = 'ready'. That is the value src/lib/topic-drafts.ts::canGenerateDrafts gates 'Generate drafts' on, and the value src/lib/review-vocabulary.ts relies on for its one shared TOPIC_REVIEW_CONFIG. (3) type_views.py says a board's lanes are its choices in declaration order, and src/lib/__tests__/health-data.test.ts pins topicPipeline's stages as suggested, ready, rejected, written in that order. src/lib/content.ts states the same pipeline, and src/lib/drafts-view.ts::APPROVED_TOPIC_STATUSES = ['ready','written'] — `written` deliberately included because it is the stage a topic reaches AFTER its drafts exist."},
+        {"name": "ai_rank", "data_type": "number", "required": false, "config": {},
+         "note": "2026-09-16 capture ('number'); 'number' also in the 2026-09-23 live read. NUMBER and not integer, taken from both readings rather than inferred from the name. src/components/record-columns.ts::NEVER_DEFAULT_ATTRS keeps it off default columns on the reviewers' own request ('these don't have much added value for us' — Malin + Jurga, bd startsim-b008b), which is a column decision and not a declaration one."},
+        {"name": "team_verdict", "data_type": "text", "required": false, "config": {},
+         "note": "TEXT AND NOT ENUM, stated outright in src/lib/health-data.ts: 'team_verdict is declared text, not enum, so there is no choice list to derive lanes from and faking one would invent a taxonomy the tenant never declared' — so its breakdown is grouped by OBSERVED value ('good 11 · bad 8'). The 2026-09-16 capture and the 2026-09-23 live read both say text. It is the default verdictAttr of the shared resolver (packages/ui review.ts: `verdictAttr: config.verdictAttr ?? 'team_verdict'`) and the signal the n8n re-rank agent turns back INTO status — src/lib/review-vocabulary.ts exists as ONE shared object precisely because 'a surface that wrote one without the other would look right on screen and silently desynchronise them'. src/components/record-columns.ts drops its column while recording that 'team_verdict KEEPS BEING WRITTEN'."},
+        {"name": "team_notes", "data_type": "longtext", "required": false, "config": {},
+         "note": "2026-09-16 capture; 'longtext' in the 2026-09-23 live read. The default noteAttr of the shared resolver (packages/ui review.ts: `noteAttr: config.noteAttr ?? 'team_notes'`), rendered as 'What the reviewer asked for' and offered as an editable textarea by src/lib/topic-edit.ts. src/lib/health-data.ts::isUnjudged reads it alongside team_verdict ('a teaching note without a verdict still means a human has looked at it')."},
+        {"name": "source_1", "data_type": "text", "required": false, "config": {},
+         "note": "2026-09-16 capture and the 2026-09-23 live read. One of the shared resolver's DEFAULT_SOURCE_ATTRS (packages/ui review.ts: ['source_1','source_2','source_3','sources']); src/lib/topic-drafts.ts newline-joins the three non-empty ones onto the writer wire. THE DIGIT IN THE NAME IS A KNOWN HAZARD and is a reason to keep the declared spelling exactly: src/lib/foundry-api.ts records that the shared client's key transform is not an involution — snake->camel uppercases the character after `_`, which is a no-op on a digit, so `source_1` became `source1` on a whole-blob PATCH and silently renamed a declared attribute on 26 of 84 live topics (33 needed repairing per src/lib/__tests__/topic-edit.test.ts), breaking attr.source_1= filtering, redenormalize_attributes and the n8n nodes that read it by name."},
+        {"name": "source_2", "data_type": "text", "required": false, "config": {},
+         "note": "2026-09-16 capture and the 2026-09-23 live read; DEFAULT_SOURCE_ATTRS in packages/ui review.ts. Same digit hazard as source_1."},
+        {"name": "source_3", "data_type": "text", "required": false, "config": {},
+         "note": "2026-09-16 capture and the 2026-09-23 live read; DEFAULT_SOURCE_ATTRS in packages/ui review.ts. Same digit hazard as source_1."},
+        {"name": "delivered_at", "data_type": "date", "required": false, "config": {},
+         "note": "2026-09-16 capture ('date'); 'date' also in the 2026-09-23 live read in src/lib/__tests__/topic-edit.test.ts. Deliberately NOT one of src/lib/board.ts::RECENCY_ATTR_NAMES (['published_at','occurred_at','happened_at']), so the topic board measures recency by each record's own createdAt rather than by this."},
+        {"name": "scheduled_for", "data_type": "date", "required": false, "config": {},
+         "note": "2026-09-16 capture ('date') and the 2026-09-23 live read. Same note as delivered_at: not a recency-convention name."},
+        {"name": "subtitle", "data_type": "text", "required": false, "config": {},
+         "note": "2026-09-16 capture ('text') and the 2026-09-23 live read. src/lib/topic-edit.ts names it SUBTITLE_ATTR and explains the declaration is the guard: 'every field, this one included, is dropped unless the TYPE DECLARES it, so a fork whose topic has no subtitle renders no subtitle editor rather than minting an undeclared blob key'. src/app/(dashboard)/t/[typeKey]/page.tsx folds it into the stacked Title cell as the preferred subtitle (`subtitleAttrs: ['subtitle','angle']`). text keeps its editor single-line (topic-edit.test.ts asserts multiline false for title, true for angle and team_notes)."},
+        {"name": "assignee_sub", "data_type": "text", "required": false, "config": {},
+         "note": "2026-09-16 capture and the 2026-09-23 live read. Gates the board's 'assigned to me' quick filter, which src/app/(dashboard)/board/[typeKey]/page.tsx enables only when the type declares an attribute of this name whose dataType is not enum, then sends attr.assignee_sub."},
+        {"name": "assignee_name", "data_type": "text", "required": false, "config": {},
+         "note": "2026-09-16 capture and the 2026-09-23 live read. src/components/record-columns.ts renders it as an initials chip and records it blank in 82 of 84 live topics, 'but the reviewers asked for the topic column and startsim-71z6 built its initials chip' — so unlike on draft it is NOT in the sparse list."},
+        {"name": "scope_path", "data_type": "text", "required": false, "config": {},
+         "note": "2026-09-16 capture and the 2026-09-23 live read, and named by this type's own config.scope.path_attribute above. src/lib/scope.ts: SCOPE_PATH_ATTR = 'scope_path', 'Declared on the topic and draft types, and named ONCE here'. The 2026-09-23 fixture row carries '/ogmc-agent-test' and the live OGMC rows carry '/ogmc'. src/lib/__tests__/topic-edit.test.ts is built around the fact that a whole-blob PATCH that drops it answers 200 and makes the row invisible to every non-exempt reader, because tenant-starter's EntityViewSet.perform_update never calls _require_scope_stamped."}
+      ]
+    }
+  ],
+
+  "relationships": [
+    {
+      "key": "draft_in_scope",
+      "label": "Draft in scope",
+      "source_type": "draft",
+      "target_type": "scope",
+      "note": "LIVE_RELATIONSHIPS in tenant-starter/apps/api/tests/test_agent_account_isolation.py, and the edge the draft type's own config.scope.edge names. ONE PER SCOPED SOURCE TYPE, which is why it is not called `in_scope`: RelationshipDef carries UniqueConstraint(['org_id','key']) and RelationshipViewSet._validate_edge_types resolves a reldef by KEY alone, so an org holds at most one `in_scope` bound to one concrete (source,target) pair and a second scoped type sending it is refused for having the wrong source type (scoping.py's EDGE_KEY note). STRUCTURE ONLY: subtree membership is answered by attr.scope_path__under over the materialized path and MUST NOT be answered by walking this, because related_depth caps at 2 and a client with projects under it is already depth 3. The edge and the path attribute are written together on upsert (bd startsim-j0ew2) because either alone is a half-truth the other cannot repair."
+    },
+    {
+      "key": "for_client",
+      "label": "For client",
+      "source_type": "topic",
+      "target_type": "client",
+      "note": "LIVE_RELATIONSHIPS (2026-09-16 capture), and listed as a live reldef in marketing-agents-web/src/lib/__tests__/draft-translation.test.ts and approval-translation.test.ts ('rel defs — grounded_by, for_client, written_for, translation_of'). The legacy per-client edge, superseded by topic_in_scope over the generic `scope` type; declared because the capture has it and because its target type is declared above. Nothing in the app traverses it."
+    },
+    {
+      "key": "grounded_by",
+      "label": "Grounded by",
+      "source_type": "topic",
+      "target_type": "news_item",
+      "note": "LIVE_RELATIONSHIPS (2026-09-16 capture), and in the 2026-08-19 ECS-exec reading's rel-def list. The evidence edge from a topic back to the curated news it was generated from — the pipeline stage start-simpli-api/backend/apps/foundry/watch_declarations/ogmc.json calls the 'Topic-strategist pool (status=acceptable)' draining into topics-all and news-cited."
+    },
+    {
+      "key": "parent_scope",
+      "source_type": "scope",
+      "target_type": "scope",
+      "note": "COPIED VERBATIM FROM scripts/schemas/scope.json, and present in the 2026-09-16 capture. A scope nests under a parent scope. Direction is CHILD -> PARENT (the child is the edge's SOURCE), matching planning.json's `sub_focus` and central's Goal.parent, so a child names its parent. READ IT THE WAY filters._one_hop DEFINES IT, because the obvious reading is backwards: `related_direction` describes the RETURNED ROW's end of the edge, not the direction you are walking — so the CHILDREN of a scope are ?related_to=<parentId>&related_via=parent_scope&related_direction=out, and a scope's PARENT is the same query with related_direction=in. STRUCTURE ONLY. This edge exists for the UI, the schema builder and RelationshipDef validation. Subtree membership is `?scope=` over the materialized path and MUST NOT be answered by walking this, because related_depth caps at 2 and a client with projects under it is already depth 3."
+    },
+    {
+      "key": "topic_in_scope",
+      "label": "Topic in scope",
+      "source_type": "topic",
+      "target_type": "scope",
+      "note": "LIVE_RELATIONSHIPS (2026-09-16 capture), and the edge the topic type's own config.scope.edge names. Its own key rather than a shared `in_scope` for the reason draft_in_scope states: a reldef is unique per (org, key) and bound to one concrete type pair. STRUCTURE ONLY; the queryable form of the same fact is topic.scope_path."
+    },
+    {
+      "key": "translation_of",
+      "label": "Translation of",
+      "source_type": "draft",
+      "target_type": "draft",
+      "note": "LIVE_RELATIONSHIPS (2026-09-16 capture), and in the 2026-08-19 reading's rel-def list. marketing-agents-web/src/lib/topic-drafts.ts names it TRANSLATION_OF: 'the edge key linking a translated draft (source) to the original draft it translates (target)', with no live rows yet, 'so this is exercised against fixtures, not live data — the language-switcher UI is expected to render \"no translations yet\" against the current live tenant, which is the correct, honest behavior'. A SELF-EDGE, which validate() accepts because source and target are the same declared key."
+    },
+    {
+      "key": "written_for",
+      "label": "Written for",
+      "source_type": "draft",
+      "target_type": "topic",
+      "note": "LIVE_RELATIONSHIPS (2026-09-16 capture), and in the 2026-08-19 reading's rel-def list. marketing-agents-web/src/lib/topic-drafts.ts names it WRITTEN_FOR, 'the edge key linking a draft (source) to the topic it was written for (target)', and ranks it SECOND behind the flat `topic_ref` stamp: 'This is how linking really works in production; `written_for` below exists as a relationship type but has ~zero live rows.' tenant-starter/apps/core/tests/test_backfill_draft_content_type.py matches on it as the first signal. Declared because it is live and because the fallback path in matchTopicDrafts reads it."
+    }
+  ]
+}
