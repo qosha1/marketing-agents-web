@@ -1,0 +1,24 @@
+{
+  "$note": "The local stack's whole user list. These passwords are PUBLIC by design — devauth is loopback-only and signs with a throwaway key generated on this laptop (see tenant-starter/local-stack/devauth.py). Nothing here is a credential for anything real, and no QA or production password may ever be copied into this file.",
+  "audience": "tenant:marketing-agents",
+  "org_id": "marketing-agents",
+  "company_id": "marketing-agents",
+  "users": [
+    {
+      "email": "dev@marketing-agents.local",
+      "password": "localdev",
+      "role": "admin",
+      "first_name": "Dev",
+      "last_name": "Local",
+      "$note": "admin, because OrgMembersView/OrgDirectoryView carry a hard `required_role = \"admin\"` floor — a member-role dev would 403 the roster and assignee pickers while every other page worked."
+    },
+    {
+      "email": "viewer@marketing-agents.local",
+      "password": "localdev",
+      "role": "viewer",
+      "first_name": "Vee",
+      "last_name": "Viewer",
+      "$note": "The bottom rung, for checking what a low-privilege member actually sees. The sign-in page pre-fills the FIRST user, so this one is typed in deliberately or not at all."
+    }
+  ]
+}

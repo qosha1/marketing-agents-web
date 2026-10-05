@@ -1,0 +1,29 @@
+{
+  "$note": "The `client` type. Two rows, because `for_client` (topic -> client) is a declared relationship and a relationship with no rows at either end cannot be exercised. Deliberately NOT the same thing as a scope: the scope primitive replaced the client/project split as the QUERY mechanism, and this type survives alongside it holding the per-client prose.",
+  "rows": [
+    {
+      "entity_type": "client",
+      "external_id": "client-ogmc",
+      "name": "OGMC",
+      "data": {
+        "name": "OGMC",
+        "active": true,
+        "brand_voice": "Measured, plain, no superlatives.",
+        "services": "Weekly brief, lead magnets, LinkedIn.",
+        "priority_framework": "Regulatory > funding > personnel.",
+        "guardrails": "No unattributed numbers."
+      }
+    },
+    {
+      "entity_type": "client",
+      "external_id": "client-sandbox",
+      "name": "Sandbox",
+      "data": {
+        "name": "Sandbox",
+        "active": true,
+        "brand_voice": "Anything.",
+        "services": "Testing."
+      }
+    }
+  ]
+}

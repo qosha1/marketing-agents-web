@@ -1,0 +1,581 @@
+{
+  "$note": "SEVENTEEN DRAFTS, shaped around the cases that break things rather than a flat list. (a) topic:seed-03 carries THREE candidate drafts at candidate_index 0/1/2 with one `chosen` — the legacy multi-draft shape the candidate-compare workspace at /drafts exists for; (b) topic:seed-07 carries two candidates with none chosen; (c) singles cover the remaining declared statuses; (d) two ORPHANS carry no topic_ref at all, which is the state that made /t/draft open empty for every user under a chip that said 'Topic approved' (startsim-8hgmq.4) — a corpus where every draft is linked cannot reproduce it; (e) an `ar` and a `zh` translation of the approved draft, so the translate path and the bidi isolate normaliser have real text; (f) one draft in /sandbox, so a scope leak shows up as a row in the wrong list. topic_ref is written as a {{id:topic:...}} token and resolved to the tenant's UUID at seed time, because that is what the app filters on — an external id there would read as linked in this file and be an orphan to every query.",
+  "rows": [
+    {
+      "entity_type": "draft",
+      "external_id": "draft-seed-01",
+      "name": "Draft 01 (approved)",
+      "data": {
+        "status": "approved",
+        "lang": "en",
+        "content_type": "weekly_brief",
+        "candidate_index": 0,
+        "chosen": true,
+        "blog": "# Draft 1\n\nSeeded body for draft 1 (approved, en). Long enough to exercise the diff and the editor.\n\nSecond paragraph, so a blog diff has two blocks to compare.",
+        "linkedin": "Seeded LinkedIn post for draft 1. (approved)",
+        "seo": {
+          "title": "Draft 1 SEO title",
+          "meta": "Seeded meta description."
+        },
+        "sources": [
+          {
+            "url": "https://example.gov.local/a",
+            "title": "Primary"
+          }
+        ],
+        "auto_checks": {
+          "sources_ok": true,
+          "length_ok": true
+        },
+        "judge_verdict": {
+          "score": 7,
+          "notes": "Seeded judge verdict."
+        },
+        "topic_ref": "{{id:topic:topic-seed-03}}"
+      },
+      "scope": "/ogmc"
+    },
+    {
+      "entity_type": "draft",
+      "external_id": "draft-seed-02",
+      "name": "Draft 02 (rejected)",
+      "data": {
+        "status": "rejected",
+        "lang": "en",
+        "content_type": "weekly_brief",
+        "candidate_index": 1,
+        "chosen": false,
+        "blog": "# Draft 2\n\nSeeded body for draft 2 (rejected, en). Long enough to exercise the diff and the editor.\n\nSecond paragraph, so a blog diff has two blocks to compare.",
+        "linkedin": "Seeded LinkedIn post for draft 2. (rejected)",
+        "seo": {
+          "title": "Draft 2 SEO title",
+          "meta": "Seeded meta description."
+        },
+        "sources": [
+          {
+            "url": "https://example.gov.local/a",
+            "title": "Primary"
+          }
+        ],
+        "auto_checks": {
+          "sources_ok": true,
+          "length_ok": true
+        },
+        "judge_verdict": {
+          "score": 7,
+          "notes": "Seeded judge verdict."
+        },
+        "topic_ref": "{{id:topic:topic-seed-03}}"
+      },
+      "scope": "/ogmc"
+    },
+    {
+      "entity_type": "draft",
+      "external_id": "draft-seed-03",
+      "name": "Draft 03 (not_for_publication)",
+      "data": {
+        "status": "not_for_publication",
+        "lang": "en",
+        "content_type": "weekly_brief",
+        "candidate_index": 2,
+        "chosen": false,
+        "blog": "# Draft 3\n\nSeeded body for draft 3 (not_for_publication, en). Long enough to exercise the diff and the editor.\n\nSecond paragraph, so a blog diff has two blocks to compare.",
+        "linkedin": "Seeded LinkedIn post for draft 3. (not_for_publication)",
+        "seo": {
+          "title": "Draft 3 SEO title",
+          "meta": "Seeded meta description."
+        },
+        "sources": [
+          {
+            "url": "https://example.gov.local/a",
+            "title": "Primary"
+          }
+        ],
+        "auto_checks": {
+          "sources_ok": true,
+          "length_ok": true
+        },
+        "judge_verdict": {
+          "score": 7,
+          "notes": "Seeded judge verdict."
+        },
+        "topic_ref": "{{id:topic:topic-seed-03}}"
+      },
+      "scope": "/ogmc"
+    },
+    {
+      "entity_type": "draft",
+      "external_id": "draft-seed-04",
+      "name": "Draft 04 (ready_for_review)",
+      "data": {
+        "status": "ready_for_review",
+        "lang": "en",
+        "content_type": "lead_magnet",
+        "candidate_index": 0,
+        "chosen": false,
+        "blog": "# Draft 4\n\nSeeded body for draft 4 (ready_for_review, en). Long enough to exercise the diff and the editor.\n\nSecond paragraph, so a blog diff has two blocks to compare.",
+        "linkedin": "Seeded LinkedIn post for draft 4. (ready_for_review)",
+        "seo": {
+          "title": "Draft 4 SEO title",
+          "meta": "Seeded meta description."
+        },
+        "sources": [
+          {
+            "url": "https://example.gov.local/a",
+            "title": "Primary"
+          }
+        ],
+        "auto_checks": {
+          "sources_ok": true,
+          "length_ok": true
+        },
+        "judge_verdict": {
+          "score": 7,
+          "notes": "Seeded judge verdict."
+        },
+        "topic_ref": "{{id:topic:topic-seed-07}}"
+      },
+      "scope": "/ogmc"
+    },
+    {
+      "entity_type": "draft",
+      "external_id": "draft-seed-05",
+      "name": "Draft 05 (ready_for_review)",
+      "data": {
+        "status": "ready_for_review",
+        "lang": "en",
+        "content_type": "lead_magnet",
+        "candidate_index": 1,
+        "chosen": false,
+        "blog": "# Draft 5\n\nSeeded body for draft 5 (ready_for_review, en). Long enough to exercise the diff and the editor.\n\nSecond paragraph, so a blog diff has two blocks to compare.",
+        "linkedin": "Seeded LinkedIn post for draft 5. (ready_for_review)",
+        "seo": {
+          "title": "Draft 5 SEO title",
+          "meta": "Seeded meta description."
+        },
+        "sources": [
+          {
+            "url": "https://example.gov.local/a",
+            "title": "Primary"
+          }
+        ],
+        "auto_checks": {
+          "sources_ok": true,
+          "length_ok": true
+        },
+        "judge_verdict": {
+          "score": 7,
+          "notes": "Seeded judge verdict."
+        },
+        "topic_ref": "{{id:topic:topic-seed-07}}"
+      },
+      "scope": "/ogmc"
+    },
+    {
+      "entity_type": "draft",
+      "external_id": "draft-seed-06",
+      "name": "Draft 06 (under_review)",
+      "data": {
+        "status": "under_review",
+        "lang": "en",
+        "content_type": "weekly_brief",
+        "candidate_index": 0,
+        "chosen": false,
+        "blog": "# Draft 6\n\nSeeded body for draft 6 (under_review, en). Long enough to exercise the diff and the editor.\n\nSecond paragraph, so a blog diff has two blocks to compare.",
+        "linkedin": "Seeded LinkedIn post for draft 6. (under_review)",
+        "seo": {
+          "title": "Draft 6 SEO title",
+          "meta": "Seeded meta description."
+        },
+        "sources": [
+          {
+            "url": "https://example.gov.local/a",
+            "title": "Primary"
+          }
+        ],
+        "auto_checks": {
+          "sources_ok": true,
+          "length_ok": true
+        },
+        "judge_verdict": {
+          "score": 7,
+          "notes": "Seeded judge verdict."
+        },
+        "topic_ref": "{{id:topic:topic-seed-07}}"
+      },
+      "scope": "/ogmc"
+    },
+    {
+      "entity_type": "draft",
+      "external_id": "draft-seed-07",
+      "name": "Draft 07 (published)",
+      "data": {
+        "status": "published",
+        "lang": "en",
+        "content_type": "lead_magnet",
+        "candidate_index": 0,
+        "chosen": false,
+        "blog": "# Draft 7\n\nSeeded body for draft 7 (published, en). Long enough to exercise the diff and the editor.\n\nSecond paragraph, so a blog diff has two blocks to compare.",
+        "linkedin": "Seeded LinkedIn post for draft 7. (published)",
+        "seo": {
+          "title": "Draft 7 SEO title",
+          "meta": "Seeded meta description."
+        },
+        "sources": [
+          {
+            "url": "https://example.gov.local/a",
+            "title": "Primary"
+          }
+        ],
+        "auto_checks": {
+          "sources_ok": true,
+          "length_ok": true
+        },
+        "judge_verdict": {
+          "score": 7,
+          "notes": "Seeded judge verdict."
+        },
+        "topic_ref": "{{id:topic:topic-seed-08}}"
+      },
+      "scope": "/ogmc"
+    },
+    {
+      "entity_type": "draft",
+      "external_id": "draft-seed-08",
+      "name": "Draft 08 (drafting)",
+      "data": {
+        "status": "drafting",
+        "lang": "en",
+        "content_type": "general",
+        "candidate_index": 0,
+        "chosen": false,
+        "blog": "# Draft 8\n\nSeeded body for draft 8 (drafting, en). Long enough to exercise the diff and the editor.\n\nSecond paragraph, so a blog diff has two blocks to compare.",
+        "linkedin": "Seeded LinkedIn post for draft 8. (drafting)",
+        "seo": {
+          "title": "Draft 8 SEO title",
+          "meta": "Seeded meta description."
+        },
+        "sources": [
+          {
+            "url": "https://example.gov.local/a",
+            "title": "Primary"
+          }
+        ],
+        "auto_checks": {
+          "sources_ok": true,
+          "length_ok": true
+        },
+        "judge_verdict": {
+          "score": 7,
+          "notes": "Seeded judge verdict."
+        },
+        "topic_ref": "{{id:topic:topic-seed-09}}"
+      },
+      "scope": "/ogmc"
+    },
+    {
+      "entity_type": "draft",
+      "external_id": "draft-seed-09",
+      "name": "Draft 09 (ready)",
+      "data": {
+        "status": "ready",
+        "lang": "en",
+        "content_type": "weekly_brief",
+        "candidate_index": 0,
+        "chosen": false,
+        "blog": "# Draft 9\n\nSeeded body for draft 9 (ready, en). Long enough to exercise the diff and the editor.\n\nSecond paragraph, so a blog diff has two blocks to compare.",
+        "linkedin": "Seeded LinkedIn post for draft 9. (ready)",
+        "seo": {
+          "title": "Draft 9 SEO title",
+          "meta": "Seeded meta description."
+        },
+        "sources": [
+          {
+            "url": "https://example.gov.local/a",
+            "title": "Primary"
+          }
+        ],
+        "auto_checks": {
+          "sources_ok": true,
+          "length_ok": true
+        },
+        "judge_verdict": {
+          "score": 7,
+          "notes": "Seeded judge verdict."
+        },
+        "topic_ref": "{{id:topic:topic-seed-10}}"
+      },
+      "scope": "/ogmc"
+    },
+    {
+      "entity_type": "draft",
+      "external_id": "draft-seed-10",
+      "name": "Draft 10 (needs_revision)",
+      "data": {
+        "status": "needs_revision",
+        "lang": "en",
+        "content_type": "lead_magnet",
+        "candidate_index": 0,
+        "chosen": false,
+        "blog": "# Draft 10\n\nSeeded body for draft 10 (needs_revision, en). Long enough to exercise the diff and the editor.\n\nSecond paragraph, so a blog diff has two blocks to compare.",
+        "linkedin": "Seeded LinkedIn post for draft 10. (needs_revision)",
+        "seo": {
+          "title": "Draft 10 SEO title",
+          "meta": "Seeded meta description."
+        },
+        "sources": [
+          {
+            "url": "https://example.gov.local/a",
+            "title": "Primary"
+          }
+        ],
+        "auto_checks": {
+          "sources_ok": true,
+          "length_ok": true
+        },
+        "judge_verdict": {
+          "score": 7,
+          "notes": "Seeded judge verdict."
+        },
+        "topic_ref": "{{id:topic:topic-seed-11}}"
+      },
+      "scope": "/ogmc"
+    },
+    {
+      "entity_type": "draft",
+      "external_id": "draft-seed-11",
+      "name": "Draft 11 (sent)",
+      "data": {
+        "status": "sent",
+        "lang": "en",
+        "content_type": "general",
+        "candidate_index": 0,
+        "chosen": false,
+        "blog": "# Draft 11\n\nSeeded body for draft 11 (sent, en). Long enough to exercise the diff and the editor.\n\nSecond paragraph, so a blog diff has two blocks to compare.",
+        "linkedin": "Seeded LinkedIn post for draft 11. (sent)",
+        "seo": {
+          "title": "Draft 11 SEO title",
+          "meta": "Seeded meta description."
+        },
+        "sources": [
+          {
+            "url": "https://example.gov.local/a",
+            "title": "Primary"
+          }
+        ],
+        "auto_checks": {
+          "sources_ok": true,
+          "length_ok": true
+        },
+        "judge_verdict": {
+          "score": 7,
+          "notes": "Seeded judge verdict."
+        },
+        "topic_ref": "{{id:topic:topic-seed-12}}"
+      },
+      "scope": "/ogmc"
+    },
+    {
+      "entity_type": "draft",
+      "external_id": "draft-seed-12",
+      "name": "Draft 12 (for_repurpose)",
+      "data": {
+        "status": "for_repurpose",
+        "lang": "en",
+        "content_type": "weekly_brief",
+        "candidate_index": 0,
+        "chosen": false,
+        "blog": "# Draft 12\n\nSeeded body for draft 12 (for_repurpose, en). Long enough to exercise the diff and the editor.\n\nSecond paragraph, so a blog diff has two blocks to compare.",
+        "linkedin": "Seeded LinkedIn post for draft 12. (for_repurpose)",
+        "seo": {
+          "title": "Draft 12 SEO title",
+          "meta": "Seeded meta description."
+        },
+        "sources": [
+          {
+            "url": "https://example.gov.local/a",
+            "title": "Primary"
+          }
+        ],
+        "auto_checks": {
+          "sources_ok": true,
+          "length_ok": true
+        },
+        "judge_verdict": {
+          "score": 7,
+          "notes": "Seeded judge verdict."
+        },
+        "topic_ref": "{{id:topic:topic-seed-01}}"
+      },
+      "scope": "/ogmc"
+    },
+    {
+      "entity_type": "draft",
+      "external_id": "draft-seed-13",
+      "name": "Draft 13 (approved, ar)",
+      "data": {
+        "status": "approved",
+        "lang": "ar",
+        "content_type": "weekly_brief",
+        "candidate_index": 0,
+        "chosen": false,
+        "blog": "# المسودة ١٣\n\nنص تجريبي للترجمة العربية.",
+        "linkedin": "Seeded LinkedIn post for draft 13. (approved)",
+        "seo": {
+          "title": "Draft 13 SEO title",
+          "meta": "Seeded meta description."
+        },
+        "sources": [
+          {
+            "url": "https://example.gov.local/a",
+            "title": "Primary"
+          }
+        ],
+        "auto_checks": {
+          "sources_ok": true,
+          "length_ok": true
+        },
+        "judge_verdict": {
+          "score": 7,
+          "notes": "Seeded judge verdict."
+        },
+        "topic_ref": "{{id:topic:topic-seed-03}}"
+      },
+      "scope": "/ogmc"
+    },
+    {
+      "entity_type": "draft",
+      "external_id": "draft-seed-14",
+      "name": "Draft 14 (approved, zh)",
+      "data": {
+        "status": "approved",
+        "lang": "zh",
+        "content_type": "weekly_brief",
+        "candidate_index": 0,
+        "chosen": false,
+        "blog": "# 草稿 14\n\n用于翻译路径的种子正文。",
+        "linkedin": "Seeded LinkedIn post for draft 14. (approved)",
+        "seo": {
+          "title": "Draft 14 SEO title",
+          "meta": "Seeded meta description."
+        },
+        "sources": [
+          {
+            "url": "https://example.gov.local/a",
+            "title": "Primary"
+          }
+        ],
+        "auto_checks": {
+          "sources_ok": true,
+          "length_ok": true
+        },
+        "judge_verdict": {
+          "score": 7,
+          "notes": "Seeded judge verdict."
+        },
+        "topic_ref": "{{id:topic:topic-seed-03}}"
+      },
+      "scope": "/ogmc"
+    },
+    {
+      "entity_type": "draft",
+      "external_id": "draft-seed-15",
+      "name": "Draft 15 (ready_for_review)",
+      "data": {
+        "status": "ready_for_review",
+        "lang": "en",
+        "content_type": "general",
+        "candidate_index": 0,
+        "chosen": false,
+        "blog": "# Draft 15\n\nSeeded body for draft 15 (ready_for_review, en). Long enough to exercise the diff and the editor.\n\nSecond paragraph, so a blog diff has two blocks to compare.",
+        "linkedin": "Seeded LinkedIn post for draft 15. (ready_for_review)",
+        "seo": {
+          "title": "Draft 15 SEO title",
+          "meta": "Seeded meta description."
+        },
+        "sources": [
+          {
+            "url": "https://example.gov.local/a",
+            "title": "Primary"
+          }
+        ],
+        "auto_checks": {
+          "sources_ok": true,
+          "length_ok": true
+        },
+        "judge_verdict": {
+          "score": 7,
+          "notes": "Seeded judge verdict."
+        }
+      },
+      "scope": "/ogmc"
+    },
+    {
+      "entity_type": "draft",
+      "external_id": "draft-seed-16",
+      "name": "Draft 16 (rejected)",
+      "data": {
+        "status": "rejected",
+        "lang": "en",
+        "content_type": "general",
+        "candidate_index": 0,
+        "chosen": false,
+        "blog": "# Draft 16\n\nSeeded body for draft 16 (rejected, en). Long enough to exercise the diff and the editor.\n\nSecond paragraph, so a blog diff has two blocks to compare.",
+        "linkedin": "Seeded LinkedIn post for draft 16. (rejected)",
+        "seo": {
+          "title": "Draft 16 SEO title",
+          "meta": "Seeded meta description."
+        },
+        "sources": [
+          {
+            "url": "https://example.gov.local/a",
+            "title": "Primary"
+          }
+        ],
+        "auto_checks": {
+          "sources_ok": true,
+          "length_ok": true
+        },
+        "judge_verdict": {
+          "score": 7,
+          "notes": "Seeded judge verdict."
+        }
+      },
+      "scope": "/ogmc"
+    },
+    {
+      "entity_type": "draft",
+      "external_id": "draft-seed-17",
+      "name": "Draft 17 (ready_for_review)",
+      "data": {
+        "status": "ready_for_review",
+        "lang": "en",
+        "content_type": "weekly_brief",
+        "candidate_index": 0,
+        "chosen": false,
+        "blog": "# Draft 17\n\nSeeded body for draft 17 (ready_for_review, en). Long enough to exercise the diff and the editor.\n\nSecond paragraph, so a blog diff has two blocks to compare.",
+        "linkedin": "Seeded LinkedIn post for draft 17. (ready_for_review)",
+        "seo": {
+          "title": "Draft 17 SEO title",
+          "meta": "Seeded meta description."
+        },
+        "sources": [
+          {
+            "url": "https://example.gov.local/a",
+            "title": "Primary"
+          }
+        ],
+        "auto_checks": {
+          "sources_ok": true,
+          "length_ok": true
+        },
+        "judge_verdict": {
+          "score": 7,
+          "notes": "Seeded judge verdict."
+        },
+        "topic_ref": "{{id:topic:topic-seed-05}}"
+      },
+      "scope": "/sandbox"
+    }
+  ]
+}

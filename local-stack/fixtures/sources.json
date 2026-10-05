@@ -1,0 +1,90 @@
+{
+  "$note": "SIX APPROVED SOURCES across all five declared source_types, one of them INACTIVE. These rows are load-bearing, not decorative: src/lib/content-checks.ts resolves the review gate's allow-list off this type (SOURCE_TYPE = 'source') because the hardcoded list it replaced had drifted, so a stack with no source rows makes every draft fail its source check for the wrong reason. Unscoped, same as news_item: one shared outlet list.",
+  "rows": [
+    {
+      "entity_type": "source",
+      "external_id": "source-example.gov.local",
+      "name": "example.gov.local",
+      "data": {
+        "domain": "example.gov.local",
+        "tier": 1,
+        "source_type": "state_wire",
+        "adapter": "rss",
+        "coverage": "GCC",
+        "feed_url": "https://example.gov.local/feed.xml",
+        "active": true
+      }
+    },
+    {
+      "entity_type": "source",
+      "external_id": "source-ministry.local",
+      "name": "ministry.local",
+      "data": {
+        "domain": "ministry.local",
+        "tier": 1,
+        "source_type": "government_body",
+        "adapter": "rss",
+        "coverage": "GCC",
+        "feed_url": "https://ministry.local/feed.xml",
+        "active": true
+      }
+    },
+    {
+      "entity_type": "source",
+      "external_id": "source-example.press.local",
+      "name": "example.press.local",
+      "data": {
+        "domain": "example.press.local",
+        "tier": 2,
+        "source_type": "independent_press",
+        "adapter": "rss",
+        "coverage": "GCC",
+        "feed_url": "https://example.press.local/feed.xml",
+        "active": true
+      }
+    },
+    {
+      "entity_type": "source",
+      "external_id": "source-thinktank.local",
+      "name": "thinktank.local",
+      "data": {
+        "domain": "thinktank.local",
+        "tier": 2,
+        "source_type": "institutional",
+        "adapter": "rss",
+        "coverage": "GCC",
+        "feed_url": "https://thinktank.local/feed.xml",
+        "active": true
+      }
+    },
+    {
+      "entity_type": "source",
+      "external_id": "source-advisory.local",
+      "name": "advisory.local",
+      "data": {
+        "domain": "advisory.local",
+        "tier": 3,
+        "source_type": "advisory",
+        "adapter": "rss",
+        "coverage": "GCC",
+        "feed_url": "https://advisory.local/feed.xml",
+        "active": true
+      }
+    },
+    {
+      "entity_type": "source",
+      "external_id": "source-blocked.local",
+      "name": "blocked.local",
+      "data": {
+        "domain": "blocked.local",
+        "tier": 3,
+        "source_type": "independent_press",
+        "adapter": "rss",
+        "coverage": "GCC",
+        "feed_url": "https://blocked.local/feed.xml",
+        "active": false,
+        "notes": "Seeded as inactive, to exercise the allow-list filter."
+      }
+    }
+  ]
+}
