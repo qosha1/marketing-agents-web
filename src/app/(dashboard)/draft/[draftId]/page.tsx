@@ -821,8 +821,19 @@ function DraftEditorScreen({
       const error = result.error;
       notify.error(error instanceof Error ? error.message : whatFailed);
     }
-    // 'refused' — the dialog says it. 'paused' — a conflict is already open and
-    // nothing was sent, which is the point.
+    if (result.status === 'paused') {
+      // NOTHING WAS SENT, AND THE DIALOG MAY NOT BE ON SCREEN TO SAY SO.
+      // Dismissing a conflict is deliberately not resolving it: Escape, the
+      // backdrop and the close button all keep the pause. So after a dismissal
+      // every write on this page is refused locally — a note added, a source
+      // verified, Approve pressed — and without this it would be refused
+      // SILENTLY, which is the one outcome worse than the overwrite this
+      // feature exists to prevent. Re-opening puts the decision the reviewer
+      // still owes back in front of them instead of a toast that explains
+      // nothing.
+      save.reopenConflict();
+    }
+    // 'refused' — the dialog is already on screen saying it.
     return false;
   };
 
@@ -841,10 +852,14 @@ function DraftEditorScreen({
         (s) => edited.find((e) => e.key === s.key) ?? s,
       );
     }
-    // The editors debounce at 1,200 ms. CHECKED BEFORE THE SEND, not after: the
-    // hook refuses to send while a conflict is open, but reading `paused` here is
-    // what stops the editor reporting "Saved" over a write that never left.
-    if (save.paused) return;
+    // NO `if (save.paused) return` HERE, AND THAT IS DELIBERATE — it was here and
+    // it was the bug. The hook already refuses to send while a conflict is open,
+    // so an early return bought nothing; what it cost was the report. Every
+    // write would short-circuit before `report` saw `paused`, so after the
+    // reviewer dismissed the dialog they could type for ten minutes into a page
+    // that was saving nothing and saying nothing. The debounce still cannot
+    // repaint a modal per keystroke: `reopenConflict` only clears a flag, so the
+    // second burst and the hundredth are both no-ops against an open dialog.
     await persist({}, 'Could not save the draft.');
   }
 
@@ -854,11 +869,9 @@ function DraftEditorScreen({
     reviewRef.current = next;
     if (reviewSaveTimer.current) clearTimeout(reviewSaveTimer.current);
     reviewSaveTimer.current = setTimeout(() => {
-      // 800 ms, not 1,200 — this is the SHORTER of the two debounces on this
-      // page, so it is the one that would repaint the dialog fastest if it fired
-      // while a conflict was open. `paused` is read when the timer runs, not when
-      // it was scheduled.
-      if (save.paused) return;
+      // 800 ms, not 1,200 — the SHORTER of the two debounces on this page. It
+      // goes through `persist` like everything else; see `saveSections` for why
+      // there is no early `paused` return here either.
       void persist({}, 'Could not save the review.');
     }, 800);
   }
@@ -1099,6 +1112,17 @@ function DraftEditorScreen({
     const feedback = compileFeedback(reviewRef.current, notesRef.current);
     if (!feedback.trim()) {
       notify.error('Add a scorecard note or a section note before requesting a revision.');
+      return;
+    }
+    // CHECKED BEFORE THE WEBHOOK, not after the status write it precedes. The
+    // n8n call below is the only irreversible, external, non-idempotent act on
+    // this page: it spends a model call and writes a NEW draft row. Its payload
+    // is built from this page's blob and this page's sections — the exact basis
+    // the server has already refused as stale — so firing it while a conflict is
+    // open asks for a rewrite of text that is not what the record says, and
+    // nothing can take it back afterwards.
+    if (save.paused) {
+      save.reopenConflict();
       return;
     }
     setRevising(true);
