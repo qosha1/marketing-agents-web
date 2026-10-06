@@ -129,3 +129,53 @@ export function withDispatchStamp(
 ): Record<string, unknown> {
   return { ...(data ?? {}), [DISPATCH_STAMP_ATTR]: new Date(at).toISOString() };
 }
+
+/**
+ * The key the relay answers the topic's NEW version under, and how to read it.
+ *
+ * WHY THE RELAY HAS TO SAY THIS AT ALL (bd startsim-jkkn7.13, bd startsim-j19hf).
+ * The stamp above is a WRITE to the topic, and every write allocates a new
+ * `version` server-side. It is issued by this route, server-side, through
+ * `tenant-fetch` — which the browser's version registry (`lib/record-version.ts`)
+ * cannot see. So without this field the browser goes on asserting the version it
+ * held BEFORE the stamp, and the next conditional write to that topic is refused
+ * with a 412 that describes no conflict: nobody else touched the row, the
+ * reviewer's own approval did.
+ *
+ * AND THE PATH IT BREAKS IS THE ONE THIS BEAD BUILDS. Approve stamps the topic;
+ * `primeEntity` writes the approve response into `['entity', <topicId>]`, which
+ * `QueryProvider` keeps FRESH for five minutes with `refetchOnWindowFocus: false`;
+ * the story page and then the draft page both read the topic under that same key
+ * and so never refetch it; and `/draft/<id>` Accept asserts the registry's
+ * version when it moves the topic to `written`. A reviewer who accepts within
+ * five minutes of approving — which is the whole point of writing the draft
+ * immediately — would get the draft approved and the topic refused. Measured
+ * from the code, not hypothesised: five minutes is `QueryProvider`'s staleTime
+ * and the writer takes ~113s.
+ *
+ * SO THE WRITE REPORTS ITS OWN RESULT, which is the same rule `updateEntity`
+ * already follows ("the response is the freshest version that exists, and it is
+ * what guards the NEXT save"). The alternative — forgetting the held version so
+ * the write goes unguarded — trades a wrong refusal for a lost guard, and the
+ * guard is the thing j19hf was for.
+ *
+ * ABSENT MEANS "NOTHING MOVED", and that is why it is optional rather than
+ * defaulted. The route omits it when the relay never happened (a refusal, or a
+ * deduped press) and when the stamp PATCH FAILED — and a failed stamp left the
+ * version where the browser already thinks it is, so remembering nothing is
+ * exactly right.
+ */
+export const DISPATCH_TOPIC_VERSION_KEY = 'topic_version';
+
+/**
+ * The topic version a relay reported, or `undefined` for "it did not say".
+ *
+ * A non-integer is ABSENCE rather than a guess: a bad value remembered as a
+ * version would produce the same silent 412 this exists to remove, and an
+ * unguarded write is the documented fallback for an unknown version.
+ */
+export function relayedTopicVersion(body: unknown): number | undefined {
+  if (!body || typeof body !== 'object') return undefined;
+  const raw = (body as Record<string, unknown>)[DISPATCH_TOPIC_VERSION_KEY];
+  return typeof raw === 'number' && Number.isInteger(raw) && raw >= 0 ? raw : undefined;
+}

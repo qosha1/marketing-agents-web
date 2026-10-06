@@ -19,8 +19,10 @@ import { describe, expect, it } from 'vitest';
 import {
   DISPATCH_STAMP_ATTR,
   DISPATCH_STAMP_TTL_MS,
+  DISPATCH_TOPIC_VERSION_KEY,
   dispatchInFlight,
   dispatchStampedAt,
+  relayedTopicVersion,
   withDispatchStamp,
 } from '../dispatch-stamp';
 
@@ -106,5 +108,46 @@ describe('withDispatchStamp', () => {
 
   it('survives an absent blob', () => {
     expect(dispatchStampedAt(withDispatchStamp(undefined, NOW))).toBe(NOW);
+  });
+});
+
+/**
+ * The version the relay reports back (bd startsim-jkkn7.13).
+ *
+ * WHY A READER AND NOT `body.topic_version`. The browser remembers whatever it
+ * is given as the version to ASSERT on the next write to that topic, so a junk
+ * value is not a cosmetic problem: it produces a 412 that describes no conflict,
+ * which is the exact failure this field exists to remove. Absence is the safe
+ * answer (the write goes unguarded, as it did before j19hf) and a non-integer is
+ * therefore read as absence rather than coerced.
+ */
+describe('relayedTopicVersion', () => {
+  it('reads the integer the route reports', () => {
+    expect(relayedTopicVersion({ ok: true, [DISPATCH_TOPIC_VERSION_KEY]: 7 })).toBe(7);
+  });
+
+  it('is absent when the relay did not say — a deduped press, or a failed stamp', () => {
+    expect(relayedTopicVersion({ ok: true, deduped: true })).toBeUndefined();
+    expect(relayedTopicVersion({ ok: true, deduped: false })).toBeUndefined();
+  });
+
+  it('accepts 0 — a topic with no recorded write yet still has a version', () => {
+    expect(relayedTopicVersion({ [DISPATCH_TOPIC_VERSION_KEY]: 0 })).toBe(0);
+  });
+
+  it('refuses anything that is not a whole, non-negative number', () => {
+    expect(relayedTopicVersion({ [DISPATCH_TOPIC_VERSION_KEY]: '7' })).toBeUndefined();
+    expect(relayedTopicVersion({ [DISPATCH_TOPIC_VERSION_KEY]: 7.5 })).toBeUndefined();
+    expect(relayedTopicVersion({ [DISPATCH_TOPIC_VERSION_KEY]: -1 })).toBeUndefined();
+    expect(relayedTopicVersion({ [DISPATCH_TOPIC_VERSION_KEY]: null })).toBeUndefined();
+    expect(relayedTopicVersion({ [DISPATCH_TOPIC_VERSION_KEY]: NaN })).toBeUndefined();
+  });
+
+  it('survives a body that is not an object at all', () => {
+    // `res.json()` is `.catch(() => null)`-ed at both call sites, so null is the
+    // shape a non-JSON 202 actually produces.
+    expect(relayedTopicVersion(null)).toBeUndefined();
+    expect(relayedTopicVersion(undefined)).toBeUndefined();
+    expect(relayedTopicVersion('202 Accepted')).toBeUndefined();
   });
 });

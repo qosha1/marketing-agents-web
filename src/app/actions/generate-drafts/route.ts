@@ -113,7 +113,11 @@
  */
 import { NextResponse } from 'next/server';
 
-import { DISPATCH_STAMP_ATTR, withDispatchStamp } from '@/lib/dispatch-stamp';
+import {
+  DISPATCH_STAMP_ATTR,
+  DISPATCH_TOPIC_VERSION_KEY,
+  withDispatchStamp,
+} from '@/lib/dispatch-stamp';
 import { APPROVAL_TRIGGER, GENERATE_BUTTON_TRIGGER } from '@/lib/draft-origin';
 import { claimGenerateRun, releaseGenerateClaim } from '@/lib/generate-claim';
 import { recordScopePath, SCOPE_PATH_ATTR } from '@/lib/scope';
@@ -341,22 +345,44 @@ export async function POST(request: Request) {
     // so there is no extra GET; it is a read-modify-write because the tenant's
     // PATCH REPLACES `data`. Server-side there is no snake→camel transform (see
     // `tenant-fetch.ts`), so the stored spelling is written directly.
+    // AND THE STAMP IS A WRITE, SO IT MOVES THE TOPIC'S VERSION — which the
+    // browser cannot see, because this PATCH is issued here and not through the
+    // client whose registry guards the reviewer's next save (bd startsim-j19hf,
+    // bd startsim-jkkn7.13). Unreported, it refuses the Accept that follows an
+    // approval with a 412 that describes no conflict. So the relay hands the new
+    // version back; see `relayedTopicVersion` in lib/dispatch-stamp.ts for the
+    // whole argument and for why absence is the correct answer on failure.
+    let topicVersion: number | undefined;
     try {
-      await tenantFetch(`entities/${encodeURIComponent(String(topic.id))}`, auth, {
-        method: 'PATCH',
-        body: { data: withDispatchStamp(topic.data, Date.now()) },
-      });
+      const stamped = await tenantFetch<{ version?: unknown }>(
+        `entities/${encodeURIComponent(String(topic.id))}`,
+        auth,
+        {
+          method: 'PATCH',
+          body: { data: withDispatchStamp(topic.data, Date.now()) },
+        },
+      );
+      topicVersion = typeof stamped?.version === 'number' ? stamped.version : undefined;
     } catch (error) {
       // Logged and swallowed. The consequence of losing this is bounded and
       // visible: the poll may dispatch this one topic a second time within the
       // writer's window, which is the behaviour that existed before the stamp.
+      // The version stays unreported, which is right — a PATCH that failed moved
+      // nothing, so the browser's held version is still the current one.
       console.warn('[generate-drafts] could not stamp the dispatch', {
         topicRef,
         attr: DISPATCH_STAMP_ATTR,
         detail: (error as Error).message,
       });
     }
-    return NextResponse.json({ ok: true, deduped: false }, { status: 202 });
+    return NextResponse.json(
+      {
+        ok: true,
+        deduped: false,
+        ...(topicVersion === undefined ? {} : { [DISPATCH_TOPIC_VERSION_KEY]: topicVersion }),
+      },
+      { status: 202 },
+    );
   } catch {
     releaseGenerateClaim(topicRef);
     return NextResponse.json(

@@ -75,6 +75,13 @@ vi.mock('@startsimpli/ui/collection', async () => {
     ReviewDrawer: () => null,
     // The shape of the real thing: it saves through the client it was GIVEN and
     // then calls a bare `onSaved` that says nothing about which decision fired.
+    //
+    // THE try/catch IS PART OF THAT SHAPE, not test scaffolding. In
+    // @startsimpli/ui@0.4.138 `onSaved?.()` sits INSIDE the try, on the line
+    // after the awaited `updateEntity` — so a save the server REFUSES (a 412
+    // from the version precondition, bd startsim-j19hf) never reaches it. A stub
+    // without the catch would turn that case into an unhandled rejection and
+    // would be testing the stub instead of the wiring (bd startsim-jkkn7.13).
     InlineReviewActions: ({
       client,
       record,
@@ -83,33 +90,30 @@ vi.mock('@startsimpli/ui/collection', async () => {
       client: CollectionClient;
       record: EntityRecord;
       onSaved?: () => void;
-    }) =>
-      React.createElement(
+    }) => {
+      const decide = (status: string) => async () => {
+        try {
+          await client.updateEntity(record.id, { data: { ...record.data, status } });
+          onSaved?.();
+        } catch (err) {
+          notify.error(err instanceof Error ? err.message : 'Could not save.');
+        }
+      };
+      return React.createElement(
         'span',
         null,
         React.createElement(
           'button',
-          {
-            'data-testid': `approve-${record.id}`,
-            onClick: async () => {
-              await client.updateEntity(record.id, { data: { ...record.data, status: 'ready' } });
-              onSaved?.();
-            },
-          },
+          { 'data-testid': `approve-${record.id}`, onClick: decide('ready') },
           'approve',
         ),
         React.createElement(
           'button',
-          {
-            'data-testid': `reject-${record.id}`,
-            onClick: async () => {
-              await client.updateEntity(record.id, { data: { ...record.data, status: 'rejected' } });
-              onSaved?.();
-            },
-          },
+          { 'data-testid': `reject-${record.id}`, onClick: decide('rejected') },
           'reject',
         ),
-      ),
+      );
+    },
   };
 });
 
@@ -193,6 +197,9 @@ vi.mock('@/lib/foundry-api', () => ({
 }));
 
 const { resetGenerateRuns } = await import('@/lib/generate-run');
+// NOT mocked: the registry is the thing the dispatch has to keep honest, so the
+// real one is under test here (bd startsim-jkkn7.13).
+const { heldVersion, rememberVersion, resetHeldVersions } = await import('@/lib/record-version');
 const TypeRecordsPage = (await import('../page')).default;
 
 function renderPage() {
@@ -213,6 +220,7 @@ beforeEach(() => {
   // test (bd startsim-ozpjw.9), so a second approval of the same topic would
   // otherwise be refused as a rejoin of the first test's run.
   resetGenerateRuns();
+  resetHeldVersions();
   searchString = '';
   // NOT OPTIONAL. Unstubbed, the dispatch POSTs /actions/generate-drafts, which
   // in a deployed tenant relays the real n8n writer.
@@ -334,6 +342,93 @@ describe('approving a topic starts its draft', () => {
     // ENDED IN THE STORE, so navigating back to this topic does not rejoin a run
     // that never began and sit on "Generating…" for six minutes.
     expect(isGenerateRunning('topic-1')).toBe(false);
+  });
+
+  /**
+   * A REFUSED APPROVE DISPATCHES NOTHING (bd startsim-m7fdm.19, bd startsim-j19hf).
+   *
+   * Approving now does two things that did not previously coexist: it WRITES
+   * (status and team_verdict together) and that write carries a version
+   * precondition, so the server can REFUSE it with a 412. If the dispatch hung
+   * off the button press, a reviewer whose approval was rejected would still
+   * spend an LLM run and still get a draft for a topic that is not approved.
+   *
+   * It does not, and the reason is structural rather than a check: the dispatch
+   * is gated on `approveWatch.tookApproval`, which reports off the record the
+   * server PERSISTED — a rejected `updateEntity` never assigns the reading, and
+   * the shared cluster never calls `onSaved` either. These tests pin that, from
+   * the outside, at the one seam a refactor could quietly move.
+   */
+  it('does NOT dispatch when the server REFUSES the approve', async () => {
+    const { isGenerateRunning } = await import('@/lib/generate-run');
+    updateEntity.mockRejectedValueOnce(
+      new Error('This topic changed since you opened it. Reload and try again.'),
+    );
+    renderPage();
+    fireEvent.click(await screen.findByTestId('approve-topic-1'));
+
+    // The reviewer is told, by the shared cluster, in the server's own words.
+    await waitFor(() => expect(notify.error).toHaveBeenCalled());
+    expect(String(notify.error.mock.calls[0][0])).toMatch(/changed since you opened it/);
+    // And nothing was asked of the writer.
+    expect(dispatched()).toBeNull();
+    expect(isGenerateRunning('topic-1')).toBe(false);
+    // Nor was the reviewer sent to a story for a topic that is not approved.
+    expect(push).not.toHaveBeenCalled();
+    expect(notify.success).not.toHaveBeenCalled();
+  });
+
+  it('dispatches on the NEXT approve, so a refusal is not a dead button', async () => {
+    const { isGenerateRunning } = await import('@/lib/generate-run');
+    updateEntity.mockRejectedValueOnce(new Error('412'));
+    renderPage();
+    fireEvent.click(await screen.findByTestId('approve-topic-1'));
+    await waitFor(() => expect(notify.error).toHaveBeenCalled());
+
+    fireEvent.click(await screen.findByTestId('approve-topic-1'));
+
+    await waitFor(() => expect(dispatched()).not.toBeNull());
+    expect(isGenerateRunning('topic-1')).toBe(true);
+  });
+
+  /**
+   * AND THE RELAY'S OWN WRITE MUST NOT BREAK THE ACCEPT THAT FOLLOWS
+   * (bd startsim-jkkn7.13).
+   *
+   * The route stamps the topic server-side, which allocates a new `version` the
+   * browser cannot see. `primeEntity` keeps `['entity', <topicId>]` fresh for
+   * five minutes with `refetchOnWindowFocus: false`, so the story page and the
+   * draft page both read the topic from that cache and never refetch it — and
+   * `/draft/<id>` Accept asserts the registry's version when it moves the topic
+   * to `written`. Unreported, a reviewer accepting inside five minutes of
+   * approving gets the draft approved and the topic refused, which is the whole
+   * flow this bead exists to make work.
+   */
+  it('remembers the topic version the relay reports, so Accept is not refused', async () => {
+    // The version the approve save itself produced — what the registry holds
+    // before the stamp moves it.
+    global.fetch = vi.fn(async () =>
+      new Response(JSON.stringify({ ok: true, deduped: false, topic_version: 31 }), { status: 202 }),
+    ) as unknown as typeof fetch;
+    rememberVersion('topic-1', { version: 30 });
+    renderPage();
+    fireEvent.click(await screen.findByTestId('approve-topic-1'));
+
+    await waitFor(() => expect(heldVersion('topic-1')).toBe(31));
+  });
+
+  it('leaves the held version alone when the relay reports none', async () => {
+    // A failed stamp moved nothing, so the version the browser holds is still
+    // the current one. Overwriting it with a guess is the bug, not the fix.
+    global.fetch = vi.fn(async () =>
+      new Response(JSON.stringify({ ok: true, deduped: true }), { status: 202 }),
+    ) as unknown as typeof fetch;
+    rememberVersion('topic-1', { version: 30 });
+    renderPage();
+    fireEvent.click(await screen.findByTestId('approve-topic-1'));
+
+    await waitFor(() => expect(notify.success).toHaveBeenCalled());
+    expect(heldVersion('topic-1')).toBe(30);
   });
 
   it('stays SILENT when the topic already has drafts', async () => {

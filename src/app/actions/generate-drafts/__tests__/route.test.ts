@@ -46,7 +46,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/lib/tenant-fetch', () => ({ tenantFetch: vi.fn() }));
 
-import { DISPATCH_STAMP_ATTR } from '@/lib/dispatch-stamp';
+import { DISPATCH_STAMP_ATTR, DISPATCH_TOPIC_VERSION_KEY } from '@/lib/dispatch-stamp';
 import { APPROVAL_TRIGGER, GENERATE_BUTTON_TRIGGER } from '@/lib/draft-origin';
 import { resetGenerateClaims } from '@/lib/generate-claim';
 import { tenantFetch } from '@/lib/tenant-fetch';
@@ -122,8 +122,13 @@ function stubTenant(opts: {
   attrFilter?: 'undeclared' | 'ignored';
   /** Django's raw whoami shape, or `null` to make ONLY that read fail. */
   whoami?: unknown;
+  /**
+   * The version the stamp PATCH reports. `null` answers with NO version at all —
+   * a tenant build that predates the revision trail.
+   */
+  stampedVersion?: number | null;
 }) {
-  vi.mocked(tenantFetch).mockImplementation(async (path: string) => {
+  vi.mocked(tenantFetch).mockImplementation(async (path: string, _auth: string, init) => {
     if (path.startsWith('whoami')) {
       if (opts.whoami === null) throw new Error(`tenant GET ${path} responded 401`);
       // snake_case, like every other fixture here: `tenantFetch` returns
@@ -146,7 +151,17 @@ function stubTenant(opts: {
     }
     if (path.startsWith('entities/')) {
       if (opts.topic === null) throw new Error(`tenant GET ${path} responded 404`);
-      return opts.topic ?? topicWire('ready');
+      const record = opts.topic ?? topicWire('ready');
+      // THE STAMP PATCH ANSWERS WITH THE VERSION IT ALLOCATED, which is how the
+      // browser learns that its own held version has moved (bd startsim-jkkn7.13).
+      // `version` is a read-only integer on EntitySerializer, so it is on the
+      // write response as well as on the read.
+      if ((init as { method?: string } | undefined)?.method === 'PATCH') {
+        return opts.stampedVersion === null
+          ? (record as Record<string, unknown>)
+          : { ...(record as Record<string, unknown>), version: opts.stampedVersion ?? 12 };
+      }
+      return record;
     }
     throw new Error(`unexpected tenant path: ${path}`);
   });
@@ -653,6 +668,72 @@ describe('telling the n8n poll a writer is running (bd startsim-m7fdm.19, constr
 
     expect(res.status).toBe(202);
     expect(await res.json()).toMatchObject({ ok: true, deduped: false });
+  });
+
+  /**
+   * AND THE STAMP IS A WRITE, SO IT MOVES THE TOPIC'S VERSION
+   * (bd startsim-jkkn7.13, bd startsim-j19hf).
+   *
+   * This PATCH goes out server-side through `tenant-fetch`, so the browser's
+   * version registry never sees it — and the next conditional write to this
+   * topic is the draft page's Accept, which asserts that registry. Unreported,
+   * the approve-then-accept flow this bead builds ends in a 412 that describes
+   * no conflict: the draft flips to approved and its topic is refused.
+   */
+  it('reports the version the stamp allocated, so the next save asserts the right one', async () => {
+    stubTenant({ topic: topicWire('ready'), drafts: [], stampedVersion: 31 });
+
+    const res = await POST(post({ story: story() }));
+
+    expect(res.status).toBe(202);
+    expect(await res.json()).toMatchObject({ [DISPATCH_TOPIC_VERSION_KEY]: 31 });
+  });
+
+  it('reports it for the BUTTON too — the same topic, the same registry', async () => {
+    stubTenant({ topic: topicWire('ready'), drafts: [], stampedVersion: 9 });
+
+    const res = await POST(post({ story: story(), trigger: GENERATE_BUTTON_TRIGGER }));
+
+    expect(await res.json()).toMatchObject({ [DISPATCH_TOPIC_VERSION_KEY]: 9 });
+  });
+
+  it('reports NOTHING when the stamp failed — a write that did not land moved nothing', async () => {
+    // Absence is the correct answer, not a fallback: the browser's held version
+    // is still the current one, so remembering anything else would be the bug.
+    stubTenant({ topic: topicWire('ready'), drafts: [] });
+    const reads = vi.mocked(tenantFetch).getMockImplementation()!;
+    vi.mocked(tenantFetch).mockImplementation(async (path: string, auth: string, init) => {
+      if ((init as { method?: string }).method === 'PATCH') {
+        throw new Error(`tenant PATCH ${path} responded 403`);
+      }
+      return reads(path, auth, init);
+    });
+
+    const body = (await (await POST(post({ story: story() }))).json()) as Record<string, unknown>;
+
+    expect(body).toMatchObject({ ok: true, deduped: false });
+    expect(DISPATCH_TOPIC_VERSION_KEY in body).toBe(false);
+  });
+
+  it('reports nothing when the tenant serves no version at all', async () => {
+    // Pre-trail tenant builds omit it. The key must then be ABSENT rather than
+    // present-and-undefined, which `JSON.stringify` would drop anyway — asserted
+    // so a future refactor cannot start sending `null`.
+    stubTenant({ topic: topicWire('ready'), drafts: [], stampedVersion: null });
+
+    const body = (await (await POST(post({ story: story() }))).json()) as Record<string, unknown>;
+
+    expect(DISPATCH_TOPIC_VERSION_KEY in body).toBe(false);
+  });
+
+  it('reports nothing for a DEDUPED press, which never relayed and never stamped', async () => {
+    stubTenant({ topic: topicWire('ready'), drafts: [], stampedVersion: 31 });
+    await POST(post({ story: story() }));
+
+    const body = (await (await POST(post({ story: story() }))).json()) as Record<string, unknown>;
+
+    expect(body).toMatchObject({ ok: true, deduped: true });
+    expect(DISPATCH_TOPIC_VERSION_KEY in body).toBe(false);
   });
 });
 

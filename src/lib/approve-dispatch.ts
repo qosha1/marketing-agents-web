@@ -67,9 +67,11 @@ import { formatBearer } from '@/lib/bearer';
 // (bd startsim-m7fdm.19). A literal spelled in this file and switched on in that
 // one is how an auto-written draft ends up labelled "a caller this app does not
 // recognise" — the regression rc92e's first constraint is about.
+import { relayedTopicVersion } from '@/lib/dispatch-stamp';
 import { APPROVAL_TRIGGER } from '@/lib/draft-origin';
 import type { EntityRecord } from '@/lib/foundry-api';
 import { endGenerateRun, startGenerateRunOnce } from '@/lib/generate-run';
+import { rememberVersion } from '@/lib/record-version';
 import { buildStoryFromTopic } from '@/lib/topic-drafts';
 
 /** What the reviewer is told at the moment of approval. */
@@ -134,13 +136,21 @@ export async function dispatchDraftForApproval(topic: EntityRecord): Promise<voi
       },
       body: JSON.stringify({ story: buildStoryFromTopic(topic), trigger: APPROVAL_TRIGGER }),
     });
+    const body = await res.json().catch(() => null);
     if (!res.ok) {
-      const body = await res.json().catch(() => null);
       endGenerateRun(topicId, 'idle');
       const message = approvalDispatchRefusal(res.status, body);
       if (message) notify.error(message);
       return;
     }
+    // THE RELAY WROTE TO THIS TOPIC, so the version the next save must assert
+    // has moved (bd startsim-jkkn7.13). Without this the Accept at the end of
+    // the flow this bead builds — approve, wait ~2 min, read the draft, accept —
+    // asserts the pre-stamp version and is refused with a 412 that describes no
+    // conflict. `rememberVersion` takes a record and reads `.version` off it, so
+    // the reported integer is handed over in that shape.
+    const version = relayedTopicVersion(body);
+    if (version !== undefined) rememberVersion(topicId, { version });
     notify.success(APPROVAL_DISPATCH_MESSAGE);
   } catch (err) {
     // Ended in the store as well as in this call, so navigating back to the
