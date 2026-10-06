@@ -162,6 +162,29 @@ export interface DefaultVisibleOptions {
    * measured itself is the one that gets to drop it.
    */
   sparse?: string[];
+  /**
+   * Attributes THIS view ALREADY renders as a filter chip row above the grid, so
+   * a column of them repeats what the chips have said — at the cost of a default
+   * slot on a table reviewers have twice called too wide to scroll (bd
+   * startsim-m7fdm.11, startsim-5pq7h, startsim-xe1uo). Applied after the cap
+   * like every other exclusion, so dropping one NARROWS the row.
+   *
+   * DELIBERATELY NOT `sparse`, and the distinction is the reason this is a
+   * second option rather than an addition to that list. `sparse` asserts a
+   * MEASUREMENT — assignee_name blank in 152 of 153 drafts, so its column
+   * renders an em dash. `status` is the opposite of blank: populated on 171 of
+   * 171 topics. It goes because it is REDUNDANT, not because it is empty, and
+   * filing it under `sparse` would leave the next reader of that list believing
+   * a count nobody took.
+   *
+   * Per-view for the same reason `sparse` is: whether a chip row renders is a
+   * property of a VIEW, not of an attribute's name. Drafts and News declare
+   * `status` too and both draw the chips, so the argument would carry there —
+   * but only the Topics table was asked for, and `status` sits in the SHARED
+   * PREFERRED_ATTRS, so doing this there would have taken State out of all
+   * three. The view that decides its chips say enough is the one that passes it.
+   */
+  shownAsFilter?: string[];
 }
 
 /**
@@ -199,6 +222,7 @@ export function defaultVisibleColumns(
     ...NAME_DUPLICATE_ATTRS,
     ...JOIN_KEY_ATTRS,
     ...(opts.sparse ?? []),
+    ...(opts.shownAsFilter ?? []),
   ]);
   const visibleAttrs = [...preferred, ...rest]
     .slice(0, DEFAULT_ATTR_CAP)

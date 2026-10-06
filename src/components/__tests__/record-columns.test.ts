@@ -134,9 +134,12 @@ describe('columns with no added value are never default-visible (startsim-b008b)
     for (const name of ['ai_rank', 'scope_path', 'team_verdict']) {
       expect(visible).not.toContain(name);
     }
-    // …while the columns that DO carry the review are still there.
+    // …while the columns that DO carry the review are still there. `status` is
+    // NOT in this list any more — it is still a default of the function, but the
+    // Topics VIEW drops it via `shownAsFilter` (bd startsim-m7fdm.11), so
+    // asserting it here would pin a set no reviewer sees.
     expect(visible).toEqual(
-      expect.arrayContaining(['name', 'createdAt', 'content_type', 'status', 'market', 'assignee_name']),
+      expect.arrayContaining(['name', 'createdAt', 'content_type', 'market', 'assignee_name']),
     );
   });
 
@@ -170,13 +173,22 @@ describe('columns with no added value are never default-visible (startsim-b008b)
     expect(visible).not.toContain('source_1');
   });
 
-  it('opens the topic table on exactly these seven columns', () => {
-    // Pinned, not descriptive: this is the set that was rendered against the
-    // deployed table to measure the row width (2026-09-07 — 1288px -> 1134px,
-    // i.e. no horizontal overflow at 1440 or 1366). If the set changes, the
-    // measurement behind bd startsim-5pq7h stops being about this table.
-    expect(defaultVisibleColumns(TOPIC_ATTRS, { hide: CONTENT_HIDE, withActions: true })).toEqual([
-      'name', 'createdAt', 'content_type', 'status', 'market', 'assignee_name', '__actions',
+  it('opens the topic table on exactly these six columns', () => {
+    // Pinned, not descriptive: this is the set the deployed table renders, and
+    // it has to be called with everything the view passes or it stops being
+    // about this table — which is exactly what the width measurement behind bd
+    // startsim-5pq7h rests on (2026-09-07: 1288px -> 1134px, no horizontal
+    // overflow at 1440 or 1366).
+    //
+    // It was SEVEN until bd startsim-m7fdm.11 took State out of the default:
+    // the chips above the grid already say it. One column narrower again, and
+    // `shownAsFilter` is part of the call because the Topics view passes it.
+    expect(defaultVisibleColumns(TOPIC_ATTRS, {
+      hide: CONTENT_HIDE,
+      withActions: true,
+      shownAsFilter: ['status'],
+    })).toEqual([
+      'name', 'createdAt', 'content_type', 'market', 'assignee_name', '__actions',
     ]);
   });
 
@@ -396,5 +408,118 @@ describe('a declared topic_ref never becomes a default column (startsim-8hgmq.11
   it('still OFFERS it in the Columns menu, like every other dropped default', () => {
     const ids = buildRecordColumns(DRAFT_ATTRS_WITH_TOPIC_REF).map((c) => c.id);
     expect(ids).toContain('topic_ref');
+  });
+});
+
+/**
+ * The Topics table opens on a State column that says nothing its own filter
+ * chip row has not already said (bd startsim-m7fdm.11). The chips sit DIRECTLY
+ * above the grid — `status`'s four declared choices, suggested / ready /
+ * rejected / written — on the one table reviewers have twice called too wide to
+ * scroll (bd startsim-5pq7h, startsim-xe1uo).
+ *
+ * This is NOT `sparse`, and keeping the two apart is the point of the second
+ * option. `sparse` asserts a MEASUREMENT: assignee_name is blank in 152 of 153
+ * drafts, so its column renders an em dash. `status` is the exact opposite —
+ * populated on 171 of 171 topics — and is dropped because it is REDUNDANT with
+ * the chips, not because it is empty. Passing it as `sparse` would leave the
+ * next reader of that list believing a count nobody took.
+ */
+describe('the Topics table does not repeat its own State chips (startsim-m7fdm.11)', () => {
+  it('opens one column NARROWER than before — State leaves, nothing arrives', () => {
+    const before = defaultVisibleColumns(TOPIC_ATTRS, {
+      hide: CONTENT_HIDE,
+      withActions: true,
+    });
+    const after = defaultVisibleColumns(TOPIC_ATTRS, {
+      hide: CONTENT_HIDE,
+      withActions: true,
+      shownAsFilter: ['status'],
+    });
+    // The whole delta, stated as a delta: one column left and none took its
+    // place. This is the assertion that fails if the exclusion ever moves to
+    // BEFORE the cap and starts backfilling.
+    expect(before.filter((c) => !after.includes(c))).toEqual(['status']);
+    expect(after.filter((c) => !before.includes(c))).toEqual([]);
+    expect(after).toHaveLength(before.length - 1);
+  });
+
+  it('renders that as the header row Title | Created | Market | Kind | Assignee', () => {
+    const visible = new Set(defaultVisibleColumns(TOPIC_ATTRS, {
+      hide: CONTENT_HIDE,
+      withActions: true,
+      shownAsFilter: ['status'],
+    }));
+    const headerRow = buildRecordColumns(TOPIC_ATTRS, {
+      subtitleAttrs: ['subtitle', 'angle'],
+      hide: CONTENT_HIDE,
+    })
+      .filter((c) => visible.has(c.id))
+      .map((c) => c.header);
+    // Market before Kind: the RENDER order is the type's own attribute order
+    // ('market' precedes 'content_type' in the declaration), which is not the
+    // order defaultVisibleColumns returns — that one leads with PREFERRED_ATTRS.
+    // The two lists answer different questions, and only this one is on screen.
+    expect(headerRow).toEqual(['Title', 'Created', 'Market', 'Kind', 'Assignee']);
+    expect(headerRow).not.toContain('State');
+  });
+
+  it('drops State WITHOUT backfilling the freed slot', () => {
+    const visible = defaultVisibleColumns(TOPIC_ATTRS, {
+      hide: CONTENT_HIDE,
+      withActions: true,
+      shownAsFilter: ['status'],
+    });
+    expect(visible).not.toContain('status');
+    // The cap runs FIRST, so the slot State gave up was already spent on
+    // ai_rank / team_verdict and dropped with them. Removing a column has to
+    // make the row narrower — never hand the gap to the next attribute in
+    // declaration order, which here is team_notes (a longtext) and source_1.
+    for (const name of ['team_notes', 'source_1', 'delivered_at', 'scheduled_for', 'assignee_sub']) {
+      expect(visible).not.toContain(name);
+    }
+    // Six, down from seven. The attribute columns are three, not four.
+    expect(visible).toHaveLength(6);
+  });
+
+  it('still OFFERS State in the Columns picker — the default goes, not the column', () => {
+    const cols = buildRecordColumns(TOPIC_ATTRS, {
+      subtitleAttrs: ['subtitle', 'angle'],
+      hide: CONTENT_HIDE,
+    });
+    expect(cols.map((c) => c.id)).toContain('status');
+    // …still under the heading a reviewer recognises from the chips.
+    expect(cols.find((c) => c.id === 'status')?.header).toBe('State');
+  });
+
+  it('is per-view: the Drafts and News tables KEEP their State column', () => {
+    // Both declare `status` and both draw the same chip row, so the argument
+    // would carry there too — but only the Topics table was asked for, and
+    // `status` sits in the SHARED PREFERRED_ATTRS, so a change made there
+    // instead would have silently taken State out of all three.
+    expect(defaultVisibleColumns(DRAFT_ATTRS, {
+      afterCreated: ['__origin'],
+      sparse: DRAFT_SPARSE,
+    })).toContain('status');
+    expect(defaultVisibleColumns(NEWS_ATTRS, { withActions: true })).toContain('status');
+  });
+
+  it('is a DIFFERENT list from sparse — neither one implies the other', () => {
+    // A view may pass both, and each drops only what it names. If the two were
+    // folded together this test could not fail.
+    const both = defaultVisibleColumns(TOPIC_ATTRS, {
+      hide: CONTENT_HIDE,
+      withActions: true,
+      shownAsFilter: ['status'],
+      sparse: ['assignee_name'],
+    });
+    expect(both).toEqual(['name', 'createdAt', 'content_type', 'market', '__actions']);
+    // …and `sparse` alone must NOT take State away: the Topics table's State
+    // column is populated, so nothing about emptiness reaches it.
+    expect(defaultVisibleColumns(TOPIC_ATTRS, {
+      hide: CONTENT_HIDE,
+      withActions: true,
+      sparse: ['assignee_name'],
+    })).toContain('status');
   });
 });

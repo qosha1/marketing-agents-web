@@ -522,6 +522,18 @@ export default function TypeRecordsPage() {
 
   const hasStatusBoard = !!statusAttr;
 
+  // The attribute the State chip row is drawn from — and therefore the one whose
+  // COLUMN repeats it (bd startsim-m7fdm.11). Read off `statusAttr` and gated on
+  // the same `choicesOf(...).length` that `filtersConfig` below gates the chip
+  // section on, so the column can only be dropped where the chips that replace
+  // it are actually rendered. Hardcoding 'status' here would let the two drift:
+  // pickStatusAttr falls back to the FIRST enum with choices when no attribute
+  // is named `status`, and then the dropped column would not be the charted one.
+  const stateChipAttr = useMemo(
+    () => (choicesOf(statusAttr).length ? statusAttr?.name ?? null : null),
+    [statusAttr],
+  );
+
   // Which columns the table OPENS with — owned by record-columns.ts so every
   // view built on buildRecordColumns gets the same defaults (and the same
   // never-default set) without a per-call-site list.
@@ -547,17 +559,37 @@ export default function TypeRecordsPage() {
         // afterCreated sits outside it on purpose, so a computed column can
         // never evict a declared attribute a reviewer reads.
         sparse: isDraft ? DRAFT_SPARSE_ATTRS : undefined,
+        // The State column says exactly what the State chips directly above the
+        // grid already say, on the table reviewers have twice said is too wide
+        // (bd startsim-m7fdm.11). Topics ONLY — Quinn asked for this table, and
+        // `status` lives in the shared PREFERRED_ATTRS, so doing it in
+        // record-columns.ts would have pulled State out of Drafts and News too.
+        // Still one toggle away in the Columns picker.
+        shownAsFilter: isContent && stateChipAttr ? [stateChipAttr] : undefined,
       }),
-      // v6: the News Item table stops opening on Url / Title / Snippet — three
-      // wide columns in its default six, one of them a duplicate of the Name
-      // column — and does not backfill their slots (bd startsim-8hgmq.1).
+      // v7: the Topics table stops opening on State — the chip row directly
+      // above the grid already says it (bd startsim-m7fdm.11). Quinn and every
+      // OGMC reviewer already carry a saved v6 choice, and a stored choice is
+      // read back VERBATIM and never consults `defaultVisible` at all
+      // (UnifiedTable: `if (stored) return JSON.parse(stored)`), so without this
+      // bump the change would be invisible to exactly the people who asked for
+      // it and visible only to someone who had never opened the table.
+      //
+      // The key is shared across types, so the bump also resets saved choices on
+      // Drafts and News. That is the accepted cost of the mechanism and the same
+      // one v5→v6 paid: a per-type suffix would buy those two a preserved
+      // layout at the price of a version number that means something different
+      // per table. The defaults are what a reviewer sees either way.
+      //
+      // v6 was: the News Item table stops opening on Url / Title / Snippet —
+      // three wide columns in its default six, one of them a duplicate of the
+      // Name column — and does not backfill their slots (bd startsim-8hgmq.1).
       // v5 was: Created moves up next to the title, ai_rank / scope_path /
       // team_verdict stop being default columns (bd startsim-b008b), and the
-      // draft table gains "Created by" (bd startsim-4gw21). The bumped key is
-      // what stops a saved v5 choice from overriding any of it.
-      persistKey: `records-${typeKey}-v6`,
+      // draft table gains "Created by" (bd startsim-4gw21).
+      persistKey: `records-${typeKey}-v7`,
     };
-  }, [type?.attributes, typeKey, isContent, isNews, isDraft]);
+  }, [type?.attributes, typeKey, isContent, isNews, isDraft, stateChipAttr]);
 
   // Kind + State facet chips (shared TableFilters). Options are the raw enum
   // values; UnifiedTable renders the chips and reports changes via onChange —
