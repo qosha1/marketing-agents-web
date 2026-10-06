@@ -109,6 +109,37 @@ export function isTerminalStatus(key: string): boolean {
   return BY_KEY.get(key)?.terminal ?? false;
 }
 
+/**
+ * The states in which NO human disposition has been recorded — the drafts a
+ * reviewer still owes a decision on (bd startsim-tkfzu).
+ *
+ * A LIST OF STATES, NOT `!terminal`. `terminal` answers a different question —
+ * "shelved without publishing, gone from the active tracker" — and `approved`
+ * and `published` are deliberately non-terminal while being emphatically
+ * decided. Reusing it here would have counted every approved draft as waiting.
+ *
+ * The four legacy values matter as much as the two current ones. wn2p.2 migrated
+ * `drafting`/blank -> `ready_for_review` and `ready`/`sent` -> `approved`, but
+ * all four stayed DECLARED on the live type (eleven choices, read 2026-10-05),
+ * so a row can still carry one. `drafting` and `needs_revision` are undecided;
+ * `ready` and `sent` were approvals and are not.
+ */
+const AWAITING_DECISION = new Set([
+  'ready_for_review',
+  'under_review',
+  'needs_revision',
+  'drafting',
+]);
+
+/**
+ * True for a status that records no human decision. '' is FALSE: a draft whose
+ * status field is empty has not said it is waiting, and no live draft carries a
+ * blank one (169 of 169 carry a value, 2026-10-05).
+ */
+export function awaitsDecision(key: string): boolean {
+  return AWAITING_DECISION.has(key);
+}
+
 /** A schema type def, narrowed to the part this module reads. */
 type StatusTypeDef =
   | { attributes?: { name: string; config?: { choices?: unknown } }[] }
@@ -138,4 +169,16 @@ export function declaredDraftStatuses(type: StatusTypeDef): string[] {
 export function missingRequiredStatuses(type: StatusTypeDef): string[] {
   const declared = new Set(declaredDraftStatuses(type));
   return STATUSES.map((s) => s.key).filter((key) => !declared.has(key));
+}
+
+/**
+ * The awaiting-decision values THIS tenant declares — the vocabulary above
+ * intersected with the live schema, in schema order.
+ *
+ * Membership from the schema, meaning from this file: a tenant that declares
+ * only `ready_for_review` and `approved` cannot hold a draft at
+ * `needs_revision`, so the queue that reads this never claims one.
+ */
+export function declaredAwaitingDecision(type: StatusTypeDef): string[] {
+  return declaredDraftStatuses(type).filter(awaitsDecision);
 }

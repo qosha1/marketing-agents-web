@@ -27,16 +27,31 @@ import { formatRelativeDate } from '@startsimpli/ui';
 import { Inbox, RadioTower } from 'lucide-react';
 
 import {
+  draftQueue,
   ingestionOverdue,
   ingestionSummary,
   queueTotal,
   topicPipeline,
   topicQueue,
 } from '@/lib/health-data';
-import { listAllEntities, listEntities, listTypes, type EntityRecord } from '@/lib/foundry-api';
+import {
+  listAllEntities,
+  listEntities,
+  listTypes,
+  orgMembers,
+  type EntityRecord,
+} from '@/lib/foundry-api';
+import { normalizeMembers, operatorSubs } from '@/lib/roster';
 
 const TOPIC_KEY = ['entities', 'topic', 'all'] as const;
+const DRAFT_KEY = ['entities', 'draft', 'all'] as const;
 const SOURCE_KEY = ['entities', 'source', 'all'] as const;
+// THE SAME KEY THE DRAFTS TABLE AND THE ASSIGNEE PICKER USE, so react-query
+// fetches the roster once and the card hides exactly the drafts its destination
+// hides. It is refused (403) for a member-role reader — `operatorSubs` is then
+// [] on BOTH surfaces and the test-draft gate runs on `_triggered_by` alone
+// (bd startsim-m7fdm.9).
+const MEMBERS_KEY = ['org-members'] as const;
 // The ingestion aggregate reads a bounded window of the newest news_items rather
 // than the whole ~3.6k-row table (the whole-table fetch was the old widget's lag).
 // FOUR pages, not one: live deliveries land ~40 articles within ~15 seconds, so a
@@ -238,21 +253,43 @@ export function IngestionWidget({ title = 'Ingestion' }: { title?: string }) {
 export function AttentionWidget({ title = 'What needs a human' }: { title?: string }) {
   const typesQuery = useQuery({ queryKey: ['schema-types'], queryFn: () => listTypes() });
   const topicsQuery = useQuery({ queryKey: TOPIC_KEY, queryFn: () => listAllEntities('topic') });
+  // DRAFTS ARE THE HUMAN STEP THIS CARD COULD NOT SEE (bd startsim-tkfzu). It
+  // counted topic predicates only, so with every topic judged it rendered
+  // "All clear — nothing is waiting on a person" over 166 drafts sitting at
+  // ready_for_review (measured live 2026-10-05). The draft decision is the step
+  // the whole m7fdm epic is about.
+  const draftsQuery = useQuery({ queryKey: DRAFT_KEY, queryFn: () => listAllEntities('draft') });
+  // Refused for a member-role reader, which is fine and is the point: the row's
+  // count and its destination then apply the identical, narrower gate.
+  const membersQuery = useQuery({ queryKey: MEMBERS_KEY, queryFn: () => orgMembers() });
 
-  if (typesQuery.isLoading || topicsQuery.isLoading) return <LoadingCard title={title} />;
-  if (typesQuery.isError || topicsQuery.isError) return <ErrorCard title={title} />;
+  if (typesQuery.isLoading || topicsQuery.isLoading || draftsQuery.isLoading) {
+    return <LoadingCard title={title} />;
+  }
+  // A refused roster is NOT an error for this card — see MEMBERS_KEY.
+  if (typesQuery.isError || topicsQuery.isError || draftsQuery.isError) {
+    return <ErrorCard title={title} />;
+  }
 
   const topicType = typesQuery.data?.results.find((t) => t.key === 'topic');
-  const rows = topicQueue(topicType, topicsQuery.data ?? []);
+  const draftType = typesQuery.data?.results.find((t) => t.key === 'draft');
+  const subs = membersQuery.data ? operatorSubs(normalizeMembers(membersQuery.data)) : [];
+  const rows = [
+    ...topicQueue(topicType, topicsQuery.data ?? []),
+    // `dataUpdatedAt`, not Date.now(): the age line is judged against when the
+    // drafts were fetched, the same rule IngestionWidget follows.
+    ...draftQueue(draftType, draftsQuery.data ?? [], subs, draftsQuery.dataUpdatedAt),
+  ];
   const waiting = queueTotal(rows);
 
   return (
     <HealthCard
       title={title}
       status={rows.length === 0 ? 'ok' : 'warn'}
-      statusLabel={
-        rows.length === 0 ? 'All clear' : `${waiting} topic${waiting === 1 ? '' : 's'} waiting`
-      }
+      // RECORD-KIND NEUTRAL. The badge used to read "N topics waiting"; it now
+      // sums topics and drafts, and naming one of the two would state something
+      // the number is not.
+      statusLabel={rows.length === 0 ? 'All clear' : `${waiting} waiting`}
       icon={Inbox}
       isEmpty={rows.length === 0}
       emptyMessage="All clear — nothing is waiting on a person."

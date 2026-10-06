@@ -30,11 +30,20 @@ import {
   pickStatusAttr,
   readData,
   RECENCY_ALL,
+  RECENCY_PARAM,
   UNSET_COLUMN,
 } from '@/lib/board';
 import { CONTENT_TYPE_KEY } from '@/lib/content';
-import type { ViewChip } from '@/lib/drafts-view';
+import { declaredAwaitingDecision, draftStatusLabel } from '@/lib/draft-status';
+import {
+  applyOriginGate,
+  GATE_ALL,
+  originGateActive,
+  TOPIC_GATE_PARAM,
+  type ViewChip,
+} from '@/lib/drafts-view';
 import type { EntityRecord, EntityTypeDef } from '@/lib/foundry-api';
+import { DRAFT_TYPE } from '@/lib/topic-drafts';
 
 /** Coerce an unknown data-blob value to a trimmed string ('' when absent). */
 function asString(v: unknown): string {
@@ -181,17 +190,36 @@ const QUEUE_ALL = RECENCY_ALL;
 
 type Params = Record<string, string | undefined | null>;
 
+/**
+ * Which record spine a queue is about.
+ *
+ * ONE `queue` param, two spines, and a queue id is only honoured on its own.
+ * A draft queue id arriving on the topics table is not a queue there — it
+ * narrows nothing and chips nothing, exactly like an unrecognised value — so a
+ * stale or hand-edited URL can never empty the wrong table.
+ */
+type QueueSubject = 'topic' | 'draft';
+
 /** One queue: its id, the words it is stated in, and the predicate it IS. */
 interface QueueDef {
   /** Stable id — the row key, and the value carried in {@link TOPIC_QUEUE_PARAM}. */
   id: string;
+  /** The spine this queue counts. */
+  subject: QueueSubject;
   /** The card's phrase, and the destination's chip. One string, both surfaces. */
   title: string;
+  /** The noun the count is in — "19 topics", "5 drafts". */
+  noun: string;
   /** True when `match` needs the schema's intake stage to mean anything. */
   needsIntake: boolean;
-  match: (topic: EntityRecord, intake: string) => boolean;
-  meta: (matched: EntityRecord[], intake: string) => string;
+  match: (record: EntityRecord, intake: string) => boolean;
+  meta: (matched: EntityRecord[], intake: string, now?: number) => string;
+  /** Where the row sends the reader. */
+  href: (id: string) => string;
 }
+
+/** The one draft queue's id — the value carried in {@link TOPIC_QUEUE_PARAM}. */
+const DRAFT_QUEUE_ID = 'drafts-awaiting-decision';
 
 /**
  * Every queue, in display order. The ONE table behind the count, the label, the
@@ -201,41 +229,64 @@ interface QueueDef {
 const QUEUE_ROWS: QueueDef[] = [
   {
     id: 'judged-not-filed',
+    subject: 'topic',
     title: 'Judged, not filed',
+    noun: 'topic',
     needsIntake: true,
     match: isJudgedNotFiled,
     meta: (matched, intake) =>
       `A team_verdict is recorded (${verdictBreakdown(matched)}) but status is still “${intake}”. Advance each to the stage its verdict implies.`,
+    href: topicQueueHref,
   },
   {
     id: 'unjudged',
+    subject: 'topic',
     title: 'Not yet judged',
+    noun: 'topic',
     needsIntake: false,
     match: (topic) => isUnjudged(topic),
     meta: () => 'No team_verdict and no team_notes — nobody has looked at these yet.',
+    href: topicQueueHref,
+  },
+  {
+    id: DRAFT_QUEUE_ID,
+    subject: 'draft',
+    title: 'Awaiting a review decision',
+    noun: 'draft',
+    // The "intake" slot carries the DECLARED undecided statuses for drafts —
+    // see {@link awaitsDraftDecision}. A type with no status enum cannot pose
+    // the question, so the row is dropped rather than reported as 0.
+    needsIntake: true,
+    match: (draft, declared) => awaitsDraftDecision(draft, declared.split(',')),
+    meta: (matched, _declared, now) =>
+      `Written, nobody has approved, rejected or shelved them (${statusBreakdown(matched)}). ` +
+      `The oldest has been waiting ${oldestWaitingDays(matched, now)}. ` +
+      'The Drafts tab opens on the last 7 days, so these drop out of it rather than into view.',
+    href: draftQueueHref,
   },
 ];
 
 /** The records one queue is true of — the only place a queue predicate runs. */
 function queueRecords(
   def: QueueDef,
-  topics: EntityRecord[],
+  records: EntityRecord[],
   intake: string | null,
 ): EntityRecord[] {
   if (def.needsIntake && intake == null) return [];
-  return topics.filter((t) => def.match(t, intake ?? ''));
+  return records.filter((t) => def.match(t, intake ?? ''));
 }
 
 /**
- * The queue this URL selects, or null when it names none we RECOGNISE.
+ * The queue this URL selects, or null when it names none we RECOGNISE on this
+ * spine.
  *
  * An unknown value is not a queue and gets no gate and no chip — the same rule
  * the board applies to `?status=bogus`. Narrowing to an empty table under a URL
  * nothing on the page acknowledges is the worse failure of the two.
  */
-function pickQueue(params: Params): QueueDef | null {
+function pickQueue(params: Params, subject: QueueSubject): QueueDef | null {
   const id = asString(params[TOPIC_QUEUE_PARAM]);
-  return QUEUE_ROWS.find((r) => r.id === id) ?? null;
+  return QUEUE_ROWS.find((r) => r.subject === subject && r.id === id) ?? null;
 }
 
 /** Where a queue row sends the reader: the topics table, gated to that queue. */
@@ -258,7 +309,7 @@ export function clearedTopicQueue(): Record<string, string> {
  * Drafts default view so both render through one block.
  */
 export function topicQueueChips(params: Params): ViewChip[] {
-  const def = pickQueue(params);
+  const def = pickQueue(params, 'topic');
   return def ? [{ param: TOPIC_QUEUE_PARAM, value: QUEUE_ALL, label: def.title }] : [];
 }
 
@@ -279,14 +330,167 @@ export function applyTopicQueue(
   params: Params,
   type: EntityTypeDef | undefined | null,
 ): EntityRecord[] {
-  const def = pickQueue(params);
+  const def = pickQueue(params, 'topic');
   if (!def) return records;
   return queueRecords(def, records, intakeStage(type));
 }
 
 /** True while a queue gate is narrowing the table. */
 export function topicQueueActive(params: Params): boolean {
-  return pickQueue(params) !== null;
+  return pickQueue(params, 'topic') !== null;
+}
+
+// ---- (2c) the DRAFT queue: the human step the card could not see (startsim-tkfzu) ----
+
+/**
+ * A draft nobody has decided: its status is one of the undecided states THIS
+ * TENANT declares.
+ *
+ * The vocabulary lives in lib/draft-status.ts (`awaitsDecision`) and membership
+ * comes from the schema, so a tenant that cannot express `needs_revision` is
+ * never told it has one. A blank status is not counted — see `awaitsDecision`.
+ */
+export function awaitsDraftDecision(draft: EntityRecord, declaredUndecided: string[]): boolean {
+  const status = field(draft, 'status');
+  return status !== '' && declaredUndecided.includes(status);
+}
+
+/** The observed statuses behind a draft row, as "ready for review 4 · under review 1". */
+function statusBreakdown(drafts: EntityRecord[]): string {
+  const counts = new Map<string, number>();
+  for (const d of drafts) {
+    const s = field(d, 'status');
+    if (!s) continue;
+    counts.set(s, (counts.get(s) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([value, n]) => `${draftStatusLabel(value).toLowerCase()} ${n}`)
+    .join(' · ');
+}
+
+/**
+ * How long the oldest draft in the pile has been waiting, in plain words.
+ *
+ * This is the half that makes the row read louder as the backlog ages, and it is
+ * the compounding failure said out loud: the Drafts tab's 7-day default means a
+ * draft older than a week is in NEITHER default surface. An unparseable or
+ * missing `createdAt` yields "an unknown time" rather than a day count derived
+ * from the epoch.
+ */
+function oldestWaitingDays(drafts: EntityRecord[], now: number = Date.now()): string {
+  const stamps = drafts.map(createdAtMs).filter((t): t is number => t != null);
+  if (stamps.length === 0) return 'an unknown time';
+  const days = Math.floor((now - Math.min(...stamps)) / 86_400_000);
+  if (days <= 0) return 'less than a day';
+  return plural(days, 'day');
+}
+
+/** Where a draft queue row sends the reader. */
+export function draftQueueHref(id: string): string {
+  // THE TWO GATES THE DESTINATION WOULD OTHERWISE APPLY TO THE COUNTED ROWS.
+  // /t/draft opens on "topic approved · last 7 days · no test drafts". The count
+  // is taken over the whole corpus, so the link turns the first two off or the
+  // reader lands on an empty table under a number that says five. `made` is
+  // deliberately NOT cleared: the count applies that gate too, so clearing it
+  // would show rows the card did not count.
+  return `/t/${DRAFT_TYPE}?${TOPIC_QUEUE_PARAM}=${encodeURIComponent(id)}&${TOPIC_GATE_PARAM}=${GATE_ALL}&${RECENCY_PARAM}=${RECENCY_ALL}`;
+}
+
+/** The chip above the drafts table naming the queue the reader arrived from. */
+export function draftQueueChips(params: Params): ViewChip[] {
+  const def = pickQueue(params, 'draft');
+  return def ? [{ param: TOPIC_QUEUE_PARAM, value: QUEUE_ALL, label: def.title }] : [];
+}
+
+/**
+ * Narrow a fetched set of drafts to the active queue — the SAME predicate
+ * {@link draftQueue} counted, over the same records.
+ *
+ * It applies the test-draft gate too, and has to: the card's count applies it
+ * (otherwise the Dashboard would send a reviewer to drafts we made while testing
+ * her tenant), and a destination that did not would show more rows than the
+ * number that sent her there — bd startsim-8hgmq.14 in mirror image. It reads
+ * `made` from the params, so a reader who clears that chip widens BOTH halves
+ * consistently rather than finding the queue silently still hiding rows.
+ *
+ * Client-side for the same reason the other draft gates are: `status` could be
+ * narrowed server-side, but `owner_sub` is a row column and `_triggered_by` is
+ * an undeclared attribute, and asking the tenant for either re-runs
+ * bd startsim-8hgmq.4.
+ */
+export function applyDraftQueue(
+  records: EntityRecord[],
+  params: Params,
+  type: EntityTypeDef | undefined | null,
+  operatorSubs: string[] = [],
+): EntityRecord[] {
+  const def = pickQueue(params, 'draft');
+  if (!def) return records;
+  const gated = originGateActive(params) ? applyOriginGate(records, operatorSubs) : records;
+  return queueRecords(def, gated, declaredUndecidedKey(type));
+}
+
+/** True while a draft queue gate is narrowing the table. */
+export function draftQueueActive(params: Params): boolean {
+  return pickQueue(params, 'draft') !== null;
+}
+
+/**
+ * The declared undecided statuses, as the single string the shared `QueueDef`
+ * passes through its `intake` slot — null when the type declares no status enum,
+ * which DROPS the row rather than reporting a zero for a question the schema
+ * cannot pose.
+ */
+function declaredUndecidedKey(type: EntityTypeDef | undefined | null): string | null {
+  const declared = declaredAwaitingDecision(type);
+  return declared.length > 0 ? declared.join(',') : null;
+}
+
+/**
+ * The drafts queue: what a reviewer still owes a decision on.
+ *
+ * `operatorSubs` is the roster-derived list the test-draft gate needs for its
+ * `owner_sub` half (lib/roster.ts). It is [] for a member-role reader, whose
+ * roster read is refused — the same [] the Drafts table uses, from the same
+ * react-query key, so the card and its destination hide the same rows for the
+ * same viewer (bd startsim-m7fdm.9).
+ */
+export function draftQueue(
+  type: EntityTypeDef | undefined | null,
+  drafts: EntityRecord[],
+  operatorSubs: string[],
+  /**
+   * The instant the age line is measured against — the widget passes
+   * react-query's `dataUpdatedAt`, so the verdict is judged against when the
+   * data was FETCHED rather than against a `Date.now()` read during render. The
+   * same rule `ingestionOverdue` follows, and for the same reason: a figure read
+   * at render time drifts from the records it describes and makes the function
+   * impure.
+   */
+  now: number = Date.now(),
+): QueueRow[] {
+  const declared = declaredUndecidedKey(type);
+  const rows: QueueRow[] = [];
+
+  for (const def of QUEUE_ROWS) {
+    if (def.subject !== 'draft') continue;
+    if (def.needsIntake && declared == null) continue;
+    // Counted over the SAME set the href's destination will show: the corpus
+    // minus the drafts the platform team made while testing this tenant.
+    const matched = queueRecords(def, applyOriginGate(drafts, operatorSubs), declared);
+    if (matched.length === 0) continue;
+    rows.push({
+      id: def.id,
+      count: matched.length,
+      label: `${def.title} — ${plural(matched.length, def.noun)}`,
+      meta: def.meta(matched, declared ?? '', now),
+      href: def.href(def.id),
+      tone: 'warn',
+    });
+  }
+
+  return rows;
 }
 
 /**
@@ -325,6 +529,7 @@ export function topicQueue(
   const rows: QueueRow[] = [];
 
   for (const def of QUEUE_ROWS) {
+    if (def.subject !== 'topic') continue;
     // A predicate the schema cannot even pose is DROPPED, not reported as 0.
     if (def.needsIntake && intake == null) continue;
     const matched = queueRecords(def, topics, intake);
@@ -332,11 +537,11 @@ export function topicQueue(
     rows.push({
       id: def.id,
       count: matched.length,
-      label: `${def.title} — ${plural(matched.length, 'topic')}`,
+      label: `${def.title} — ${plural(matched.length, def.noun)}`,
       meta: def.meta(matched, intake ?? ''),
       // Same `def`, so the destination re-runs the predicate this count came
       // from. The href cannot name a narrower or wider pile than the number.
-      href: topicQueueHref(def.id),
+      href: def.href(def.id),
       tone: 'warn',
     });
   }
