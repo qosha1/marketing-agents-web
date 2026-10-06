@@ -440,7 +440,22 @@ export function QualityRail(props: QualityRailProps) {
             // what tells the reader this trail is per-field, not per-save.
             // `incompleteNote` is deliberately left at the shared default — a
             // fork must not decide it looks more complete than the trail is.
-            classNames={{ root: FLATTEN_CARD, header: 'border-b-0 px-0 pb-3 pt-0', title: 'hidden' }}
+            // `px-0` on both: the CollapsiblePanel already supplies the gutter,
+            // and the panel's own would cost 40px of a ~370px rail that the
+            // per-field before/after columns need. They are still tight here —
+            // the shared panel sizes that split on the VIEWPORT (`sm:flex-nowrap`)
+            // rather than on its container, so it reads as a full-width page even
+            // inside a narrow rail. Filed upstream rather than hacked around: a
+            // fork reaching into another component's utility classes would break
+            // silently on its next publish.
+            classNames={{
+              root: FLATTEN_CARD,
+              header: 'border-b-0 px-0 pb-3 pt-0',
+              title: 'hidden',
+              body: 'max-h-[32rem] overflow-y-auto px-0 py-2',
+              notice: 'border-b border-border px-0 py-2 text-xs text-muted-foreground',
+              countLine: 'border-t border-border px-0 py-2 text-xs text-muted-foreground',
+            }}
           />
         ) : null}
       </CollapsiblePanel>
