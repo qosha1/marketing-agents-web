@@ -107,14 +107,13 @@ const onWire = (o: Record<string, unknown>) => camelToSnake(o) as Record<string,
 function saveWith(
   stored: Record<string, unknown>,
   changes: Record<string, string>,
-  by: string | null = 'jurga@ogmc.example',
   fresh: Record<string, unknown> = stored,
 ) {
   const baseline = topicEditValues(asRead(stored), FIELDS);
   const values = { ...baseline, ...changes };
   const changed = topicEditChanges(FIELDS, values, baseline);
-  const { data, history } = topicEditData(asRead(fresh), DECLARED, changed, values, by);
-  return { wire: onWire(data), history };
+  const data = topicEditData(asRead(fresh), DECLARED, changed, values);
+  return { wire: onWire(data) };
 }
 
 describe('which fields the panel offers', () => {
@@ -245,45 +244,28 @@ describe('an empty title is refused rather than deleting the attribute', () => {
   });
 });
 
-describe('the edit log rides the blob it was read from (bd startsim-m7fdm.2)', () => {
-  it('stamps the editor onto the log', () => {
-    const { wire, history } = saveWith(STORED, { title: 'A new title' });
-    expect(history.at(-1)).toMatchObject({ by: 'jurga@ogmc.example', saves: 1 });
-    expect(wire._edit_history).toHaveLength(1);
+describe('the blob carries no edit log of its own (bd startsim-j19hf)', () => {
+  it('writes neither spelling of _edit_history', () => {
+    // It used to stamp one here, read out of the freshly re-read blob so a stale
+    // log could not be written back. The trail is server-side now — one row per
+    // write — and a log that rode inside the blob the backend REPLACES wholesale
+    // was losing entries in exactly the collision it existed to record.
+    const { wire } = saveWith(STORED, { title: 'A new title' });
+    expect(Object.keys(wire).filter((k) => /edit_?history/i.test(k))).toEqual([]);
   });
 
-  it('KEEPS an entry that only the freshly re-read blob knows about', () => {
-    // The save path re-reads the record and merges onto THAT. If the log were
-    // read from the blob the page loaded instead, this entry — somebody else's
-    // edit, landed while the form was open — would be silently erased, which is
-    // startsim-m7fdm.2's own failure mode newly minted by the fix for it.
-    const fresh = {
+  it('leaves a log a previous build already stored exactly where it is', () => {
+    // bd startsim-j19hf measured two such rows on the live tenant and chose to
+    // leave them: clearing them is a whole-blob PATCH over live records for no
+    // gain. So this write must neither extend them nor drop them.
+    const stored = {
       ...STORED,
       _edit_history: [
         { by: 'malin@ogmc.example', from: '2026-09-23T09:00:00.000Z', at: '2026-09-23T09:04:00.000Z', saves: 3 },
       ],
     };
-    const { wire } = saveWith(fresh, { title: 'A new title' });
-    const log = wire._edit_history as { by?: string }[];
-    expect(log).toHaveLength(2);
-    expect(log[0].by).toBe('malin@ogmc.example');
-    expect(log[1].by).toBe('jurga@ogmc.example');
-  });
-
-  it('records an unattributed edit rather than skipping it', () => {
-    const { wire } = saveWith(STORED, { title: 'A new title' }, null);
-    const log = wire._edit_history as { by?: string }[];
-    expect(log).toHaveLength(1);
-    expect(log[0].by).toBeUndefined();
-  });
-
-  it('writes the log under ONE key — not both spellings', () => {
-    const read = asRead({ ...STORED, _edit_history: [] });
-    const values = topicEditValues(read, FIELDS);
-    const { data } = topicEditData(read, DECLARED, FIELDS, { ...values, title: 'x' }, 'a@b.c');
-    expect(Object.keys(data).filter((k) => k.toLowerCase().includes('edithistory'))).toEqual([
-      'EditHistory',
-    ]);
+    const { wire } = saveWith(stored, { title: 'A new title' });
+    expect(wire._edit_history).toEqual(stored._edit_history);
   });
 });
 
@@ -309,14 +291,14 @@ describe('a save writes the DIFF, not the whole form (bd startsim-m7fdm.2)', () 
     // loaded; by the time she saves, Malin has rewritten it. Re-asserting the
     // stale angle would undo his edit without either of them noticing.
     const fresh = { ...STORED, angle: 'Malin rewrote the angle while she typed.' };
-    const { wire } = saveWith(STORED, { title: 'A new title' }, 'jurga@ogmc.example', fresh);
+    const { wire } = saveWith(STORED, { title: 'A new title' }, fresh);
     expect(wire.angle).toBe('Malin rewrote the angle while she typed.');
     expect(wire.title).toBe('A new title');
   });
 
   it('still overwrites a field she DID change \u2014 last write wins, and that is the open bead', () => {
     const fresh = { ...STORED, title: 'Malin\u2019s title' };
-    const { wire } = saveWith(STORED, { title: 'Her title' }, 'jurga@ogmc.example', fresh);
+    const { wire } = saveWith(STORED, { title: 'Her title' }, fresh);
     expect(wire.title).toBe('Her title');
   });
 });

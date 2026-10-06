@@ -46,13 +46,28 @@
  * (chosen + approved) and its parent topic (written) together; once approved, a
  * "Mark sent" hands off (status → sent, posting stays manual).
  *
- * Edit history (bd startsim-j9rxf): every write this page makes is a person doing
- * something on purpose, so `mergedData()` — the ONE body every PATCH goes through —
- * folds the caller into `data._edit_history`. It is a choke point precisely so a
- * new write path cannot forget it. The log answers "who touched this and when" and
- * deliberately nothing more; see lib/edit-history.ts for the collapsing window that
- * keeps a debounced autosave from turning it into noise, and bd startsim-b3twa for
- * the tracked-changes feature the customer deferred.
+ * Conditional saves and the history (bd startsim-j19hf; server bd startsim-3c2wc /
+ * bd startsim-o1qib). Every write from this page asserts the version it loaded, so
+ * a save merged over a stale blob is REFUSED instead of destroying the other
+ * reviewer's text — and the reviewer's own text stays on screen while they decide.
+ * The three rules that matter here, because breaking any of them makes the guard a
+ * decoration:
+ *
+ *   1. NOTHING ADOPTS `current_version` AND RETRIES. The hook holds the version and
+ *      advances it only from a write that SUCCEEDED; re-sending at the version the
+ *      refusal names is exactly the overwrite the 412 prevented. Only an explicit
+ *      "Save mine anyway" does that, and a person has to press it.
+ *   2. `save.paused` IS CHECKED BEFORE EVERY WRITE, and the debounced ones are the
+ *      reason: the content editor autosaves at 1,200 ms and the scorecard at 800 ms,
+ *      so an unguarded path would repaint the dialog per keystroke burst.
+ *   3. `save()` REPORTS INSTEAD OF THROWING. Every call site below handles the
+ *      result union, because a `{status: 'failed'}` never reaches a `.catch` and a
+ *      500 would otherwise render as a success.
+ *
+ * It replaced `data._edit_history`, a log this page wrote INSIDE the blob the
+ * backend replaces wholesale — so it lost entries in exactly the collision it
+ * existed to record, and `human_edits` then held the log itself against machine
+ * writes. The trail is server-side now and the panel in the rail is shared.
  *
  * Jump-to-issue (P3, bd 768w.16.15.3): the checks now report WHERE they failed, so
  * this page owns the jump — the active channel + pane (both shells took an optional
@@ -82,11 +97,16 @@ import {
   recordPatchFromSections,
   type DocSection,
 } from '@startsimpli/ui/document-editor';
+import {
+  StaleSaveDialog,
+  unifiedTextDiff,
+  useConditionalSave,
+  type ConditionalSaveResult,
+} from '@startsimpli/ui/history';
 
 import { useAuth } from '@startsimpli/auth';
 
 import { readData, typeRoute } from '@/lib/board';
-import { readEditHistory, withEditStamp, type EditEntry } from '@/lib/edit-history';
 import {
   declaredLangChoices,
   effectiveLocale,
@@ -139,15 +159,16 @@ import {
 import { draftDecisionLabel } from '@/lib/review-vocabulary';
 import { shouldIgnoreShortcut } from '@/lib/keyboard';
 import {
+  entityWriteClient,
   getEntity,
   listAllEntities,
   listTypes,
   type EntityRecord,
 } from '@/lib/foundry-api';
-import { entityKey, saveEntity } from '@/lib/entity-cache';
+import { entityKey, primeEntity, saveEntity } from '@/lib/entity-cache';
+import { revisionClient } from '@/lib/revisions';
 import { compileFeedback, readNotes, readReview, revisedFrom, revisionChain } from '@/lib/review';
 import { buildRevisionPayload } from '@/lib/revision-request';
-import { unifiedBlogDiff } from '@/lib/blog-diff';
 import {
   coverageSummary,
   parseSourceEntry,
@@ -382,11 +403,32 @@ function LanguageSwitcher({ draft }: { draft: EntityRecord }) {
 export default function DraftPage() {
   const params = useParams<{ draftId: string }>();
   const draftId = String(params.draftId);
+  const qc = useQueryClient();
 
   const draftQuery = useQuery({
     queryKey: entityKey(draftId),
     queryFn: () => getEntity(draftId),
   });
+
+  /**
+   * Forces the editor to re-seed from the server's copy (bd startsim-j19hf).
+   *
+   * WHY A NONCE AND NOT A REFETCH. The screen seeds its section state once, from
+   * `useState(() => draftSections(draft))`, and the `key` below is the record id —
+   * which does not change when the SAME record is refetched. So a refetch alone
+   * puts the new blob in the cache and leaves the reviewer looking at the old one
+   * (the same mechanism lib/entity-cache.ts documents for invalidation). That is
+   * harmless for an autosave and WRONG for "Discard my edits", which would
+   * otherwise adopt the other person's version while still showing your own text:
+   * a control that silently does nothing is worse than one that is not offered.
+   *
+   * Refetch FIRST, then remount — the other order remounts onto the stale blob.
+   */
+  const [reseed, setReseed] = useState(0);
+  const reload = useCallback(async () => {
+    await qc.refetchQueries({ queryKey: entityKey(draftId), exact: true });
+    setReseed((n) => n + 1);
+  }, [qc, draftId]);
 
   if (draftQuery.isLoading) {
     return <p className="text-sm text-neutral-500">Loading draft…</p>;
@@ -403,11 +445,28 @@ export default function DraftPage() {
   }
 
   // Key by id so the editor's section state re-initializes if we ever navigate
-  // between drafts without a full unmount.
-  return <DraftEditorScreen key={draftQuery.data.id} draft={draftQuery.data} draftId={draftId} />;
+  // between drafts without a full unmount — and by `reseed` so a deliberate
+  // "load theirs" re-initializes it over the SAME record. See `reload`.
+  return (
+    <DraftEditorScreen
+      key={`${draftQuery.data.id}:${reseed}`}
+      draft={draftQuery.data}
+      draftId={draftId}
+      reload={reload}
+    />
+  );
 }
 
-function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: string }) {
+function DraftEditorScreen({
+  draft,
+  draftId,
+  reload,
+}: {
+  draft: EntityRecord;
+  draftId: string;
+  /** Refetch this record and re-seed the editor from it. See `DraftPage`. */
+  reload: () => Promise<void>;
+}) {
   const qc = useQueryClient();
 
   const contentType = draftStr(draft.data, 'content_type');
@@ -475,12 +534,11 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
   );
   const [sourceMeta, setSourceMeta] = useState<SourceMetaEntry[]>(() => readSourceMeta(draft.data));
 
-  // Who has been in this draft, and when (bd startsim-j9rxf). Seeded from the
-  // stored blob and advanced locally by `mergedData` on every write — the panel
-  // in the rail reads THIS, so a reviewer sees her own edit appear without a
-  // round trip. Keyed per draft by the `key={draft.id}` remount above.
-  const [editHistory, setEditHistory] = useState<EditEntry[]>(() => readEditHistory(draft.data));
   const today = useMemo(() => new Date(), []);
+
+  /** Whether the rail's History panel is open. Page state because the stale-save
+   *  dialog's safe default action opens it. */
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   // Refs mirror the latest local state so any async persist merges the freshest of
   // every field (sections + review + notes + sources) into the full data blob,
@@ -490,11 +548,6 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
   const notesRef = useRef(notes);
   const sourceItemsRef = useRef(sourceItems);
   const sourceMetaRef = useRef(sourceMeta);
-  // The BASE the next edit folds onto. Advanced synchronously inside `mergedData`
-  // rather than by the commit-sync effect below, because two debounced saves can
-  // be in flight at once: folding the second onto the pre-first base would write a
-  // blob that ERASES the first fold. See `mergedData`.
-  const editHistoryRef = useRef(editHistory);
   // Sync the mirrors after each commit. Handlers that persist immediately also set
   // their own ref inline (below) so they never wait on this effect.
   useEffect(() => {
@@ -503,17 +556,6 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
     notesRef.current = notes;
     sourceItemsRef.current = sourceItems;
     sourceMetaRef.current = sourceMeta;
-  });
-
-  // WHO IS EDITING. The email, for the same reason the "Generate drafts" relay
-  // uses it (see app/actions/generate-drafts/route.ts): whoami returns no display
-  // name, so the choice is email or a `sub` UUID, and a UUID answers "who?" with a
-  // string no reader can resolve. Mirrored into a ref so a debounced save fired
-  // from a timer reads the CURRENT session rather than the one it closed over.
-  const { user } = useAuth();
-  const editorEmailRef = useRef<string | undefined>(user?.email ?? undefined);
-  useEffect(() => {
-    editorEmailRef.current = user?.email ?? undefined;
   });
 
   const reviewSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -579,7 +621,13 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
   });
   const parentBlog = parentQuery.data ? String(readData(parentQuery.data.data, 'blog') ?? '') : '';
   const thisBlog = String(sectionValue(sections, 'blog') ?? '');
-  const blogDiff = useMemo(() => unifiedBlogDiff(parentBlog, thisBlog), [parentBlog, thisBlog]);
+  // `blog.md` explicitly: the shared helper is generic over any record field and
+  // defaults to `value.txt`, while the DiffViewer prints the path in its header
+  // and this diff is a blog body.
+  const blogDiff = useMemo(
+    () => unifiedTextDiff(parentBlog, thisBlog, 'blog.md'),
+    [parentBlog, thisBlog],
+  );
 
   // Recompute the deterministic guardrail checks over the CURRENT edited section
   // values (not stale draft.data) on every edit, so the checklist tracks live.
@@ -701,51 +749,85 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
   // The single source of truth for a PATCH body: the full existing blob with the
   // freshest sections + review + notes folded in, plus any explicit status/flag
   // overrides. Every write below goes through this so nothing is ever dropped.
-  const mergedData = (overrides: Record<string, unknown> = {}): Record<string, unknown> => {
-    // WHO TOUCHED THIS, AND WHEN (bd startsim-j9rxf). Every write below reaches the
-    // server through this one body, so folding the edit in HERE is what makes the
-    // log complete: a new persist path cannot forget to stamp it. Every caller is a
-    // person doing something deliberate — a typed edit, a verdict, a note, a source,
-    // Accept, Reject, Mark sent — and nothing on this page persists on mount or on a
-    // normalisation, so there is no phantom entry to filter out.
-    //
-    // It is advanced OPTIMISTICALLY, before the PATCH is known to have landed. A
-    // failed save therefore leaves one extra fold in an entry that is already true
-    // about WHO and WHEN — whereas waiting for the response would let a second
-    // in-flight save fold onto a stale base and write a blob that erases the first.
-    // Over-counting a save is the cheaper of the two lies.
-    //
-    // `withEditStamp` writes the CAMEL spelling on purpose — the same reason
-    // `sourceMeta` below is: the spread above carries the client's camelCased blob,
-    // so writing the snake form would leave both keys to collide on the wire. It is
-    // the SAME helper the record drawer stamps through, so the two surfaces cannot
-    // drift apart again (bd startsim-m7fdm.3).
-    const stamped = withEditStamp(
-      {
-        ...draft.data,
-        ...recordPatchFromSections(sectionsRef.current),
-        // Sources are re-serialized to their ORIGINAL container so the pipeline reader
-        // stays intact; unchanged rows round-trip verbatim. `sourceMeta` (camel — matches
-        // the read shape so it overrides cleanly) carries the reviewer-only verified flags.
-        sources: serializeSources(sourceItemsRef.current, sourcesContainer),
-        sourceMeta: sourceMetaRef.current,
-        review: reviewRef.current,
-        notes: notesRef.current,
-      },
-      editHistoryRef.current,
-      editorEmailRef.current,
-    );
-    editHistoryRef.current = stamped.history;
-    setEditHistory(stamped.history);
+  //
+  // IT NO LONGER STAMPS AN EDIT LOG (bd startsim-j19hf). It used to fold
+  // `data._edit_history` in here, and the choke point was the right shape for
+  // the wrong thing: a log that rides inside the blob the backend REPLACES
+  // wholesale loses its entries in exactly the collision it exists to record,
+  // and `human_edits` then holds the log itself against a machine write. The
+  // trail is written server-side now, one row per write, and read back through
+  // the History panel in the rail.
+  const mergedData = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
+    ...draft.data,
+    ...recordPatchFromSections(sectionsRef.current),
+    // Sources are re-serialized to their ORIGINAL container so the pipeline reader
+    // stays intact; unchanged rows round-trip verbatim. `sourceMeta` (camel — matches
+    // the read shape so it overrides cleanly) carries the reviewer-only verified flags.
+    sources: serializeSources(sourceItemsRef.current, sourcesContainer),
+    sourceMeta: sourceMetaRef.current,
+    review: reviewRef.current,
+    notes: notesRef.current,
+    ...overrides,
+  });
 
-    return { ...stamped.data, ...overrides };
+  /**
+   * THE WRITE. Every PATCH this page makes asserts the version the page loaded
+   * (bd startsim-j19hf), and a refusal keeps the reviewer's text on screen.
+   *
+   * The hook holds the version: seeded from the record, advanced ONLY by a write
+   * that succeeded, and never from the refusal — adopting `current_version` and
+   * re-sending is the overwrite the 412 just prevented. The refused body is kept
+   * on `conflict.refusedBody`, so the typed text survives even a reload of the
+   * server's copy over the editor.
+   */
+  const writeClient = useMemo(() => entityWriteClient(draft.id), [draft.id]);
+  const revisions = useMemo(() => revisionClient(draft.id), [draft.id]);
+  const save = useConditionalSave({
+    client: writeClient,
+    // SEEDED, or the first save of the session is unguarded and the trail says so
+    // (`precondition: "none"`). `?? undefined` and not `|| undefined`: version 0
+    // is legitimate on every record that predates the trail.
+    version: draft.version ?? undefined,
+    // The 412 carries no identity by design, so the dialog reads the trail for
+    // the human-readable half — the same client the panel takes.
+    revisions,
+  });
+
+  /**
+   * Report a save, in one place.
+   *
+   * `save()` RESOLVES on every outcome rather than throwing, which is the one
+   * thing about this hook that can quietly break a call site: a `.catch` never
+   * runs, so a 500 would render as a success and a refusal would look like a
+   * save that landed. So nothing calls `save.save` directly — everything goes
+   * through here, and every caller gets a boolean that means "it is on the
+   * server".
+   *
+   * A REFUSAL IS NOT REPORTED AS AN ERROR. The dialog is already on screen
+   * saying what happened and offering the three choices; a toast beside it would
+   * be a second, worse account of the same event.
+   */
+  const report = (result: ConditionalSaveResult, whatFailed: string): boolean => {
+    if (result.status === 'saved') {
+      // The response is the freshest copy of this row that exists, and dropping
+      // it left ['entity', <id>] holding the pre-edit blob for five minutes —
+      // the reviewer reopened the draft and her edit was gone (bd
+      // startsim-ug09d / startsim-mk5qp). See lib/entity-cache.ts.
+      const saved = result.outcome.body as EntityRecord | undefined;
+      if (saved?.id !== undefined) primeEntity(qc, draft.id, saved);
+      return true;
+    }
+    if (result.status === 'failed') {
+      const error = result.error;
+      notify.error(error instanceof Error ? error.message : whatFailed);
+    }
+    // 'refused' — the dialog says it. 'paused' — a conflict is already open and
+    // nothing was sent, which is the point.
+    return false;
   };
-  // `saveEntity`, not a bare `updateEntity`: the PATCH response is the freshest
-  // copy of this row that exists, and dropping it left ['entity', <id>] holding
-  // the pre-edit blob for five minutes — the reviewer reopened the draft and her
-  // edit was gone (bd startsim-ug09d/startsim-mk5qp). See lib/entity-cache.ts.
-  const persist = (overrides: Record<string, unknown> = {}) =>
-    saveEntity(qc, draft.id, { data: mergedData(overrides) });
+
+  const persist = async (overrides: Record<string, unknown> = {}, whatFailed = 'Could not save.') =>
+    report(await save.save({ data: mergedData(overrides) }), whatFailed);
 
   // Debounced autosave from the content editors. No list invalidation here — the
   // editors show their own "Saved" pill, and refetching mid-edit would churn it.
@@ -753,13 +835,17 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
   // own BlogSection so it can open in Read — locked decision #3), so merge the
   // edited subset back into the full section ref rather than replacing it, or a
   // section would drop out of the ref and the next full-blob PATCH would lose it.
-  async function save(edited?: DocSection[]) {
+  async function saveSections(edited?: DocSection[]) {
     if (edited && edited.length) {
       sectionsRef.current = sectionsRef.current.map(
         (s) => edited.find((e) => e.key === s.key) ?? s,
       );
     }
-    await saveEntity(qc, draft.id, { data: mergedData() });
+    // The editors debounce at 1,200 ms. CHECKED BEFORE THE SEND, not after: the
+    // hook refuses to send while a conflict is open, but reading `paused` here is
+    // what stops the editor reporting "Saved" over a write that never left.
+    if (save.paused) return;
+    await persist({}, 'Could not save the draft.');
   }
 
   // Scorecard autosave is debounced so per-keystroke note edits don't churn.
@@ -768,9 +854,12 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
     reviewRef.current = next;
     if (reviewSaveTimer.current) clearTimeout(reviewSaveTimer.current);
     reviewSaveTimer.current = setTimeout(() => {
-      persist().catch((err) =>
-        notify.error(err instanceof Error ? err.message : 'Could not save the review.'),
-      );
+      // 800 ms, not 1,200 — this is the SHORTER of the two debounces on this
+      // page, so it is the one that would repaint the dialog fastest if it fired
+      // while a conflict was open. `paused` is read when the timer runs, not when
+      // it was scheduled.
+      if (save.paused) return;
+      void persist({}, 'Could not save the review.');
     }, 800);
   }
 
@@ -866,18 +955,14 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
     const next = [...notesRef.current, note];
     setNotes(next);
     notesRef.current = next;
-    persist().catch((err) =>
-      notify.error(err instanceof Error ? err.message : 'Could not save the note.'),
-    );
+    void persist({}, 'Could not save the note.');
   }
 
   function resolveNote(id: string) {
     const next = notesRef.current.map((n) => (n.id === id ? { ...n, resolved: true } : n));
     setNotes(next);
     notesRef.current = next;
-    persist().catch((err) =>
-      notify.error(err instanceof Error ? err.message : 'Could not update the note.'),
-    );
+    void persist({}, 'Could not update the note.');
   }
 
   // --- Sources tool mutations (persist immediately via the full-blob merge) ---
@@ -886,9 +971,7 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
     setSourceMeta(nextMeta);
     sourceItemsRef.current = nextItems;
     sourceMetaRef.current = nextMeta;
-    persist().catch((err) =>
-      notify.error(err instanceof Error ? err.message : 'Could not save sources.'),
-    );
+    void persist({}, 'Could not save sources.');
   }
 
   function addSource(url: string) {
@@ -931,13 +1014,27 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
     try {
       // Save pending edits + review and flip the draft to chosen+approved in one
       // PATCH, then move the topic to 'written'. Stamp the override reason when set.
-      await persist({
-        chosen: true,
-        status: 'approved',
-        ...(override.overridden ? { override_reason: override.reason } : {}),
-      });
+      //
+      // STOPS HERE IF THE SAVE DID NOT LAND. `persist` reports rather than
+      // throwing, so without this the topic would be moved to 'written' and the
+      // reviewer sent to the next draft over a draft that was never approved —
+      // and on a refusal, the dialog saying so would be on screen behind a
+      // "Accepted." toast.
+      const approved = await persist(
+        {
+          chosen: true,
+          status: 'approved',
+          ...(override.overridden ? { override_reason: override.reason } : {}),
+        },
+        'Could not accept.',
+      );
+      if (!approved) return;
       // The topic gets the same treatment — its own ['entity', <id>] is read by
       // this page's `topicQuery` and by the topic drawer.
+      // Its precondition comes from lib/record-version.ts — the version
+      // `topicQuery` read — because this is a write to a DIFFERENT record and the
+      // version this page's hook holds is the draft's. A 412 here throws and is
+      // reported by the catch below, carrying the server's own sentence.
       await saveEntity(qc, topic.id, { data: { ...topic.data, status: 'written' } });
       // No ['entity', draftId] invalidation: `persist` above just wrote the
       // server's own answer into that entry, so invalidating it would only buy a
@@ -958,7 +1055,9 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
       const sentAt = new Date().toISOString().slice(0, 10); // today, ISO date
       // Approved + a publication date, per the team's vocabulary: the status
       // says a human signed it off, `sent_at` says when it went out.
-      await persist({ status: 'approved', sent_at: sentAt });
+      if (!(await persist({ status: 'approved', sent_at: sentAt }, 'Could not mark sent.'))) {
+        return;
+      }
       await qc.invalidateQueries({ queryKey: ['entities', CONTENT_TYPE_KEY, 'all'] });
       notify.success('Marked sent.');
       goToDraft(nextDraft); // advance to the next draft in the queue
@@ -981,7 +1080,7 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
   async function reject() {
     setRejecting(true);
     try {
-      await persist({ chosen: false });
+      if (!(await persist({ chosen: false }, 'Could not reject.'))) return;
       await qc.invalidateQueries({ queryKey: ['entities', CONTENT_TYPE_KEY, 'all'] });
       notify.success('Candidate rejected.');
       goToDraft(nextDraft); // advance to the next draft in the queue
@@ -1043,8 +1142,20 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
       // review + notes) and reflect the new status pill.
       // `persist` primes ['entity', <id>] with the server's answer, so the status
       // pill flips on the next render without a round trip.
-      await persist({ status: 'under_review' });
-      notify.success('Revision requested — GPT is rewriting the draft (~1 min).');
+      //
+      // THE WEBHOOK HAS ALREADY FIRED by the time this line runs, so a refused
+      // status write does NOT undo the revision — it means a rewrite is coming
+      // and this draft's pill does not say so. Two facts, so two sentences; and
+      // the polling below starts either way, because the rewrite is real.
+      const marked = await persist(
+        { status: 'under_review' },
+        'Could not record the revision request.',
+      );
+      notify.success(
+        marked
+          ? 'Revision requested — GPT is rewriting the draft (~1 min).'
+          : 'Revision requested — GPT is rewriting the draft. This draft’s status was not updated.',
+      );
       // Stop polling after ~90s even if nothing shows up.
       if (pollTimeoutRef.current) clearTimeout(pollTimeoutRef.current);
       pollTimeoutRef.current = setTimeout(() => setRevising(false), 90_000);
@@ -1220,7 +1331,7 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
                 value={blogValue}
                 highlight={blogHighlight}
                 onChange={(v) => onChange('blog', v)}
-                onSave={(v) => save([{ key: 'blog', label: 'Blog post', kind: 'markdown', value: v }])}
+                onSave={(v) => saveSections([{ key: 'blog', label: 'Blog post', kind: 'markdown', value: v }])}
               />
             ),
           },
@@ -1228,12 +1339,12 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
             id: 'linkedin',
             label: 'LinkedIn',
             badge: linkedinValue ? `${words(linkedinValue)}w` : undefined,
-            content: <DocumentEditor sections={linkedinSection} onChange={onChange} onSave={save} />,
+            content: <DocumentEditor sections={linkedinSection} onChange={onChange} onSave={saveSections} />,
           },
           {
             id: 'seo',
             label: 'SEO',
-            content: <DocumentEditor sections={seoSection} onChange={onChange} onSave={save} />,
+            content: <DocumentEditor sections={seoSection} onChange={onChange} onSave={saveSections} />,
           },
           {
             id: 'sources',
@@ -1322,7 +1433,9 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
       noteSection={noteSection}
       onNoteSectionChange={setNoteSection}
       noteSections={noteSections}
-      editHistory={editHistory}
+      revisions={revisions}
+      historyOpen={historyOpen}
+      onHistoryOpenChange={setHistoryOpen}
       chain={chain}
       currentId={String(draft.id)}
       parentId={parentId}
@@ -1417,13 +1530,50 @@ function DraftEditorScreen({ draft, draftId }: { draft: EntityRecord; draftId: s
   );
 
   return (
-    <DraftReviewLayout
-      header={header}
-      content={content}
-      rail={rail}
-      decisionBar={decisionBar}
-      pane={pane}
-      onPaneChange={setPane}
-    />
+    <>
+      <DraftReviewLayout
+        header={header}
+        content={content}
+        rail={rail}
+        decisionBar={decisionBar}
+        pane={pane}
+        onPaneChange={setPane}
+      />
+      {/* "Someone changed this while you were editing", and your text is still on
+          screen behind it (bd startsim-jkkn7.3). Rendered OUTSIDE the layout
+          because the layout's panes are exclusive below `lg` and a modal that
+          lived inside one would be hidden on the pane the reviewer was not on.
+          It needs no QueryClientProvider — deliberately, see the shared module. */}
+      <StaleSaveDialog
+        conflict={save.conflict}
+        open={save.dialogOpen}
+        recordLabel="this draft"
+        busy={save.resolving}
+        onDismiss={save.dismissConflict}
+        // The ONLY path that adopts the version the refusal named. It re-sends
+        // the refused body, so the reviewer's text is what lands.
+        onKeepMine={() => {
+          void save.keepMine().then((result) => {
+            if (report(result, 'Could not save over their change.')) {
+              notify.success('Saved — your version replaced theirs.');
+            }
+          });
+        }}
+        // Destructive to the local edit BY DESIGN, which is why it is the only
+        // control here that is a link rather than a button. `reload` is what
+        // makes it real: without the remount it would adopt their version and
+        // leave your text on screen.
+        onAcceptTheirs={() => {
+          save.acceptTheirs();
+          void reload();
+        }}
+        // The safe default action: show the trail rather than decide anything.
+        onReviewChange={() => {
+          setHistoryOpen(true);
+          setPane('quality');
+          save.dismissConflict();
+        }}
+      />
+    </>
   );
 }

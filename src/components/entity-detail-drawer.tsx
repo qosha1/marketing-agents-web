@@ -25,7 +25,6 @@ import {
   type RecordField,
 } from '@startsimpli/ui';
 
-import { useAuth } from '@startsimpli/auth';
 import { resolveReviewConfig } from '@startsimpli/ui/collection';
 
 import { AttributeField } from './attribute-field';
@@ -33,7 +32,6 @@ import { getRegisteredToken } from '@/infrastructure/auth';
 import { formatBearer } from '@/lib/bearer';
 import { readData, toCamelKey } from '@/lib/board';
 import { CONTENT_TYPE_KEY } from '@/lib/content';
-import { readEditHistory, withEditStamp } from '@/lib/edit-history';
 import { draftHref } from '@/lib/story-nav';
 import { memberDisplayName, memberSub, normalizeMembers } from '@/lib/roster';
 import { findTag, GOOD_EXAMPLE_LABEL } from '@/lib/tags';
@@ -246,10 +244,6 @@ export function RecordEditFields({
   const [name, setName] = useState(record.name || '');
   const [values, setValues] = useState<Record<string, unknown>>(() => initialValues(type, record));
   const [saving, setSaving] = useState(false);
-  // WHO IS EDITING — the email, for the same reason lib/edit-history.ts gives:
-  // whoami returns no display name, and a `sub` UUID answers "who?" with a string
-  // no reader can resolve.
-  const { user } = useAuth();
 
   async function save() {
     const nextData: Record<string, unknown> = { ...record.data };
@@ -278,20 +272,28 @@ export function RecordEditFields({
         if (camel !== attr.name) delete nextData[attr.name];
       }
     }
-    // WHO TOUCHED THIS, AND WHEN (bd startsim-m7fdm.3). A field edited from the
-    // /t/<type> table is a real, deliberate edit by a person, and it used to reach
-    // the tenant with no trace in the log the draft page renders. Stamped through
-    // the SAME helper as the draft page so the two surfaces cannot drift apart
-    // again; the history is read from the record because this form saves once from
-    // a freshly-opened blob, not across a burst of autosaves.
-    const stamped = withEditStamp(nextData, readEditHistory(record.data), user?.email);
+    // WHO TOUCHED THIS, AND WHEN (bd startsim-m7fdm.3, then bd startsim-j19hf).
+    // This used to fold `data._edit_history` in here, through the same helper the
+    // draft page used, so an edit made from the /t/<type> table reached the log.
+    // Both halves are gone: the trail is written SERVER-SIDE now, one row per
+    // write, so this save is recorded without the app stamping anything — and a
+    // log that lived inside the blob the backend replaces wholesale was losing
+    // entries in exactly the collision it existed to record.
+    //
+    // WHAT GUARDS THIS SAVE INSTEAD. `updateEntity` asserts the version
+    // lib/record-version.ts noted when this record was read, so a blob merged
+    // over a row somebody has since changed is REFUSED rather than written. There
+    // is no conflict dialog on this surface — the server's refusal sentence is
+    // reported by the catch below, which names both versions and says to reload.
+    // The full dialog lives where a reviewer types prose they cannot retype: the
+    // draft page.
     setSaving(true);
     try {
       // `saveEntity` also writes the server's answer into ['entity', <id>] — the
       // key the full-page editors read. Invalidating only the LIST left that entry
       // holding the pre-edit blob for five minutes, so opening /draft/<id> right
       // after an "Edit fields" save showed the old values back (bd startsim-mk5qp).
-      await saveEntity(qc, record.id, { name: name.trim() || record.name, data: stamped.data });
+      await saveEntity(qc, record.id, { name: name.trim() || record.name, data: nextData });
       await qc.invalidateQueries({ queryKey: ['entities', type.key] });
       notify.success('Saved.');
       onSaved();
