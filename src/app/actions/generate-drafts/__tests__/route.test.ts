@@ -13,10 +13,15 @@
  * been paid for and the drafts would already exist. So every refusal case
  * asserts `global.fetch` was never called, not merely that the status was 4xx.
  *
- * `global.fetch` IS STUBBED IN `beforeEach` AND THAT IS NOT OPTIONAL. The route
- * POSTs to a real, uncredentialed production webhook
- * (`ogmc-generate-drafts-7h3k9x2q`); an unstubbed run of this file would fire
- * the live writer and create real drafts in the customer's tenant.
+ * TWO THINGS KEEP THIS FILE OFF THE LIVE WRITER, and it needs both.
+ * `global.fetch` is stubbed in `beforeEach`, and `N8N_WRITER_WEBHOOK_URL` is set
+ * to a URL that goes nowhere. The stub alone was the whole guard until
+ * 2026-10-06, when the same missing variable let a DEV SERVER relay
+ * `ogmc-generate-drafts-7h3k9x2q` — the real, uncredentialed OGMC writer — and
+ * put a draft into the customer's queue. The route refuses an unset variable
+ * outside production now, so this is belt-and-braces rather than the only belt;
+ * setting it here also means these tests exercise the same arm production does
+ * instead of the refusal.
  *
  * THE SCHEMA FIXTURES ARE RAW snake_case ON PURPOSE. `tenantFetch` returns
  * Django's JSON untouched — the shared browser client's snake→camel transform
@@ -174,6 +179,10 @@ function post(body: unknown, auth: string | null = AUTH): Request {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // See the file header. Not a convenience: without it the route refuses
+  // outright (NODE_ENV is 'test'), and every assertion below would be about a
+  // 503 rather than about the gate.
+  vi.stubEnv('N8N_WRITER_WEBHOOK_URL', 'http://127.0.0.1:1/no-writer-in-tests');
   // The in-flight claim store is module-level and outlives a single test, which
   // is the whole point of it (bd startsim-8hgmq.8) — so a test must clear it.
   resetGenerateClaims();
@@ -644,5 +653,32 @@ describe('telling the n8n poll a writer is running (bd startsim-m7fdm.19, constr
 
     expect(res.status).toBe(202);
     expect(await res.json()).toMatchObject({ ok: true, deduped: false });
+  });
+});
+
+describe('the webhook URL is EARNED, not assumed (the 2026-10-06 incident)', () => {
+  it('refuses to relay when no webhook is configured outside production', async () => {
+    // The default is the LIVE OGMC writer. A dev server, a preview, or a test
+    // harness that reaches it fires a real run against a real customer tenant —
+    // which is exactly what happened, from a topic that existed only on a
+    // laptop. Refusing is loud, local, and costs nothing.
+    vi.stubEnv('N8N_WRITER_WEBHOOK_URL', '');
+    stubTenant({ topic: topicWire('ready'), drafts: [] });
+
+    const res = await POST(post({ story: story() }));
+
+    expect(res.status).toBe(503);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('refuses BEFORE it reads the tenant or claims a run', async () => {
+    // Nothing after the refusal is useful, and a claim left behind would refuse
+    // the next press for 130 seconds over a relay that never happened.
+    vi.stubEnv('N8N_WRITER_WEBHOOK_URL', '   ');
+    stubTenant({ topic: topicWire('ready'), drafts: [] });
+
+    await POST(post({ story: story() }));
+
+    expect(tenantFetch).not.toHaveBeenCalled();
   });
 });

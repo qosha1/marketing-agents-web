@@ -3,8 +3,10 @@
  *
  * Server-side POST handler that forwards a topic's story to the n8n writer
  * webhook. The webhook URL lives ONLY on the server (`N8N_WRITER_WEBHOOK_URL`,
- * with a hardcoded fallback) — never shipped to the browser — so the client just
- * POSTs `{ story }` here and we relay it. The webhook is fire-and-forget: it
+ * with a hardcoded fallback that ONLY a production build may use — see
+ * `writerWebhookUrl`, and the incident that made it conditional) — never
+ * shipped to the browser — so the client just POSTs `{ story }` here and we
+ * relay it. The webhook is fire-and-forget: it
  * returns 200 immediately and the writer runs async, writing candidate `draft`
  * records back to the tenant (each stamped with `topic_ref`). We return 202 on a
  * 2xx from the webhook, 502 otherwise.
@@ -124,6 +126,34 @@ const DEFAULT_WEBHOOK_URL =
   'https://debugg.app.n8n.cloud/webhook/ogmc-generate-drafts-7h3k9x2q';
 
 /**
+ * The webhook to relay to, or `null` for "there isn't one and I will not guess".
+ *
+ * THE FALLBACK USED TO BE UNCONDITIONAL, AND IT COST A CUSTOMER A JUNK DRAFT.
+ * `DEFAULT_WEBHOOK_URL` is the LIVE OGMC writer: it accepts unauthenticated
+ * POSTs, spends real LLM budget, and upserts into the real tenant at whatever
+ * `scope_path` it is handed. The offline local stack sets five environment
+ * variables on `pnpm dev` and `N8N_WRITER_WEBHOOK_URL` is not one of them (it is
+ * exported by `tenant-starter/local-stack/stack.sh`, a different repo), so a dev
+ * server reached this line with the variable unset — and on 2026-10-06
+ * approving a topic that existed only on a laptop relayed the production writer
+ * and put a draft into the customer's `/ogmc` queue. Nobody typed a URL wrong;
+ * the default simply was production.
+ *
+ * SO THE DEFAULT IS NOW EARNED, NOT ASSUMED. Only a production build may fall
+ * back to it. Everywhere else — `next dev`, a test runner, any harness — an
+ * unset variable is a refusal, which is loud, local, and costs nothing.
+ * `NODE_ENV` is the discriminator because it is the one the RUNTIME sets rather
+ * than the one a config file hopes for: the tenant image runs `next build` then
+ * `next start`, so it is 'production' there and 'development'/'test' in every
+ * place that must not reach OGMC.
+ */
+function writerWebhookUrl(): string | null {
+  const configured = (process.env.N8N_WRITER_WEBHOOK_URL || '').trim();
+  if (configured) return configured;
+  return process.env.NODE_ENV === 'production' ? DEFAULT_WEBHOOK_URL : null;
+}
+
+/**
  * The `trigger` this route is willing to relay, from what the caller claims.
  *
  * ABSENT MEANS `generate_button`, which is exactly what this route hardcoded
@@ -175,7 +205,17 @@ async function resolveCaller(auth: string): Promise<string | undefined> {
 }
 
 export async function POST(request: Request) {
-  const webhookUrl = process.env.N8N_WRITER_WEBHOOK_URL || DEFAULT_WEBHOOK_URL;
+  const webhookUrl = writerWebhookUrl();
+  if (!webhookUrl) {
+    // BEFORE the gate reads and before anything is claimed: there is nowhere to
+    // relay to, so every step after this is wasted and the honest answer is that
+    // this deployment has no writer configured.
+    console.error('[generate-drafts] N8N_WRITER_WEBHOOK_URL is unset outside production — refusing to relay');
+    return NextResponse.json(
+      { error: 'No writer webhook is configured for this environment.' },
+      { status: 503 },
+    );
+  }
 
   // The gate is a tenant READ, and this handler has no session of its own, so it
   // borrows the caller's — the same shape /actions/translate-draft uses. A call
