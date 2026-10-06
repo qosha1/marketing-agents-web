@@ -321,16 +321,54 @@ export function declaredLangChoices(type: EntityTypeDef | null | undefined): str
 }
 
 /**
+ * The tenant's SOURCE language: the first locale its `lang` enum declares.
+ *
+ * Schema-derived, with no locale named in this file — the same rule
+ * `intakeStage()` applies to the status enum in lib/health-data.ts, and the same
+ * reason: a fork that writes in Arabic first declares `ar` first and needs no
+ * code change. '' when the type declares no languages, which every caller must
+ * read as "this tenant has not said", never as a language.
+ */
+export function sourceLocale(declared: readonly string[]): string {
+  return declared[0] ?? '';
+}
+
+/**
+ * The language a draft is actually IN: what it recorded, else the source locale.
+ *
+ * AN UNSTAMPED DRAFT IS NOT IN NO LANGUAGE (bd startsim-s0c4b). Measured over
+ * the 169 live drafts on 2026-10-05: 66 carry `lang: 'en'`, every one created on
+ * or before 2026-08-13, and all 100 created from 2026-08-21 onward carry no
+ * `lang` key at all. The writer stamped it and stopped. Reading that silence as
+ * absence made `translatableTargets` offer "+ EN" on an English brief — a press
+ * spends a model call translating English into English and writes a second
+ * draft carrying `lang: 'en'`, which is the competing near-duplicate the
+ * function below exists to prevent.
+ *
+ * Stamping the field on creation would fix the cause instead of the symptom, and
+ * should (bd startsim-pbx32) — but the writer is an n8n workflow outside this
+ * repo and 100 unstamped rows belong to a paying customer. This default is
+ * already true of all of them and becomes a no-op the day the writer stamps.
+ */
+export function effectiveLocale(lang: string, declared: readonly string[]): string {
+  return lang || sourceLocale(declared);
+}
+
+/**
  * The targets still worth offering: every declared locale that no draft in this
  * language group already occupies. Offering a language that exists would create
  * a second, competing translation rather than taking the reviewer to the one
  * that is already there.
+ *
+ * A draft that recorded no language occupies the SOURCE locale — see
+ * {@link effectiveLocale}. An empty `declared` leaves a blank blank, so a tenant
+ * with no language enum still offers nothing rather than an empty chip.
  */
 export function translatableTargets(
   declared: readonly string[],
   presentLangs: readonly string[],
 ): string[] {
-  const taken = new Set(presentLangs.filter(Boolean));
+  const taken = new Set(presentLangs.map((l) => effectiveLocale(l, declared)).filter(Boolean));
   return declared.filter((choice) => choice && !taken.has(choice));
 }
 

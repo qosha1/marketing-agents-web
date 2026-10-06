@@ -1,5 +1,5 @@
 {
-  "$note": "SEVENTEEN DRAFTS, shaped around the cases that break things rather than a flat list. (a) topic:seed-03 carries THREE candidate drafts at candidate_index 0/1/2 with one `chosen` — the legacy multi-draft shape the candidate-compare workspace at /drafts exists for; (b) topic:seed-07 carries two candidates with none chosen; (c) singles cover the remaining declared statuses; (d) two ORPHANS carry no topic_ref at all, which is the state that made /t/draft open empty for every user under a chip that said 'Topic approved' (startsim-8hgmq.4) — a corpus where every draft is linked cannot reproduce it; (e) an `ar` and a `zh` translation of the approved draft, so the translate path and the bidi isolate normaliser have real text; (f) one draft in /sandbox, so a scope leak shows up as a row in the wrong list. topic_ref is written as a {{id:topic:...}} token and resolved to the tenant's UUID at seed time, because that is what the app filters on — an external id there would read as linked in this file and be an orphan to every query.",
+  "$note": "SEVENTEEN DRAFTS, shaped around the cases that break things rather than a flat list. (a) topic:seed-03 carries THREE candidate drafts at candidate_index 0/1/2 with one `chosen` — the legacy multi-draft shape the candidate-compare workspace at /drafts exists for; (b) topic:seed-07 carries two candidates with none chosen; (c) singles cover the remaining declared statuses; (d) two ORPHANS carry no topic_ref at all, which is the state that made /t/draft open empty for every user under a chip that said 'Topic approved' (startsim-8hgmq.4) — a corpus where every draft is linked cannot reproduce it; (e) an `ar` and a `zh` translation of the approved draft, so the translate path and the bidi isolate normaliser have real text; (f) one draft in /sandbox, so a scope leak shows up as a row in the wrong list. topic_ref is written as a {{id:topic:...}} token and resolved to the tenant's UUID at seed time, because that is what the app filters on — an external id there would read as linked in this file and be an orphan to every query. (g) draft-seed-05 carries NO `lang` key at all, which is the shape of 100 of the 169 live drafts (the n8n writer stamped `lang: en` up to 2026-08-13 and has stamped nothing since) — a corpus where every original declares its language cannot reproduce bd startsim-s0c4b, where the language switcher offered '+ EN' on an English brief.",
   "rows": [
     {
       "entity_type": "draft",
@@ -140,10 +140,9 @@
     {
       "entity_type": "draft",
       "external_id": "draft-seed-05",
-      "name": "Draft 05 (ready_for_review)",
+      "name": "Draft 05 (ready_for_review, lang UNSTAMPED)",
       "data": {
         "status": "ready_for_review",
-        "lang": "en",
         "content_type": "lead_magnet",
         "candidate_index": 1,
         "chosen": false,

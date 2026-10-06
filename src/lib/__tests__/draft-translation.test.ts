@@ -24,6 +24,8 @@ import { describe, expect, it } from 'vitest';
 import {
   applyDraftTranslations,
   declaredLangChoices,
+  effectiveLocale,
+  sourceLocale,
   translatableTargets,
   draftSegments,
   TRANSLATED_STATUS,
@@ -232,5 +234,61 @@ describe('which languages are still on offer (bd startsim-tetf)', () => {
 
   it('ignores blank languages rather than offering an empty chip', () => {
     expect(translatableTargets(['en', 'ar', ''], ['', 'en'])).toEqual(['ar']);
+  });
+});
+
+/**
+ * An original whose `lang` was never stamped is in the tenant's SOURCE language,
+ * not in no language at all (bd startsim-s0c4b).
+ *
+ * MEASURED, 169 live drafts on 2026-10-05: 66 carry `lang: 'en'` and every one
+ * of them was created on or before 2026-08-13; all 100 created from 2026-08-21
+ * onward carry no `lang` key at all. So the writer did stamp it and stopped —
+ * and for those 100 drafts `draftLang()` returned '', `filter(Boolean)` dropped
+ * it, 'en' was never in `taken`, and the page offered "+ EN" on an English
+ * brief. Pressing it spends a model call translating English into English and
+ * writes a second, competing draft carrying `lang: 'en'` — the precise harm
+ * {@link translatableTargets}'s own doc comment says it exists to prevent.
+ *
+ * THE SOURCE LOCALE IS THE FIRST DECLARED CHOICE, read from the schema, with no
+ * locale named in the code — the same rule `intakeStage()` applies to the status
+ * enum in lib/health-data.ts. Stamping `lang` on creation would fix the cause
+ * rather than the symptom, but the writer is an n8n workflow outside this repo
+ * and the 100 unstamped rows are a customer's; this default is correct for them
+ * today and becomes a no-op the moment the writer stamps again.
+ */
+describe('an unstamped original counts as the tenant’s source language', () => {
+  it('does not offer the source locale to a draft that never recorded one', () => {
+    // The live shape: one draft, no `lang`, no translations.
+    expect(translatableTargets(['en', 'ar', 'zh'], [''])).toEqual(['ar', 'zh']);
+  });
+
+  it('still offers the source locale when the group genuinely lacks it', () => {
+    // An ar-only group — e.g. a translation opened on its own, source deleted.
+    // Nothing here says "en exists", so the offer is real.
+    expect(translatableTargets(['en', 'ar', 'zh'], ['ar'])).toEqual(['en', 'zh']);
+  });
+
+  it('counts an unstamped original ALONGSIDE its stamped translations', () => {
+    expect(translatableTargets(['en', 'ar', 'zh'], ['', 'ar'])).toEqual(['zh']);
+    expect(translatableTargets(['en', 'ar', 'zh'], ['', 'ar', 'zh'])).toEqual([]);
+  });
+
+  it('names no locale of its own — a tenant whose first choice is ar defaults to ar', () => {
+    expect(translatableTargets(['ar', 'en'], [''])).toEqual(['en']);
+  });
+
+  it('offers nothing when the tenant declares no languages, stamped or not', () => {
+    expect(translatableTargets([], [''])).toEqual([]);
+  });
+
+  it('exposes the source locale so the page can LABEL an unstamped draft', () => {
+    // A disappearing button is an absence; the switcher should also be able to
+    // say "EN · No translations yet." rather than leaving the draft nameless.
+    expect(sourceLocale(['en', 'ar', 'zh'])).toBe('en');
+    expect(sourceLocale([])).toBe('');
+    expect(effectiveLocale('ar', ['en', 'ar'])).toBe('ar');
+    expect(effectiveLocale('', ['en', 'ar'])).toBe('en');
+    expect(effectiveLocale('', [])).toBe('');
   });
 });

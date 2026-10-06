@@ -87,7 +87,12 @@ import { useAuth } from '@startsimpli/auth';
 
 import { readData, typeRoute } from '@/lib/board';
 import { readEditHistory, withEditStamp, type EditEntry } from '@/lib/edit-history';
-import { declaredLangChoices, pendingTranslation, translatableTargets } from '@/lib/draft-translation';
+import {
+  declaredLangChoices,
+  effectiveLocale,
+  pendingTranslation,
+  translatableTargets,
+} from '@/lib/draft-translation';
 import { getRegisteredToken } from '@/infrastructure/auth';
 import { wordCount } from '@startsimpli/ui';
 import { formatBearer } from '@/lib/bearer';
@@ -277,17 +282,21 @@ function LanguageSwitcher({ draft }: { draft: EntityRecord }) {
   // is a schema change and no code change (startsim-jb1z's naming ban).
   const typesQuery = useQuery({ queryKey: ['types'], queryFn: () => listTypes() });
 
-  const lang = draftLang(draft);
+  const draftType = (typesQuery.data?.results ?? []).find((t) => t.key === DRAFT_TYPE);
+  const declaredLangs = declaredLangChoices(draftType);
+  // WHAT A DRAFT THAT NEVER RECORDED ITS LANGUAGE IS IN (bd startsim-s0c4b):
+  // the tenant's source locale, which is the first choice its `lang` enum
+  // declares. 100 of the 169 live drafts carry no `lang` key, so reading that
+  // silence as absence offered "+ EN" on an English brief and labelled it with
+  // nothing. Both halves are the same question, so both ask it the same way.
+  const localeOf = (d: EntityRecord) => effectiveLocale(draftLang(d), declaredLangs);
+  const lang = localeOf(draft);
   const translations = translationsQuery.data ?? [];
   const variants = [draft, ...translations]
     .slice()
-    .sort((a, b) => draftLang(a).localeCompare(draftLang(b)));
+    .sort((a, b) => localeOf(a).localeCompare(localeOf(b)));
 
-  const draftType = (typesQuery.data?.results ?? []).find((t) => t.key === DRAFT_TYPE);
-  const targets = translatableTargets(
-    declaredLangChoices(draftType),
-    variants.map((d) => draftLang(d)),
-  );
+  const targets = translatableTargets(declaredLangs, variants.map((d) => draftLang(d)));
 
   // DERIVED, not remembered: we are translating exactly while the language the
   // reviewer asked for is missing from the group. Nothing has to clear it, so
@@ -343,7 +352,7 @@ function LanguageSwitcher({ draft }: { draft: EntityRecord }) {
                 : 'text-neutral-500 hover:bg-neutral-50'
             }`}
           >
-            {draftLang(d) || '—'}
+            {localeOf(d) || '—'}
           </Link>
         ))
       ) : (

@@ -70,7 +70,6 @@ import {
   draftsViewFilters,
   originGateActive,
   topicGateActive,
-  ORIGIN_GATE_PARAM,
   TOPIC_GATE_PARAM,
   APPROVED_TOPIC_STATUSES,
 } from '@/lib/drafts-view';
@@ -82,8 +81,10 @@ import {
   contentCategoryLabel,
 } from '@/lib/content';
 import {
+  applyDraftQueue,
   applyTopicQueue,
   clearedTopicQueue,
+  draftQueueChips,
   topicQueueActive,
   topicQueueChips,
 } from '@/lib/health-data';
@@ -264,11 +265,23 @@ export default function TypeRecordsPage() {
     () => (membersQuery.data ? operatorSubs(normalizeMembers(membersQuery.data)) : []),
     [membersQuery.data],
   );
-  // Same posture as the topic gate: a FAILED roster read is not a pending one.
-  // It drops the chip rather than leaving the table waiting behind a claim it is
-  // no longer honouring — and applyOriginGate over an empty list hides nothing,
-  // so the queue widens rather than narrows on a guess.
-  const originGateBroken = originGateOn && membersQuery.isError;
+  // A REFUSED ROSTER COSTS ONE HALF OF THIS GATE, NOT THE GATE (bd
+  // startsim-m7fdm.9). `GET /api/v1/org/members/` needs an admin-tier bearer
+  // (startsim-q79l), so every member-role reviewer gets a 403 — measured live
+  // 2026-10-05 as qa+ma@startsimpli.com on both path forms. This used to read
+  // `originGateBroken` and, on that one failure, drop the chip AND skip
+  // applyOriginGate: the filter that keeps our test drafts out of the
+  // customer's queue was off for exactly the people it protects, silently.
+  //
+  // It is not broken. `madeByOperator` has two halves and only one of them
+  // needs a roster: `isOperatorEmail(_triggered_by)` reads a domain off the
+  // draft itself (five of the 169 live drafts on 2026-10-05), while
+  // `owner_sub ∈ operatorSubs` needs the roster to resolve a sub to a person
+  // (three). So the gate RUNS either way — `operatorSubList` is already [] on
+  // error and applyOriginGate fails open over an empty list — and what the page
+  // owes the reader is the missing half, said out loud, the way the topic gate
+  // below and the AssigneePicker already do.
+  const rosterUnavailable = originGateOn && membersQuery.isError;
   const gateReady =
     (!gateOn || approvedTopicsQuery.isSuccess || approvedTopicsQuery.isError) &&
     (!originGateOn || membersQuery.isSuccess || membersQuery.isError);
@@ -280,14 +293,17 @@ export default function TypeRecordsPage() {
     () => [
       ...(isDraft
         ? draftsViewChips(viewParams).filter(
-            (c) =>
-              !(gateBroken && c.param === TOPIC_GATE_PARAM) &&
-              !(originGateBroken && c.param === ORIGIN_GATE_PARAM),
+            // The topic gate's chip goes when its gate goes. The origin gate's
+            // STAYS: a refused roster narrows it, it does not stop it.
+            (c) => !(gateBroken && c.param === TOPIC_GATE_PARAM),
           )
         : []),
+      // The Dashboard's draft queue, same rule as the topic one: a gate the
+      // page does not SAY it applied reads as an empty pipeline (startsim-tkfzu).
+      ...(isDraft ? draftQueueChips(viewParams) : []),
       ...(isContent ? topicQueueChips(viewParams) : []),
     ],
-    [isDraft, isContent, viewParams, gateBroken, originGateBroken],
+    [isDraft, isContent, viewParams, gateBroken],
   );
 
   // `title` on the topic spine, `story_title` on drafts — see pickTitleAttr.
@@ -417,9 +433,22 @@ export default function TypeRecordsPage() {
       // side for a harder reason than the other two: neither `owner_sub` (a row
       // column) nor `_triggered_by` (an undeclared attribute) can be asked of
       // the server without re-running bd startsim-8hgmq.4.
-      if (!originGateBroken && originGateActive(viewParams)) {
+      //
+      // UNCONDITIONAL on the roster (bd startsim-m7fdm.9). `operatorSubList` is
+      // [] while the read is in flight AND when it is refused; the `owner_sub`
+      // half then matches nothing and the `_triggered_by` half still runs. The
+      // old `!originGateBroken` guard turned one refused request into no gate at
+      // all for every member-role reviewer.
+      if (originGateActive(viewParams)) {
         rows = applyOriginGate(rows, operatorSubList);
       }
+      // Where the Dashboard's "Awaiting a review decision" card lands
+      // (bd startsim-tkfzu). Re-runs the SAME predicate the card counted, over
+      // the same test-draft gate — so the number on the card and the list under
+      // it are one filter() call. The origin half above is already applied and
+      // re-applying it is idempotent; passing the subs keeps the two paths one
+      // predicate rather than two that must be kept in step.
+      rows = applyDraftQueue(rows, viewParams, type, operatorSubList);
     }
     // Where the Dashboard's "needs a human" cards land. The gate re-runs the
     // SAME predicate the card counted (lib/health-data.ts QUEUE_ROWS), so the
@@ -438,7 +467,6 @@ export default function TypeRecordsPage() {
     isContent,
     isDraft,
     gateBroken,
-    originGateBroken,
     operatorSubList,
     viewParams,
     approvedIds,
@@ -865,6 +893,21 @@ export default function TypeRecordsPage() {
               {gateBroken ? (
                 <span className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800">
                   Could not check which topics are approved — showing drafts unfiltered
+                </span>
+              ) : null}
+              {/* The origin gate's missing half, named (bd startsim-m7fdm.9).
+                  Not "the gate is off" — it is on, and the chip beside this says
+                  so: a draft that names a platform address in `_triggered_by` is
+                  still hidden. What cannot be checked is the owner, which needs
+                  the roster this reader is not allowed to read. Same words as
+                  the AssigneePicker's placeholder for the same 403. */}
+              {rosterUnavailable ? (
+                <span
+                  className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800"
+                  title="Test drafts are still hidden when the draft itself names who asked for it. Matching a draft's owner to a person needs the member list, which only an admin may read."
+                >
+                  Roster unavailable (admin role required) — test drafts are only hidden where the
+                  draft names its author
                 </span>
               ) : null}
               {viewChips.length > 0 ? (
