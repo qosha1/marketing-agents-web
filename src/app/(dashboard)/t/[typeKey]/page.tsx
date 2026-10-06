@@ -89,6 +89,7 @@ import {
   topicQueueChips,
 } from '@/lib/health-data';
 import { boardViewHref } from '@/lib/view-toggle';
+import { dispatchDraftForApproval } from '@/lib/approve-dispatch';
 import { createApproveWatch } from '@/lib/approve-watch';
 import { currentReturnPath, storyHref } from '@/lib/story-nav';
 import { primeEntity } from '@/lib/entity-cache';
@@ -208,6 +209,15 @@ export default function TypeRecordsPage() {
     (row: EntityRecord): boolean => {
       if (!isContent) return false;
       if (!approveWatch.tookApproval(row, topicReview.transitions.approve)) return false;
+      // THE DRAFT STARTS HERE, not six hours later at the next n8n poll tick
+      // (bd startsim-m7fdm.19). Fired and NOT awaited: the approval has already
+      // been saved, so a slow or refused dispatch must not hold the navigation —
+      // and it is started BEFORE the push so the story page's `TopicDrafts`
+      // seeds "Generating… (~2 min)" from the run store on its first frame.
+      // `row` is the PRE-save copy, which is the right one: the writer's story
+      // is built from title/market/angle/sources, none of which an approval
+      // touches. See lib/approve-dispatch.ts for the whole ordering argument.
+      void dispatchDraftForApproval(row);
       router.push(storyHref(row.id, returnPath));
       return true;
     },

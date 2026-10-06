@@ -234,6 +234,54 @@ describe('which caller started the writer', () => {
     expect(origin.detail).not.toMatch(/does not say which/i);
   });
 
+  it('says the APPROVAL started it, and names the approver', () => {
+    // CONSTRAINT 5 OF bd startsim-m7fdm.19, which is the whole reason this value
+    // is not just `generate_button`: an approval-dispatched draft was asked for
+    // by the approver, and a column that said "somebody pressed Generate drafts"
+    // would be describing an act that never happened.
+    const origin = describeRecordOrigin(
+      record({
+        data: { Origin: WRITER, Trigger: 'topic_approved', TriggeredBy: REVIEWER },
+        ownerSub: SERVICE,
+      }),
+    );
+    expect(origin.trigger).toBe('topic_approved');
+    expect(origin.label).toBe('Approved');
+    expect(origin.triggeredBy).toBe(REVIEWER);
+    expect(origin.detail).toContain(REVIEWER);
+    expect(origin.detail).toMatch(/approved the topic/i);
+    // NOT the "we don't know which caller" sentence, and not the "pressed
+    // Generate drafts" one either.
+    expect(origin.detail).not.toMatch(/does not say which/i);
+    expect(origin.detail).not.toMatch(/pressed/i);
+  });
+
+  it('keeps "Approved" and "Generated" APART, so a hand-run retry stays visible', () => {
+    // Folding the two together would make the retry path invisible — and the
+    // retry is the interesting row, because it means the automatic dispatch
+    // failed and somebody had to chase it.
+    const approved = describeRecordOrigin(record({ data: { Origin: WRITER, Trigger: 'topic_approved' } }));
+    const pressed = describeRecordOrigin(record({ data: { Origin: WRITER, Trigger: 'generate_button' } }));
+    expect(approved.label).not.toBe(pressed.label);
+  });
+
+  it('does not report an approval as a caller it fails to recognise', () => {
+    // The regression this guards: `draft-origin.ts` renders an unknown trigger
+    // as 'AI writer … names its caller as "X", which this app does not
+    // recognise'. Shipping the dispatch without teaching this file the value
+    // would have made every auto-written draft say exactly that.
+    const origin = describeRecordOrigin(record({ data: { Origin: WRITER, Trigger: 'topic_approved' } }));
+    expect(origin.detail).not.toMatch(/does not recognise/i);
+    expect(origin.label).not.toBe('AI writer');
+  });
+
+  it('says the topic was approved without inventing who, when the caller did not say', () => {
+    const origin = describeRecordOrigin(record({ data: { Origin: WRITER, Trigger: 'topic_approved' } }));
+    expect(origin.label).toBe('Approved');
+    expect(origin.triggeredBy).toBeUndefined();
+    expect(origin.detail).toMatch(/does not say by whom/i);
+  });
+
   it('reads the RAW snake_case keys too, for any path that skips the transform', () => {
     const origin = describeRecordOrigin(
       record({ data: { [ORIGIN_ATTR]: WRITER, [TRIGGER_ATTR]: 'generate_button', [TRIGGERED_BY_ATTR]: REVIEWER } }),

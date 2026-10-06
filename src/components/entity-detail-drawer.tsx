@@ -32,6 +32,7 @@ import { getRegisteredToken } from '@/infrastructure/auth';
 import { formatBearer } from '@/lib/bearer';
 import { readData, toCamelKey } from '@/lib/board';
 import { CONTENT_TYPE_KEY } from '@/lib/content';
+import { relayedTopicVersion } from '@/lib/dispatch-stamp';
 import { draftHref } from '@/lib/story-nav';
 import { memberDisplayName, memberSub, normalizeMembers } from '@/lib/roster';
 import { findTag, GOOD_EXAMPLE_LABEL } from '@/lib/tags';
@@ -70,6 +71,7 @@ import {
   type EntityTypeDef,
 } from '@/lib/foundry-api';
 import { saveEntity } from '@/lib/entity-cache';
+import { rememberVersion } from '@/lib/record-version';
 
 /** Name convention (any type, not just topic/draft) that upgrades the two plain
  *  text fields into one roster picker (startsim-71z6). */
@@ -674,6 +676,14 @@ export function TopicDrafts({
           .catch(() => undefined);
         throw new Error(detail || `Writer request failed (${res.status}).`);
       }
+      // THE RELAY STAMPED THIS TOPIC, so its version moved somewhere the browser
+      // cannot see (bd startsim-jkkn7.13). The approval path does the same thing
+      // for the same reason — see lib/approve-dispatch.ts — because the next
+      // conditional write to this topic (the draft page's Accept) asserts the
+      // version this registry holds, and an unreported bump refuses it with a
+      // 412 that describes no conflict.
+      const version = relayedTopicVersion(await res.json().catch(() => null));
+      if (version !== undefined) rememberVersion(topicId, { version });
       notify.success('Generating drafts… new candidates appear in ~2 min.');
     } catch (err) {
       // The writer never started, so there is nothing to have waited for: clear

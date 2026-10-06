@@ -83,6 +83,7 @@ import {
   whoami,
   type EntityRecord,
 } from '@/lib/foundry-api';
+import { dispatchDraftForApproval } from '@/lib/approve-dispatch';
 import { createApproveWatch } from '@/lib/approve-watch';
 import { currentReturnPath, storyHref } from '@/lib/story-nav';
 import { primeEntity } from '@/lib/entity-cache';
@@ -365,6 +366,12 @@ export default function BoardPage() {
       void qc.invalidateQueries({ queryKey: ['entities', typeKey] });
       if (!isTopicBoard) return;
       if (!approveWatch.tookApproval(record, topicReview.transitions.approve)) return;
+      // The same dispatch the table fires, from the one module, for the same
+      // reason the review config is imported rather than re-declared above: two
+      // surfaces that each decide what approval STARTS is how they drift
+      // (bd startsim-m7fdm.19). Fired and not awaited, before the push — see
+      // lib/approve-dispatch.ts.
+      void dispatchDraftForApproval(record);
       router.push(storyHref(record.id, returnPath));
     },
     [qc, typeKey, isTopicBoard, approveWatch, topicReview.transitions.approve, router, returnPath],

@@ -25,6 +25,12 @@
  *                                  said who (startsim-8hgmq.7 makes this app
  *                                  say who; the poller never does, because
  *                                  nobody pressed anything).
+ *   `_trigger: 'topic_approved'`   APPROVING the topic started the writer, with
+ *                                  no second press (bd startsim-m7fdm.19). It is
+ *                                  a person's act, so `_triggered_by` names the
+ *                                  approver — which is why it is not folded into
+ *                                  `generate_button` (nobody pressed a button)
+ *                                  and not into `schedule` (somebody asked).
  *   `_trigger: 'unknown'`          NOBODY TOLD US — a hand-run from the n8n
  *                                  editor, or a caller added later that does
  *                                  not name itself. It is NOT "we tried and
@@ -72,6 +78,24 @@ export const TRIGGER_ATTR = '_trigger';
 export const TRIGGERED_BY_ATTR = '_triggered_by';
 export const RUN_ID_ATTR = '_run_id';
 
+/**
+ * The `_trigger` VALUES, named once (bd startsim-m7fdm.19).
+ *
+ * They live beside the renderer that has to understand them, and that adjacency
+ * is the point: a caller that invents a trigger string the switch below has not
+ * heard of does not fail loudly — it renders "AI writer … names its caller as
+ * X, which this app does not recognise", which is a correct sentence about a
+ * draft nobody can attribute. `/actions/generate-drafts` relays one of these and
+ * `lib/approve-dispatch.ts` asks for one of these, so the string the writer
+ * stamps and the string this file switches on are the same literal.
+ *
+ * `SCHEDULE_TRIGGER` is n8n's, not this app's — it is here to be READ, never
+ * sent. This app has no unattended caller.
+ */
+export const SCHEDULE_TRIGGER = 'schedule';
+export const GENERATE_BUTTON_TRIGGER = 'generate_button';
+export const APPROVAL_TRIGGER = 'topic_approved';
+
 /** The prefix the tenant backend gives a non-human (service credential) owner. */
 export const SERVICE_OWNER_PREFIX = 'svc:';
 
@@ -88,6 +112,8 @@ export type OriginTrigger =
   | 'schedule'
   /** Somebody pressed "Generate drafts". */
   | 'generate_button'
+  /** Approving the topic started the writer — no button was pressed. */
+  | 'topic_approved'
   /** The record does not say — including every row written before the stamp. */
   | 'unknown';
 
@@ -154,7 +180,7 @@ export function describeRecordOrigin(
     const runId = stamp(record.data, RUN_ID_ATTR) || undefined;
     const common = { kind: 'automation' as const, triggeredBy, runId, editedFields };
 
-    if (rawTrigger === 'schedule') {
+    if (rawTrigger === SCHEDULE_TRIGGER) {
       return {
         ...common,
         trigger: 'schedule',
@@ -163,7 +189,7 @@ export function describeRecordOrigin(
       };
     }
 
-    if (rawTrigger === 'generate_button') {
+    if (rawTrigger === GENERATE_BUTTON_TRIGGER) {
       return {
         ...common,
         trigger: 'generate_button',
@@ -171,6 +197,24 @@ export function describeRecordOrigin(
         detail: triggeredBy
           ? `${workflow}, started when ${triggeredBy} pressed "Generate drafts" on the topic.`
           : `${workflow}, started when somebody pressed "Generate drafts" on the topic; the record does not say who.`,
+      };
+    }
+
+    // A SEPARATE LABEL FROM 'Generated', not a synonym for it. Both are a
+    // person's act, but they answer "what did they do?" differently, and that
+    // difference is the only way a reader can tell a draft nobody chased from
+    // one somebody re-ran by hand: 'Approved' is the ordinary path every topic
+    // now takes, 'Generated' means a reviewer went and pressed the retry.
+    // Folding them together would make the retry invisible, which is the
+    // opposite of what this column is for.
+    if (rawTrigger === APPROVAL_TRIGGER) {
+      return {
+        ...common,
+        trigger: 'topic_approved',
+        label: 'Approved',
+        detail: triggeredBy
+          ? `${workflow}, started the moment ${triggeredBy} approved the topic.`
+          : `${workflow}, started the moment the topic was approved; the record does not say by whom.`,
       };
     }
 

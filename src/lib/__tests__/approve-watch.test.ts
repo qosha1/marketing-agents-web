@@ -111,6 +111,63 @@ describe('createApproveWatch', () => {
     expect(watch.tookApproval(record('t1', { status: 'suggested' }), APPROVE)).toBe(false);
   });
 
+  /**
+   * A SAVE THE SERVER REFUSED IS NOT AN APPROVAL (bd startsim-j19hf,
+   * bd startsim-jkkn7.13).
+   *
+   * Every write now carries a version precondition, so `updateEntity` can reject
+   * with a 412 where it used to return a 200 over somebody else's text. The
+   * dispatch that hangs off this watch spends an LLM run and writes a draft, so
+   * "did it actually land?" stopped being a detail. It is answered structurally —
+   * the reading is assigned on the line AFTER the await — and this pins it, so a
+   * refactor that moved the assignment above the await, or into a `finally`,
+   * fails here rather than in a customer's queue.
+   */
+  it('reports NOTHING when the save was refused', async () => {
+    const base = fakeClient();
+    vi.mocked(base.updateEntity).mockRejectedValueOnce(new Error('412 Precondition Failed'));
+    const watch = createApproveWatch(base, 'status');
+    const row = record('t1', { status: 'suggested' });
+
+    await expect(
+      watch.client.updateEntity('t1', { data: { status: 'ready' } }),
+    ).rejects.toThrow(/412/);
+
+    expect(watch.tookApproval(row, APPROVE)).toBe(false);
+  });
+
+  it('does not let an EARLIER approve stand in for a refused one', async () => {
+    // The reading is consumed on the way out, so the approve below cannot be
+    // re-read by the refusal that follows it — the shape that would make a
+    // rejected save dispatch a writer anyway.
+    const base = fakeClient();
+    const watch = createApproveWatch(base, 'status');
+    const row = record('t1', { status: 'suggested' });
+
+    await watch.client.updateEntity('t1', { data: { status: 'ready' } });
+    expect(watch.tookApproval(row, APPROVE)).toBe(true);
+
+    vi.mocked(base.updateEntity).mockRejectedValueOnce(new Error('412 Precondition Failed'));
+    await expect(
+      watch.client.updateEntity('t1', { data: { status: 'ready' } }),
+    ).rejects.toThrow(/412/);
+    expect(watch.tookApproval(row, APPROVE)).toBe(false);
+  });
+
+  it('does not prime the host cache for a save that never landed', async () => {
+    // `onSaved` is how the fork keeps `['entity', <id>]` honest. Calling it with
+    // an undefined record would throw inside the watch; calling it at all would
+    // cache a blob the server rejected.
+    const base = fakeClient();
+    vi.mocked(base.updateEntity).mockRejectedValueOnce(new Error('412 Precondition Failed'));
+    const onSaved = vi.fn();
+    const watch = createApproveWatch(base, 'status', onSaved);
+
+    await expect(watch.client.updateEntity('t1', { data: { status: 'ready' } })).rejects.toThrow();
+
+    expect(onSaved).not.toHaveBeenCalled();
+  });
+
   it('reports nothing before anything has been saved', () => {
     const watch = createApproveWatch(fakeClient(), 'status');
     expect(watch.tookApproval(record('t1', { status: 'suggested' }), APPROVE)).toBe(false);

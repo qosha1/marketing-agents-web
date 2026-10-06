@@ -13,10 +13,15 @@
  * been paid for and the drafts would already exist. So every refusal case
  * asserts `global.fetch` was never called, not merely that the status was 4xx.
  *
- * `global.fetch` IS STUBBED IN `beforeEach` AND THAT IS NOT OPTIONAL. The route
- * POSTs to a real, uncredentialed production webhook
- * (`ogmc-generate-drafts-7h3k9x2q`); an unstubbed run of this file would fire
- * the live writer and create real drafts in the customer's tenant.
+ * TWO THINGS KEEP THIS FILE OFF THE LIVE WRITER, and it needs both.
+ * `global.fetch` is stubbed in `beforeEach`, and `N8N_WRITER_WEBHOOK_URL` is set
+ * to a URL that goes nowhere. The stub alone was the whole guard until
+ * 2026-10-06, when the same missing variable let a DEV SERVER relay
+ * `ogmc-generate-drafts-7h3k9x2q` — the real, uncredentialed OGMC writer — and
+ * put a draft into the customer's queue. The route refuses an unset variable
+ * outside production now, so this is belt-and-braces rather than the only belt;
+ * setting it here also means these tests exercise the same arm production does
+ * instead of the refusal.
  *
  * THE SCHEMA FIXTURES ARE RAW snake_case ON PURPOSE. `tenantFetch` returns
  * Django's JSON untouched — the shared browser client's snake→camel transform
@@ -41,6 +46,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/lib/tenant-fetch', () => ({ tenantFetch: vi.fn() }));
 
+import { DISPATCH_STAMP_ATTR, DISPATCH_TOPIC_VERSION_KEY } from '@/lib/dispatch-stamp';
+import { APPROVAL_TRIGGER, GENERATE_BUTTON_TRIGGER } from '@/lib/draft-origin';
 import { resetGenerateClaims } from '@/lib/generate-claim';
 import { tenantFetch } from '@/lib/tenant-fetch';
 import { POST } from '../route';
@@ -115,8 +122,13 @@ function stubTenant(opts: {
   attrFilter?: 'undeclared' | 'ignored';
   /** Django's raw whoami shape, or `null` to make ONLY that read fail. */
   whoami?: unknown;
+  /**
+   * The version the stamp PATCH reports. `null` answers with NO version at all —
+   * a tenant build that predates the revision trail.
+   */
+  stampedVersion?: number | null;
 }) {
-  vi.mocked(tenantFetch).mockImplementation(async (path: string) => {
+  vi.mocked(tenantFetch).mockImplementation(async (path: string, _auth: string, init) => {
     if (path.startsWith('whoami')) {
       if (opts.whoami === null) throw new Error(`tenant GET ${path} responded 401`);
       // snake_case, like every other fixture here: `tenantFetch` returns
@@ -139,7 +151,17 @@ function stubTenant(opts: {
     }
     if (path.startsWith('entities/')) {
       if (opts.topic === null) throw new Error(`tenant GET ${path} responded 404`);
-      return opts.topic ?? topicWire('ready');
+      const record = opts.topic ?? topicWire('ready');
+      // THE STAMP PATCH ANSWERS WITH THE VERSION IT ALLOCATED, which is how the
+      // browser learns that its own held version has moved (bd startsim-jkkn7.13).
+      // `version` is a read-only integer on EntitySerializer, so it is on the
+      // write response as well as on the read.
+      if ((init as { method?: string } | undefined)?.method === 'PATCH') {
+        return opts.stampedVersion === null
+          ? (record as Record<string, unknown>)
+          : { ...(record as Record<string, unknown>), version: opts.stampedVersion ?? 12 };
+      }
+      return record;
     }
     throw new Error(`unexpected tenant path: ${path}`);
   });
@@ -172,6 +194,10 @@ function post(body: unknown, auth: string | null = AUTH): Request {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // See the file header. Not a convenience: without it the route refuses
+  // outright (NODE_ENV is 'test'), and every assertion below would be about a
+  // 503 rather than about the gate.
+  vi.stubEnv('N8N_WRITER_WEBHOOK_URL', 'http://127.0.0.1:1/no-writer-in-tests');
   // The in-flight claim store is module-level and outlives a single test, which
   // is the whole point of it (bd startsim-8hgmq.8) — so a test must clear it.
   resetGenerateClaims();
@@ -503,5 +529,237 @@ describe('the scope the writer stamps (bd startsim-0r7ru)', () => {
     const body = JSON.parse(String(init.body)) as Record<string, unknown>;
     expect('scope_path' in body).toBe(false);
     expect('scopePath' in body).toBe(false);
+  });
+});
+
+describe('which act the relay names (bd startsim-m7fdm.19)', () => {
+  /** The relayed webhook body. */
+  function relayed(): Record<string, unknown> {
+    const [, init] = vi.mocked(global.fetch).mock.calls[0] as [string, RequestInit];
+    return JSON.parse(String(init.body)) as Record<string, unknown>;
+  }
+
+  it('relays topic_approved when the approval dispatched it', async () => {
+    // THE WHOLE POINT OF ACCEPTING THE FIELD. The writer stamps `trigger` as
+    // `data._trigger` and `lib/draft-origin.ts` renders it in the "Created by"
+    // column; a dispatch that reused `generate_button` would make every
+    // auto-written draft claim somebody pressed a button, undoing that column.
+    stubTenant({ topic: topicWire('ready'), drafts: [] });
+
+    const res = await POST(post({ story: story(), trigger: APPROVAL_TRIGGER }));
+
+    expect(res.status).toBe(202);
+    expect(relayed()).toMatchObject({ trigger: 'topic_approved', triggered_by: CALLER_EMAIL });
+  });
+
+  it('still resolves the IDENTITY from the bearer, never from the body', async () => {
+    // The split that makes accepting a body field honest: the LABEL is the
+    // caller's to name, the PERSON is not. A tab that could name the person
+    // could attribute a draft to somebody else.
+    stubTenant({ topic: topicWire('ready'), drafts: [] });
+
+    await POST(post({ story: story(), trigger: APPROVAL_TRIGGER, triggered_by: 'someone@else.test' }));
+
+    expect(relayed()).toMatchObject({ triggered_by: CALLER_EMAIL });
+  });
+
+  it('defaults to generate_button when the body says nothing — the drawer’s POST is unchanged', async () => {
+    stubTenant({ topic: topicWire('ready'), drafts: [] });
+
+    await POST(post({ story: story() }));
+
+    expect(relayed()).toMatchObject({ trigger: GENERATE_BUTTON_TRIGGER });
+  });
+
+  it('refuses to relay a trigger it does not recognise, including "schedule"', async () => {
+    // An unvetted string would let a tab write arbitrary text into a column
+    // every reviewer reads — and `schedule` specifically would have an app-driven
+    // draft claim the unattended poller wrote it. The poller calls the webhook
+    // directly and never comes through here.
+    for (const claimed of ['schedule', 'topic_approved ', 'whatever', 42, { a: 1 }]) {
+      vi.mocked(global.fetch).mockClear();
+      resetGenerateClaims();
+      stubTenant({ topic: topicWire('ready'), drafts: [] });
+
+      const res = await POST(post({ story: story(), trigger: claimed }));
+
+      expect(res.status).toBe(202);
+      expect(relayed()).toMatchObject({ trigger: GENERATE_BUTTON_TRIGGER });
+    }
+  });
+});
+
+describe('telling the n8n poll a writer is running (bd startsim-m7fdm.19, constraint 4)', () => {
+  /** Every PATCH the route made against the tenant. */
+  function patches() {
+    return vi
+      .mocked(tenantFetch)
+      .mock.calls.filter(([, , init]) => (init as { method?: string } | undefined)?.method === 'PATCH');
+  }
+
+  it('stamps the topic AFTER the webhook accepted, so the poll skips it', async () => {
+    // The poll's dedup is "ready, and no draft carries this topic_ref" — correct,
+    // and blind for the whole length of a writer run, because the drafts it looks
+    // for do not exist yet. The stamp is the fact it is missing.
+    stubTenant({ topic: topicWire('ready'), drafts: [] });
+
+    const res = await POST(post({ story: story() }));
+
+    expect(res.status).toBe(202);
+    expect(patches()).toHaveLength(1);
+    const [path, , init] = patches()[0] as [string, string, { body?: { data?: Record<string, unknown> } }];
+    expect(path).toBe(`entities/${TOPIC_ID}`);
+    const stamp = init.body?.data?.[DISPATCH_STAMP_ATTR];
+    expect(typeof stamp).toBe('string');
+    expect(Date.parse(String(stamp))).toBeGreaterThan(0);
+  });
+
+  it('KEEPS the rest of the blob — the tenant PATCH replaces `data` wholesale', async () => {
+    // A body carrying only the stamp would empty the customer's topic.
+    stubTenant({
+      topic: { ...topicWire('ready'), data: { status: 'ready', title: 'Qatar customs', market: 'UAE' } },
+      drafts: [],
+    });
+
+    await POST(post({ story: story() }));
+
+    const [, , init] = patches()[0] as [string, string, { body?: { data?: Record<string, unknown> } }];
+    expect(init.body?.data).toMatchObject({ status: 'ready', title: 'Qatar customs', market: 'UAE' });
+  });
+
+  it('is stamped for the BUTTON too, not just for an approval', async () => {
+    // The retry is the press most likely to collide with the poll: a retry is by
+    // definition a `ready` topic with no draft, which is exactly what
+    // `Pick Unwritten Ready` selects on.
+    stubTenant({ topic: topicWire('ready'), drafts: [] });
+
+    await POST(post({ story: story(), trigger: GENERATE_BUTTON_TRIGGER }));
+
+    expect(patches()).toHaveLength(1);
+  });
+
+  it('never stamps a relay that did not happen', async () => {
+    stubTenant({ topic: topicWire('suggested') });
+    expect((await POST(post({ story: story() }))).status).toBe(403);
+    expect(patches()).toHaveLength(0);
+
+    resetGenerateClaims();
+    vi.mocked(tenantFetch).mockClear();
+    stubTenant({ topic: topicWire('ready'), drafts: [] });
+    global.fetch = vi.fn(async () => new Response('no', { status: 500 })) as unknown as typeof fetch;
+    expect((await POST(post({ story: story() }))).status).toBe(502);
+    expect(patches()).toHaveLength(0);
+  });
+
+  it('STILL answers 202 when the stamp write fails', async () => {
+    // By then the writer is already running. A 502 here would make the drawer
+    // end its run and the reviewer press the button again — manufacturing the
+    // duplicate the stamp exists to prevent.
+    stubTenant({ topic: topicWire('ready'), drafts: [] });
+    const reads = vi.mocked(tenantFetch).getMockImplementation()!;
+    vi.mocked(tenantFetch).mockImplementation(async (path: string, auth: string, init) => {
+      if ((init as { method?: string }).method === 'PATCH') {
+        throw new Error(`tenant PATCH ${path} responded 403`);
+      }
+      return reads(path, auth, init);
+    });
+
+    const res = await POST(post({ story: story() }));
+
+    expect(res.status).toBe(202);
+    expect(await res.json()).toMatchObject({ ok: true, deduped: false });
+  });
+
+  /**
+   * AND THE STAMP IS A WRITE, SO IT MOVES THE TOPIC'S VERSION
+   * (bd startsim-jkkn7.13, bd startsim-j19hf).
+   *
+   * This PATCH goes out server-side through `tenant-fetch`, so the browser's
+   * version registry never sees it — and the next conditional write to this
+   * topic is the draft page's Accept, which asserts that registry. Unreported,
+   * the approve-then-accept flow this bead builds ends in a 412 that describes
+   * no conflict: the draft flips to approved and its topic is refused.
+   */
+  it('reports the version the stamp allocated, so the next save asserts the right one', async () => {
+    stubTenant({ topic: topicWire('ready'), drafts: [], stampedVersion: 31 });
+
+    const res = await POST(post({ story: story() }));
+
+    expect(res.status).toBe(202);
+    expect(await res.json()).toMatchObject({ [DISPATCH_TOPIC_VERSION_KEY]: 31 });
+  });
+
+  it('reports it for the BUTTON too — the same topic, the same registry', async () => {
+    stubTenant({ topic: topicWire('ready'), drafts: [], stampedVersion: 9 });
+
+    const res = await POST(post({ story: story(), trigger: GENERATE_BUTTON_TRIGGER }));
+
+    expect(await res.json()).toMatchObject({ [DISPATCH_TOPIC_VERSION_KEY]: 9 });
+  });
+
+  it('reports NOTHING when the stamp failed — a write that did not land moved nothing', async () => {
+    // Absence is the correct answer, not a fallback: the browser's held version
+    // is still the current one, so remembering anything else would be the bug.
+    stubTenant({ topic: topicWire('ready'), drafts: [] });
+    const reads = vi.mocked(tenantFetch).getMockImplementation()!;
+    vi.mocked(tenantFetch).mockImplementation(async (path: string, auth: string, init) => {
+      if ((init as { method?: string }).method === 'PATCH') {
+        throw new Error(`tenant PATCH ${path} responded 403`);
+      }
+      return reads(path, auth, init);
+    });
+
+    const body = (await (await POST(post({ story: story() }))).json()) as Record<string, unknown>;
+
+    expect(body).toMatchObject({ ok: true, deduped: false });
+    expect(DISPATCH_TOPIC_VERSION_KEY in body).toBe(false);
+  });
+
+  it('reports nothing when the tenant serves no version at all', async () => {
+    // Pre-trail tenant builds omit it. The key must then be ABSENT rather than
+    // present-and-undefined, which `JSON.stringify` would drop anyway — asserted
+    // so a future refactor cannot start sending `null`.
+    stubTenant({ topic: topicWire('ready'), drafts: [], stampedVersion: null });
+
+    const body = (await (await POST(post({ story: story() }))).json()) as Record<string, unknown>;
+
+    expect(DISPATCH_TOPIC_VERSION_KEY in body).toBe(false);
+  });
+
+  it('reports nothing for a DEDUPED press, which never relayed and never stamped', async () => {
+    stubTenant({ topic: topicWire('ready'), drafts: [], stampedVersion: 31 });
+    await POST(post({ story: story() }));
+
+    const body = (await (await POST(post({ story: story() }))).json()) as Record<string, unknown>;
+
+    expect(body).toMatchObject({ ok: true, deduped: true });
+    expect(DISPATCH_TOPIC_VERSION_KEY in body).toBe(false);
+  });
+});
+
+describe('the webhook URL is EARNED, not assumed (the 2026-10-06 incident)', () => {
+  it('refuses to relay when no webhook is configured outside production', async () => {
+    // The default is the LIVE OGMC writer. A dev server, a preview, or a test
+    // harness that reaches it fires a real run against a real customer tenant —
+    // which is exactly what happened, from a topic that existed only on a
+    // laptop. Refusing is loud, local, and costs nothing.
+    vi.stubEnv('N8N_WRITER_WEBHOOK_URL', '');
+    stubTenant({ topic: topicWire('ready'), drafts: [] });
+
+    const res = await POST(post({ story: story() }));
+
+    expect(res.status).toBe(503);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('refuses BEFORE it reads the tenant or claims a run', async () => {
+    // Nothing after the refusal is useful, and a claim left behind would refuse
+    // the next press for 130 seconds over a relay that never happened.
+    vi.stubEnv('N8N_WRITER_WEBHOOK_URL', '   ');
+    stubTenant({ topic: topicWire('ready'), drafts: [] });
+
+    await POST(post({ story: story() }));
+
+    expect(tenantFetch).not.toHaveBeenCalled();
   });
 });
