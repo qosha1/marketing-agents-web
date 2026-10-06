@@ -45,20 +45,26 @@
  *
  * ── AND ONE THING IT DELIBERATELY DOES NOT FIX ─────────────────────────────
  *
- * Two people editing one record still overwrite each other (bd startsim-m7fdm.2);
- * the durable fix is the conditional-write epic startsim-jkkn7 and it is not
- * this bead. What this module DOES do is refuse to make the race worse: the
- * caller hands it the blob it just re-read from the server, not the one the page
- * loaded, so the window shrinks from "since this page opened" to "since the save
- * button was pressed". {@link topicEditData} reads the edit log out of THAT SAME
- * blob for the same reason — stamping a freshly-read blob with a stale log would
- * drop every entry somebody else added in between, which is m7fdm.2's own
- * failure mode newly minted by the fix for it.
+ * ── AND THE RACE IS NOW CLOSED, BY THE LAYER BELOW THIS ONE ────────────────
+ *
+ * This module used to say that two people editing one record still overwrite
+ * each other (bd startsim-m7fdm.2) and that it only NARROWED the window — the
+ * caller hands it the blob it just re-read, so the gap is "since Save was
+ * pressed" rather than "since the page opened". That window is now GUARDED:
+ * `updateEntity` asserts the version of the read the caller just made
+ * (lib/record-version.ts), so a write landing inside it is refused rather than
+ * applied (bd startsim-j19hf; server bd startsim-3c2wc). The narrowing still
+ * matters — it is what makes the refusal rare instead of routine.
+ *
+ * IT ALSO USED TO STAMP `data._edit_history`, read out of that same fresh blob
+ * so a stale log could not be written back. Both halves are gone: the trail is
+ * written server-side, one row per write, and a log that lived inside the blob
+ * the backend replaces wholesale was losing entries in exactly the collision it
+ * existed to record.
  */
 import { declaredBlob, writeData, type ResolvedReview } from '@startsimpli/ui/collection';
 
 import { readData } from '@/lib/board';
-import { readEditHistory, withEditStamp, type EditEntry } from '@/lib/edit-history';
 import type { EntityTypeDef } from '@/lib/foundry-api';
 
 /**
@@ -288,21 +294,17 @@ export function topicEditError(
  * it.
  *
  * @param source the record's `data` AS THE SERVER JUST RETURNED IT. Not the blob
- *   the page loaded — see the module header on startsim-m7fdm.2. The edit log is
- *   read from this same object, so a save never writes back a log older than the
- *   blob it is merging onto.
+ *   the page loaded — see the module header on startsim-m7fdm.2.
  * @param declaredNames `type.attributes.map(a => a.name)`, for the re-key pass
  * @param changed the fields the reviewer actually typed in — {@link topicEditChanges}.
  *   Everything else is left exactly as `source` had it.
- * @param by the editor's email; absent records the edit unattributed
  */
 export function topicEditData(
   source: Record<string, unknown> | undefined,
   declaredNames: Iterable<string>,
   changed: TopicEditField[],
   values: Record<string, string>,
-  by: string | null | undefined,
-): { data: Record<string, unknown>; history: EditEntry[] } {
+): Record<string, unknown> {
   let next: Record<string, unknown> = { ...(source ?? {}) };
   for (const f of changed) {
     // `writeData` removes every other spelling of the attribute and deletes it
@@ -311,6 +313,5 @@ export function topicEditData(
   }
   // Repairs a row already carrying `source1` on its way past, exactly as every
   // other whole-blob write in this app does.
-  next = declaredBlob(next, declaredNames);
-  return withEditStamp(next, readEditHistory(source), by);
+  return declaredBlob(next, declaredNames);
 }

@@ -20,6 +20,14 @@ export interface CollapsiblePanelProps {
   /** A small metric/badge rendered at the right of the header (e.g. "7/8"). */
   badge?: React.ReactNode;
   defaultOpen?: boolean;
+  /**
+   * CONTROLLED mode. Pass it and the host owns the open state — which the stale-
+   * save dialog needs: its safe default action is "See what changed", and that
+   * has to be able to open the history panel in the rail from outside it. Omit
+   * it and the panel keeps its own state exactly as before.
+   */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
   children: React.ReactNode;
   className?: string;
 }
@@ -28,10 +36,18 @@ export function CollapsiblePanel({
   title,
   badge,
   defaultOpen = false,
+  open: controlledOpen,
+  onOpenChange,
   children,
   className,
 }: CollapsiblePanelProps) {
-  const [open, setOpen] = React.useState(defaultOpen);
+  const [uncontrolledOpen, setUncontrolledOpen] = React.useState(defaultOpen);
+  const open = controlledOpen ?? uncontrolledOpen;
+  const setOpen = (next: (current: boolean) => boolean) => {
+    const value = next(open);
+    if (controlledOpen === undefined) setUncontrolledOpen(value);
+    onOpenChange?.(value);
+  };
   return (
     <div className={cn('overflow-hidden rounded-xl border border-border bg-card shadow-sm', className)}>
       <button

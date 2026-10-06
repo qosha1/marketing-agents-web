@@ -17,8 +17,16 @@
  */
 import { readScopeAccess, type ScopeAccess } from '@startsimpli/ui';
 import type { CollectionClient } from '@startsimpli/ui/collection';
+import {
+  preconditionFor,
+  type ConditionalWriteClient,
+  type ConditionalWriteOutcome,
+  type PreconditionSpelling,
+} from '@startsimpli/ui/history';
+import { ApiException } from '@startsimpli/api';
 
 import { api } from './api';
+import { heldVersion, rememberVersion, rememberVersions } from './record-version';
 
 // DRF PageNumberPagination envelope (matches UnifiedTable's page-number model).
 //
@@ -83,6 +91,18 @@ export interface EntityRecord {
   name: string;
   data: Record<string, unknown>;
   createdAt: string;
+  /**
+   * The row's revision count — READ-ONLY, and the token every conditional write
+   * asserts (bd startsim-3c2wc). 1-based and gapless; it reads `0` on a record
+   * that predates the revision trail, and 0 is a version the server accepts
+   * back, so `if (version)` is a bug that unguards exactly the oldest records.
+   *
+   * ABSENT on a tenant build that predates the trail, which is why nothing here
+   * requires it: see lib/record-version.ts for the fail-toward-unguarded
+   * posture. Sending it in a request body is IGNORED by the backend — the
+   * precondition spellings are `If-Match` and `expected_version`.
+   */
+  version?: number;
   /**
    * Who the backend recorded as the row's owner. A service credential looks like
    * `svc:n8n-ogmc`; a person is their central-auth user id. Every list/detail
@@ -216,10 +236,15 @@ function withFilters(path: string, filters: EntityFilters | undefined): string {
   return `${path}${path.includes('?') ? '&' : '?'}${qs}`;
 }
 
-export function listEntities(type: string, page = 1, filters?: EntityFilters) {
-  return api.client.get<Paginated<EntityRecord>>(withFilters('api/v1/entities', filters), {
-    params: { type, page },
-  });
+export async function listEntities(type: string, page = 1, filters?: EntityFilters) {
+  const res = await api.client.get<Paginated<EntityRecord>>(
+    withFilters('api/v1/entities', filters),
+    { params: { type, page } },
+  );
+  // Every row's version, so a write issued from a table, a board or a drawer
+  // asserts the version the reader was looking at — see lib/record-version.ts.
+  rememberVersions(res?.results);
+  return res;
 }
 
 /**
@@ -271,8 +296,10 @@ export async function fetchScopeAccess(type: string): Promise<ScopeProbe> {
 
 /** Fetch a single entity record by id. Path carries no trailing slash (the Next
  * rewrite adds it), matching the listEntities/updateEntity convention. */
-export function getEntity(id: number | string) {
-  return api.client.get<EntityRecord>(`api/v1/entities/${id}`);
+export async function getEntity(id: number | string) {
+  const record = await api.client.get<EntityRecord>(`api/v1/entities/${id}`);
+  rememberVersion(id, record);
+  return record;
 }
 
 export async function createEntity(input: {
@@ -283,7 +310,14 @@ export async function createEntity(input: {
   // Same re-keying as updateEntity — a record created through the app must not be
   // born with a renamed attribute. See the wire-safety section below.
   const data = await wireSafeData(input.data);
-  return api.client.post<EntityRecord>('api/v1/entities', { ...input, ...(data ? { data } : {}) });
+  const created = await api.client.post<EntityRecord>('api/v1/entities', {
+    ...input,
+    ...(data ? { data } : {}),
+  });
+  // No precondition on a CREATE — there is no prior version to assert — but the
+  // version it was born at is what guards the first write that follows it.
+  if (created?.id !== undefined && created?.id !== null) rememberVersion(created.id, created);
+  return created;
 }
 
 // ---- wire-safe data blobs (bd startsim-8hgmq.18) --------------------------
@@ -438,20 +472,173 @@ async function wireSafeData(
  * the way out — see {@link wireSafeData}. That is a repair as well as a guard: a
  * row already holding `source1` goes back as `source_1`.
  *
- * WHAT THIS DOES NOT FIX (bd startsim-m7fdm.2): sending the whole blob is still
- * last-write-wins over every field, so two reviewers on one draft still overwrite
- * each other's text. Key spelling and concurrency are separate defects; this
- * touches only the first.
+ * AND IT CARRIES A VERSION PRECONDITION (bd startsim-j19hf, server bd
+ * startsim-3c2wc). Sending the whole blob is still last-write-wins over every
+ * field — so the fix for two reviewers colliding (bd startsim-m7fdm.2) is not to
+ * stop sending the blob, it is to assert WHICH version of the row the blob was
+ * merged over and let the server refuse a stale one. The version comes from ONE
+ * source per request, never two: `opts.precondition` when the caller owns the
+ * guard (the draft page, through `useConditionalSave`), otherwise the version
+ * lib/record-version.ts last saw for this id. See {@link EntityWriteOptions}.
  */
 export async function updateEntity(
   id: number | string,
   input: { name?: string; data?: Record<string, unknown> },
+  opts?: EntityWriteOptions,
 ) {
   const data = await wireSafeData(input.data);
-  return api.client.patch<EntityRecord>(`api/v1/entities/${id}`, {
-    ...input,
-    ...(data ? { data } : {}),
-  });
+  const guard = preconditionOf(id, opts);
+  const saved = await api.client.patch<EntityRecord>(
+    `api/v1/entities/${id}`,
+    { ...input, ...(data ? { data } : {}), ...guard.body },
+    Object.keys(guard.headers).length > 0 ? { headers: guard.headers } : undefined,
+  );
+  // The response is the freshest version that exists, and it is what guards the
+  // NEXT save — which is what lets a 1,200 ms autosave stay guarded without a
+  // GET between every write.
+  rememberVersion(id, saved);
+  return saved;
+}
+
+/** Which spelling every write in this app sends.
+ *
+ *  `header` (`If-Match`) is the design default and leaves the request body
+ *  completely untouched, so there is no path by which a precondition can end up
+ *  stored on the record. It survives this app's route to Django — browser ->
+ *  Next rewrite -> tenant nginx -> DRF — which was verified by sending a
+ *  deliberately stale validator through the whole chain and getting a 412 rather
+ *  than a 200 (a 200 is what a stripped header looks like, and it is silent).
+ *  `body` is the fallback the server provides for a proxy that strips it. */
+const PRECONDITION_SPELLING: PreconditionSpelling = 'header';
+
+export interface EntityWriteOptions {
+  /**
+   * The precondition this write will carry, already built by the caller.
+   *
+   * SUPPLYING IT — EVEN EMPTY — MEANS THE CALLER OWNS THE GUARD, and the
+   * registry contributes nothing. That is the whole point: `preconditions.
+   * enforce` checks BOTH `If-Match` and `expected_version` and refuses if
+   * EITHER disagrees, so a request carrying a caller's validator beside a
+   * registry-derived one would refuse ITSELF with a 412 that looks exactly like
+   * a real conflict. One source per request, decided by this one `if`.
+   */
+  precondition?: {
+    headers?: Record<string, string>;
+    /** Merged at the TOP LEVEL of the body, never inside `data`. */
+    body?: Record<string, unknown>;
+  };
+}
+
+function preconditionOf(
+  id: number | string,
+  opts: EntityWriteOptions | undefined,
+): { headers: Record<string, string>; body: Record<string, unknown> } {
+  if (opts?.precondition) {
+    return { headers: opts.precondition.headers ?? {}, body: opts.precondition.body ?? {} };
+  }
+  const parts = preconditionFor(heldVersion(id), PRECONDITION_SPELLING);
+  return { headers: parts.headers, body: parts.body };
+}
+
+/**
+ * The `ConditionalWriteClient` `useConditionalSave` asks for, over ONE record.
+ *
+ * ── WHY THIS IS NOT EIGHT LINES OF `fetch` ──────────────────────────────────
+ *
+ * The hook's own documentation shows a plain `fetch` adapter, and it would be
+ * wrong here. Every write in this app has to pass through {@link wireSafeData}
+ * and through the shared client's recursive camelCase -> snake_case request
+ * transform: the blob a surface holds carries `sourceMeta` and `teamVerdict`,
+ * which only reach the tenant as `source_meta` and `team_verdict` because the
+ * client rewrites them. A `fetch` would send the camel spellings verbatim and
+ * mint a parallel set of undeclared attribute keys — the exact corruption class
+ * the wire-safety section above exists to stop, and one this repo has already
+ * had once. So the transport stays `api.client.patch`.
+ *
+ * ── AND THE PRICE OF THAT, WHICH IS THE PART TO READ ───────────────────────
+ *
+ * The shared client THROWS on a non-2xx and normalises the body away. For a
+ * plain DRF error (`{detail, …}`) `parseErrorResponse` keeps `detail` and
+ * `status` and DISCARDS every other key, so `current_version` — the one value
+ * the recovery depends on — never reaches the browser, and `detail` lands as a
+ * property of `ApiException` rather than inside any body the shared
+ * `parseStaleSaveRefusal` looks in. Handed the exception as-is it would read
+ * `{status: 412}` with neither half, the dialog would open naming nobody and
+ * `keepMine` would send NO precondition at all: an unguarded overwrite recorded
+ * `precondition: "none"`, so the trail would claim nobody checked.
+ *
+ * So a 412 is REBUILT into the shape the contract specifies, and the missing
+ * `current_version` is read back off the record. That is one extra request, on
+ * the conflict path only, and the design already accepts two there (the 412
+ * carries no identity by design, so the dialog reads `/revisions/` for the name
+ * regardless — bd startsim-j4kx6 §7).
+ *
+ * THE RE-READ IS NOT A RETRY. Nothing here adopts the version it finds; it is
+ * handed to the dialog, and only an explicit `keepMine` ever sends it. A blind
+ * retry at the current version is precisely the overwrite the 412 prevented.
+ */
+export function entityWriteClient(id: number | string): ConditionalWriteClient {
+  return {
+    write: async ({ body, headers }): Promise<ConditionalWriteOutcome> => {
+      // `body` is whatever the page handed `save()`, plus the hook's own
+      // precondition under the chosen spelling. Split the two apart so the
+      // record fields go through `updateEntity`'s re-keying and the precondition
+      // goes through verbatim as the caller-owned guard.
+      const { name, data, ...precondition } = body as {
+        name?: string;
+        data?: Record<string, unknown>;
+      } & Record<string, unknown>;
+      try {
+        const saved = await updateEntity(
+          id,
+          {
+            ...(name !== undefined ? { name } : {}),
+            ...(data !== undefined ? { data } : {}),
+          },
+          { precondition: { headers, body: precondition } },
+        );
+        return { status: 200, body: saved };
+      } catch (error) {
+        if (!(error instanceof ApiException) || error.status !== STALE_SAVE_HTTP_STATUS) throw error;
+        return {
+          status: STALE_SAVE_HTTP_STATUS,
+          body: {
+            // The server's own sentence names both versions and is safe to show.
+            detail: error.detail ?? error.message,
+            ...(await currentVersionOf(id)),
+          },
+        };
+      }
+    },
+  };
+}
+
+/** 412. Local rather than imported so this file does not depend on the shared
+ *  module for one integer it compares against an `ApiException.status`. */
+const STALE_SAVE_HTTP_STATUS = 412;
+
+/**
+ * `{current_version}` for the record, or `{}` when it cannot be read.
+ *
+ * `{}` IS A LEGITIMATE ANSWER AND MUST NOT THROW. A failure here happens while
+ * the app is already reporting a conflict, and losing the conflict because the
+ * follow-up read failed would put the reviewer back in the editor with no idea
+ * their save did not land. The dialog is built to be useful on `detail` alone.
+ *
+ * IT DELIBERATELY DOES NOT GO THROUGH {@link getEntity}, so the version it finds
+ * is NOT remembered. Recording it would let the registry adopt the version the
+ * refusal named, and the next unparameterised write on this id — a second click
+ * on a drawer's Save — would then succeed and perform exactly the overwrite the
+ * 412 just prevented. The guard has to stay refused until a read the USER asked
+ * for replaces the blob they are holding.
+ */
+async function currentVersionOf(id: number | string): Promise<{ current_version?: number }> {
+  try {
+    const record = await api.client.get<EntityRecord>(`api/v1/entities/${id}`);
+    return typeof record?.version === 'number' ? { current_version: record.version } : {};
+  } catch {
+    return {};
+  }
 }
 
 export function deleteEntity(id: number | string) {

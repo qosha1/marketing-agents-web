@@ -298,13 +298,16 @@ describe('TopicContextHeader editing', () => {
     expect(data.title).toBe('A new title');
   });
 
-  it('stamps the edit log so the draft page can say who touched the topic', async () => {
+  it('writes no edit log into the blob — the trail is the server\u2019s (bd startsim-j19hf)', async () => {
     const { data } = await saveAfter(() =>
       fireEvent.change(screen.getByDisplayValue('Qatar Market Entry Guide 2026'), {
         target: { value: 'A new title' },
       }),
     );
-    expect(data.EditHistory).toMatchObject([{ by: 'jurga@ogmc.example', saves: 1 }]);
+    // Neither spelling. A log inside the blob the backend replaces wholesale was
+    // losing entries in exactly the collision it existed to record, and
+    // `human_edits` then held the log itself against machine writes.
+    expect(Object.keys(data).filter((k) => /edit_?history/i.test(k))).toEqual([]);
   });
 
   it('refuses an empty title instead of deleting the attribute', async () => {

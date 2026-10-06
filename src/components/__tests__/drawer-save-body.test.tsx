@@ -1,16 +1,24 @@
 /**
- * AN EDIT MADE FROM THE RECORD DRAWER REACHES THE EDIT LOG (bd startsim-m7fdm.3).
+ * WHAT THE RECORD DRAWER'S "EDIT FIELDS" ACTUALLY SENDS.
  *
- * `data._edit_history` was stamped in ONE place — the draft review page's
- * `mergedData()`. A reviewer can change a headline or a status from the
- * /t/<type> table's "Edit fields" without ever opening /draft/<id>, and that edit
- * left no trace: the panel that exists to answer "who touched this draft" simply
- * did not know it had happened. It did not corrupt the log (the save spreads
- * `record.data`, so an existing log survived) — it just never extended it.
+ * This file was `drawer-edit-stamp.test.tsx` and pinned the opposite behaviour
+ * (bd startsim-m7fdm.3): the drawer stamped `data._edit_history` so an edit made
+ * from the /t/<type> table reached the log the draft page rendered. bd
+ * startsim-j19hf removed that log, so what has to be pinned now is its ABSENCE —
+ * and for a reason worth stating, because "we deleted a feature" is not one:
  *
- * A unit test over `withEditStamp` cannot see this. The defect was that the
- * drawer's save never CALLED anything of the kind, so the assertion has to be on
- * the body that actually leaves the component.
+ *  - the log rode inside the `data` blob, which the tenant PATCH REPLACES
+ *    wholesale, so two reviewers colliding lost log entries in exactly the
+ *    collision the log existed to record; and
+ *  - `_edit_history` itself appears in `human_edited` on the live rows that
+ *    carry it, so `guard_machine_write` held a stale LOG against a machine
+ *    write. A log that is also guarded content is a category error.
+ *
+ * The trail is server-side now (bd startsim-o1qib), one row per write.
+ *
+ * The third assertion here predates all of that and still earns its place: the
+ * drawer's save is an ADDITION to the blob, never a rewrite of it, and the way
+ * that breaks is a body that drops keys nothing on screen knew about.
  */
 import * as React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -18,7 +26,6 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { EntityRecord, EntityTypeDef } from '@/lib/foundry-api';
-import { EDIT_HISTORY_PATCH_KEY, type EditEntry } from '@/lib/edit-history';
 
 const saveEntity = vi.fn(async () => ({}) as EntityRecord);
 
@@ -26,9 +33,6 @@ vi.mock('@/lib/entity-cache', () => ({
   saveEntity: (...args: unknown[]) => saveEntity(...(args as [])),
   primeEntity: vi.fn(),
   entityKey: (id: unknown) => ['entity', String(id)],
-}));
-vi.mock('@startsimpli/auth', () => ({
-  useAuth: () => ({ user: { email: 'jurga@ogmc.example' } }),
 }));
 vi.mock('@/infrastructure/auth', () => ({ getRegisteredToken: () => null }));
 
@@ -44,13 +48,12 @@ const DRAFT_TYPE = {
   ],
 } as unknown as EntityTypeDef;
 
-/** A draft that has been edited once already, by someone else, days ago. */
-const EXISTING: EditEntry = {
-  by: 'malin@ogmc.example',
-  from: '2026-09-01T09:00:00.000Z',
-  at: '2026-09-01T09:04:00.000Z',
-  saves: 3,
-};
+/** A log a previous build of this app already wrote into a live row. bd
+ *  startsim-j19hf measured two of these on the live tenant and chose to LEAVE
+ *  them: clearing them is a whole-blob PATCH over customer records for no gain. */
+const STORED_LOG = [
+  { by: 'malin@ogmc.example', from: '2026-09-01T09:00:00.000Z', at: '2026-09-01T09:04:00.000Z', saves: 3 },
+];
 
 function record(data: Record<string, unknown>): EntityRecord {
   return { id: 'draft-1', entityType: 'draft', name: 'A draft', data } as unknown as EntityRecord;
@@ -84,28 +87,22 @@ beforeEach(() => {
 });
 
 describe('RecordEditFields save', () => {
-  it('stamps who edited and when', async () => {
+  it('writes no edit log of its own — neither spelling', async () => {
     const data = await saveWithEdit(record({ blog: 'body', seo: 'old title' }));
 
-    const log = data[EDIT_HISTORY_PATCH_KEY] as EditEntry[];
-    expect(log).toHaveLength(1);
-    expect(log[0]!.by).toBe('jurga@ogmc.example');
-    expect(log[0]!.saves).toBe(1);
-    expect(Date.parse(log[0]!.at)).not.toBeNaN();
+    expect(Object.keys(data).filter((k) => /edit_?history/i.test(k))).toEqual([]);
     // and the edit itself still lands
     expect(data.seo).toBe('a new title');
   });
 
-  it('extends an existing log rather than replacing it', async () => {
-    // The blob arrives camelised, which is the spelling the stamp writes back.
+  it('leaves a log a previous build already stored exactly as it found it', async () => {
     const data = await saveWithEdit(
-      record({ blog: 'body', seo: 'old title', [EDIT_HISTORY_PATCH_KEY]: [EXISTING] }),
+      record({ blog: 'body', seo: 'old title', EditHistory: STORED_LOG }),
     );
 
-    const log = data[EDIT_HISTORY_PATCH_KEY] as EditEntry[];
-    expect(log).toHaveLength(2);
-    expect(log[0]).toEqual(EXISTING);
-    expect(log[1]!.by).toBe('jurga@ogmc.example');
+    // Not extended, not dropped, not re-spelled. It is somebody else's old data
+    // now, and this write has no opinion about it.
+    expect(data.EditHistory).toEqual(STORED_LOG);
   });
 
   it('leaves undeclared blob keys untouched — this is an addition, not a rewrite', async () => {

@@ -27,12 +27,17 @@
  *   • Notes — a small ReviewNotes affordance (section notes still feed the revise
  *     loop). TODO 768w.16: true inline paragraph pins need an upstream anchor model.
  *   • Revision history — lineage chips + on-demand blog diff, unchanged.
- *   • Edit history — WHO touched this draft and WHEN (bd startsim-j9rxf). The
- *     sibling of the "Created by" column: that one says where the draft came
- *     from, this one says who has been in it since. Deliberately NOT a diff —
- *     see lib/edit-history.ts, and bd startsim-b3twa for the tracked-changes
- *     feature the customer deferred. It renders through the SHARED
- *     ActivityTimeline / ActorIdentity primitives rather than a second timeline.
+ *   • History — WHO changed WHICH FIELD, from what to what, and whether a
+ *     machine did it (bd startsim-j19hf). This is the SHARED
+ *     `RecordHistoryPanel` from `@startsimpli/ui/history` over the server-side
+ *     revision trail (bd startsim-o1qib), mounted with this app's authed reader.
+ *     It replaced a fork-local "Edit history" panel that rendered
+ *     `data._edit_history` — a log this app wrote INSIDE the guarded content
+ *     blob, which therefore lost entries exactly when two reviewers collided
+ *     (the thing it existed to record) and which `human_edits` then held against
+ *     machine writes. Nothing here folds, diffs or decides an actor kind: the
+ *     shared panel owns all three, including the three-state `actor_kind` whose
+ *     `unknown` must never read as "a machine did this".
  *
  * Presentational — all state + persistence stay in the draft page. Fork-local.
  */
@@ -40,7 +45,6 @@ import * as React from 'react';
 import Link from 'next/link';
 
 import {
-  ActivityTimeline,
   ValidationChecklist,
   ReviewNotes,
   DiffViewer,
@@ -53,14 +57,14 @@ import {
   type ReviewNote,
   type CheckStatus,
   type ReviewDimension,
-  type ActivityTimelineItem,
 } from '@startsimpli/ui';
+
+import { RecordHistoryPanel, type RevisionClient } from '@startsimpli/ui/history';
 
 import { cn } from '@startsimpli/ui/utils';
 import type { EntityRecord } from '@/lib/foundry-api';
 import type { IssueStop } from '@/lib/issue-jump';
 import { DRAFT_DECISIONS, draftDecisionLabel } from '@/lib/review-vocabulary';
-import { editSummary, type EditEntry } from '@/lib/edit-history';
 import { CollapsiblePanel, FLATTEN_CARD } from './CollapsiblePanel';
 
 type Call = NonNullable<ReviewScore['verdict']>;
@@ -104,11 +108,15 @@ export interface QualityRailProps {
   noteSections: string[];
 
   /**
-   * Who has edited this draft and when, newest LAST (bd startsim-j9rxf).
-   * Already collapsed by lib/edit-history — one entry per sitting, not per
-   * autosave — so this renders it as given and folds nothing itself.
+   * The authed reader for THIS draft's revision trail (bd startsim-j19hf). The
+   * panel pages it server-side and folds the autosave bursts itself — nothing
+   * about the trail is held in this component or in the page above it.
    */
-  editHistory: EditEntry[];
+  revisions: RevisionClient;
+  /** Whether the history panel is open. CONTROLLED, because the stale-save
+   *  dialog's safe default action has to be able to open it from outside. */
+  historyOpen: boolean;
+  onHistoryOpenChange: (open: boolean) => void;
 
   // Revision history
   chain: EntityRecord[];
@@ -204,7 +212,9 @@ export function QualityRail(props: QualityRailProps) {
     noteSection,
     onNoteSectionChange,
     noteSections,
-    editHistory,
+    revisions,
+    historyOpen,
+    onHistoryOpenChange,
     chain,
     currentId,
     parentId,
@@ -414,8 +424,41 @@ export function QualityRail(props: QualityRailProps) {
         </div>
       </CollapsiblePanel>
 
-      {/* Edit history — who touched this draft and when (bd startsim-j9rxf). */}
-      <EditHistoryPanel entries={editHistory} />
+      {/* History — who changed which field, from what to what (bd startsim-j19hf).
+          CONTROLLED so the stale-save dialog can open it; `defaultOpen` would
+          leave the dialog's "See what changed" with nothing to reveal. */}
+      <CollapsiblePanel title="History" open={historyOpen} onOpenChange={onHistoryOpenChange}>
+        {/* Mounted only while open: the panel fetches on mount and this rail has
+            eight panels, so an always-mounted trail would cost a request per
+            draft opened for a card nobody expanded. */}
+        {historyOpen ? (
+          <RecordHistoryPanel
+            client={revisions}
+            queryKey={['entity', currentId, 'revisions']}
+            // The rail's own card and heading supply the chrome, so the panel's
+            // title is hidden rather than repeated. Its DESCRIPTION stays: it is
+            // what tells the reader this trail is per-field, not per-save.
+            // `incompleteNote` is deliberately left at the shared default — a
+            // fork must not decide it looks more complete than the trail is.
+            // `px-0` on both: the CollapsiblePanel already supplies the gutter,
+            // and the panel's own would cost 40px of a ~370px rail that the
+            // per-field before/after columns need. They are still tight here —
+            // the shared panel sizes that split on the VIEWPORT (`sm:flex-nowrap`)
+            // rather than on its container, so it reads as a full-width page even
+            // inside a narrow rail. Filed upstream rather than hacked around: a
+            // fork reaching into another component's utility classes would break
+            // silently on its next publish.
+            classNames={{
+              root: FLATTEN_CARD,
+              header: 'border-b-0 px-0 pb-3 pt-0',
+              title: 'hidden',
+              body: 'max-h-[32rem] overflow-y-auto px-0 py-2',
+              notice: 'border-b border-border px-0 py-2 text-xs text-muted-foreground',
+              countLine: 'border-t border-border px-0 py-2 text-xs text-muted-foreground',
+            }}
+          />
+        ) : null}
+      </CollapsiblePanel>
 
       {/* Revision history — lineage chips + on-demand blog diff. */}
       {hasHistory ? (
@@ -729,70 +772,3 @@ function ScoreAdjust({
   );
 }
 
-/**
- * "Who has been in this draft" — the interim accountability log the 2026-09-08
- * call asked for (bd startsim-j9rxf).
- *
- * IT SAYS WHO AND WHEN. IT DOES NOT SAY WHAT. That is the whole scope, decided on
- * the call: real track changes is high-risk work made riskier by the legal content
- * heading for this pipeline, so it was deferred whole (bd startsim-b3twa) rather
- * than half-built here. Do not add a diff to this panel — the "Revision history"
- * panel directly below already owns the AI-revision diff, and conflating the two
- * is exactly how the deferred feature arrives by accident.
- *
- * The rows come in oldest-first (append order) and are shown newest-first, because
- * "who touched this last" is the question a reviewer actually opens this for.
- *
- * EVERY ENTRY SAYS IT IS A COLLAPSE. The editor autosaves on a 1.2s debounce, so a
- * bare timestamp over a sitting would claim a precision it does not have; the
- * detail line carries the save count and the span (see `editSummary`).
- */
-function EditHistoryPanel({ entries }: { entries: EditEntry[] }) {
-  // Shared primitives, not a second timeline (rule 9): `ActivityTimeline` renders
-  // the row and `ActorIdentity` inside it renders the person — the same way every
-  // other attributed surface in the monorepo does. The email is the identity by
-  // design (whoami returns no display name; a `sub` UUID names nobody a reader can
-  // resolve) — see lib/edit-history.ts.
-  const items: ActivityTimelineItem[] = React.useMemo(
-    () =>
-      [...entries].reverse().map((e, i) => ({
-        id: `${e.from}-${i}`,
-        type: 'edit',
-        title: 'Edited',
-        occurredAt: e.at,
-        tone: 'muted' as const,
-        // Absent `by` is "not recorded", never a person with a blank name —
-        // ActorIdentity renders nothing at all rather than a dangling "by".
-        actor: e.by ? { email: e.by } : undefined,
-        detail: editSummary(e),
-      })),
-    [entries],
-  );
-
-  const last = entries[entries.length - 1];
-  return (
-    <CollapsiblePanel
-      title="Edit history"
-      badge={
-        <span className="font-mono text-xs text-neutral-500">
-          {entries.length || ''}
-        </span>
-      }
-    >
-      <div className="space-y-2">
-        <ActivityTimeline
-          activities={items}
-          className="space-y-3"
-          emptyTitle="No edits yet"
-          emptyDescription="Nobody has changed this draft since it was written."
-        />
-        {last ? (
-          <p className="text-[11px] text-neutral-400">
-            Consecutive saves by the same person are shown as one entry. This log
-            records who and when, not what changed.
-          </p>
-        ) : null}
-      </div>
-    </CollapsiblePanel>
-  );
-}

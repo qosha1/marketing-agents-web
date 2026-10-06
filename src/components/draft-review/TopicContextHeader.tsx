@@ -70,7 +70,6 @@ import { resolveReviewConfig } from '@startsimpli/ui/collection';
 import type { EntityRecord, EntityTypeDef } from '@startsimpli/ui/collection';
 import { useQueryClient } from '@tanstack/react-query';
 import { Button, Input, Label, Textarea, notify } from '@startsimpli/ui';
-import { useAuth } from '@startsimpli/auth';
 
 import { readData } from '@/lib/board';
 import { contentCategoryLabel } from '@/lib/content';
@@ -117,10 +116,6 @@ export function TopicContextHeader({
   const [open, setOpen] = useState(defaultOpen);
   const cfg = useMemo(() => resolveReviewConfig(type ?? undefined, TOPIC_REVIEW_CONFIG), [type]);
   const qc = useQueryClient();
-  // WHO IS EDITING — the email, for the same reason lib/edit-history.ts gives:
-  // whoami returns no display name, and a `sub` UUID answers "who?" with a
-  // string no reader can resolve.
-  const { user } = useAuth();
 
   const data = topic?.data;
   const title = str(data, cfg.titleAttr) || topic?.name || '';
@@ -165,16 +160,19 @@ export function TopicContextHeader({
       // tenant REPLACES `data` on a PATCH, so a whole-blob write built on the
       // blob this page loaded would undo every change made to the topic since —
       // including ones this form does not even show. It does not FIX the race
-      // (startsim-jkkn7 owns the conditional write); it narrows it from "since
-      // this page opened" to "since Save was pressed". `topicEditData` reads the
-      // edit log out of this same response for the same reason.
+      // it narrows it from "since this page opened" to "since Save was pressed".
+      //
+      // AND THAT REMAINING WINDOW IS NOW GUARDED (bd startsim-j19hf). This read
+      // is what tells lib/record-version.ts which version to assert, so a write
+      // that lands inside it is REFUSED with the server's own sentence rather
+      // than silently applied. The re-read is still worth making: it is what
+      // keeps the refusal rare.
       const fresh = await getEntity(topic.id);
-      const { data: body } = topicEditData(
+      const body = topicEditData(
         fresh.data,
         type.attributes.map((a) => a.name),
         changes,
         values,
-        user?.email,
       );
       // THE TITLE THE TABLE SHOWS IS `record.name`, not `data.title` — the
       // content spine folds title/subtitle/angle into one cell keyed off the
