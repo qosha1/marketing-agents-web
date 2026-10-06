@@ -13,6 +13,14 @@
       "$note": "admin, because OrgMembersView/OrgDirectoryView carry a hard `required_role = \"admin\"` floor — a member-role dev would 403 the roster and assignee pickers while every other page worked."
     },
     {
+      "email": "jurga@marketing-agents.local",
+      "password": "localdev",
+      "role": "admin",
+      "first_name": "Jurga",
+      "last_name": "Second",
+      "$note": "A SECOND ADMIN, so two DIFFERENT people can hold one draft open at once. With a single account the stale-save dialog names the signed-in user's own address on both sides, and \"it named the other editor\" is indistinguishable from \"it named you\" — which is the one thing bd startsim-v839u exists to check. Admin and not viewer, for the reason the first entry gives. Never first in this list: the sign-in page pre-fills whichever user is."
+    },
+    {
       "email": "viewer@marketing-agents.local",
       "password": "localdev",
       "role": "viewer",
