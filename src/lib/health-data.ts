@@ -213,7 +213,7 @@ interface QueueDef {
   /** True when `match` needs the schema's intake stage to mean anything. */
   needsIntake: boolean;
   match: (record: EntityRecord, intake: string) => boolean;
-  meta: (matched: EntityRecord[], intake: string) => string;
+  meta: (matched: EntityRecord[], intake: string, now?: number) => string;
   /** Where the row sends the reader. */
   href: (id: string) => string;
 }
@@ -258,9 +258,9 @@ const QUEUE_ROWS: QueueDef[] = [
     // the question, so the row is dropped rather than reported as 0.
     needsIntake: true,
     match: (draft, declared) => awaitsDraftDecision(draft, declared.split(',')),
-    meta: (matched) =>
+    meta: (matched, _declared, now) =>
       `Written, nobody has approved, rejected or shelved them (${statusBreakdown(matched)}). ` +
-      `The oldest has been waiting ${oldestWaitingDays(matched)}. ` +
+      `The oldest has been waiting ${oldestWaitingDays(matched, now)}. ` +
       'The Drafts tab opens on the last 7 days, so these drop out of it rather than into view.',
     href: draftQueueHref,
   },
@@ -460,6 +460,15 @@ export function draftQueue(
   type: EntityTypeDef | undefined | null,
   drafts: EntityRecord[],
   operatorSubs: string[],
+  /**
+   * The instant the age line is measured against — the widget passes
+   * react-query's `dataUpdatedAt`, so the verdict is judged against when the
+   * data was FETCHED rather than against a `Date.now()` read during render. The
+   * same rule `ingestionOverdue` follows, and for the same reason: a figure read
+   * at render time drifts from the records it describes and makes the function
+   * impure.
+   */
+  now: number = Date.now(),
 ): QueueRow[] {
   const declared = declaredUndecidedKey(type);
   const rows: QueueRow[] = [];
@@ -475,7 +484,7 @@ export function draftQueue(
       id: def.id,
       count: matched.length,
       label: `${def.title} — ${plural(matched.length, def.noun)}`,
-      meta: def.meta(matched, declared ?? ''),
+      meta: def.meta(matched, declared ?? '', now),
       href: def.href(def.id),
       tone: 'warn',
     });

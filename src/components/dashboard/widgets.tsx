@@ -276,7 +276,9 @@ export function AttentionWidget({ title = 'What needs a human' }: { title?: stri
   const subs = membersQuery.data ? operatorSubs(normalizeMembers(membersQuery.data)) : [];
   const rows = [
     ...topicQueue(topicType, topicsQuery.data ?? []),
-    ...draftQueue(draftType, draftsQuery.data ?? [], subs),
+    // `dataUpdatedAt`, not Date.now(): the age line is judged against when the
+    // drafts were fetched, the same rule IngestionWidget follows.
+    ...draftQueue(draftType, draftsQuery.data ?? [], subs, draftsQuery.dataUpdatedAt),
   ];
   const waiting = queueTotal(rows);
 
