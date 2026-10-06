@@ -41,6 +41,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/lib/tenant-fetch', () => ({ tenantFetch: vi.fn() }));
 
+import { DISPATCH_STAMP_ATTR } from '@/lib/dispatch-stamp';
+import { APPROVAL_TRIGGER, GENERATE_BUTTON_TRIGGER } from '@/lib/draft-origin';
 import { resetGenerateClaims } from '@/lib/generate-claim';
 import { tenantFetch } from '@/lib/tenant-fetch';
 import { POST } from '../route';
@@ -503,5 +505,144 @@ describe('the scope the writer stamps (bd startsim-0r7ru)', () => {
     const body = JSON.parse(String(init.body)) as Record<string, unknown>;
     expect('scope_path' in body).toBe(false);
     expect('scopePath' in body).toBe(false);
+  });
+});
+
+describe('which act the relay names (bd startsim-m7fdm.19)', () => {
+  /** The relayed webhook body. */
+  function relayed(): Record<string, unknown> {
+    const [, init] = vi.mocked(global.fetch).mock.calls[0] as [string, RequestInit];
+    return JSON.parse(String(init.body)) as Record<string, unknown>;
+  }
+
+  it('relays topic_approved when the approval dispatched it', async () => {
+    // THE WHOLE POINT OF ACCEPTING THE FIELD. The writer stamps `trigger` as
+    // `data._trigger` and `lib/draft-origin.ts` renders it in the "Created by"
+    // column; a dispatch that reused `generate_button` would make every
+    // auto-written draft claim somebody pressed a button, undoing that column.
+    stubTenant({ topic: topicWire('ready'), drafts: [] });
+
+    const res = await POST(post({ story: story(), trigger: APPROVAL_TRIGGER }));
+
+    expect(res.status).toBe(202);
+    expect(relayed()).toMatchObject({ trigger: 'topic_approved', triggered_by: CALLER_EMAIL });
+  });
+
+  it('still resolves the IDENTITY from the bearer, never from the body', async () => {
+    // The split that makes accepting a body field honest: the LABEL is the
+    // caller's to name, the PERSON is not. A tab that could name the person
+    // could attribute a draft to somebody else.
+    stubTenant({ topic: topicWire('ready'), drafts: [] });
+
+    await POST(post({ story: story(), trigger: APPROVAL_TRIGGER, triggered_by: 'someone@else.test' }));
+
+    expect(relayed()).toMatchObject({ triggered_by: CALLER_EMAIL });
+  });
+
+  it('defaults to generate_button when the body says nothing — the drawer’s POST is unchanged', async () => {
+    stubTenant({ topic: topicWire('ready'), drafts: [] });
+
+    await POST(post({ story: story() }));
+
+    expect(relayed()).toMatchObject({ trigger: GENERATE_BUTTON_TRIGGER });
+  });
+
+  it('refuses to relay a trigger it does not recognise, including "schedule"', async () => {
+    // An unvetted string would let a tab write arbitrary text into a column
+    // every reviewer reads — and `schedule` specifically would have an app-driven
+    // draft claim the unattended poller wrote it. The poller calls the webhook
+    // directly and never comes through here.
+    for (const claimed of ['schedule', 'topic_approved ', 'whatever', 42, { a: 1 }]) {
+      vi.mocked(global.fetch).mockClear();
+      resetGenerateClaims();
+      stubTenant({ topic: topicWire('ready'), drafts: [] });
+
+      const res = await POST(post({ story: story(), trigger: claimed }));
+
+      expect(res.status).toBe(202);
+      expect(relayed()).toMatchObject({ trigger: GENERATE_BUTTON_TRIGGER });
+    }
+  });
+});
+
+describe('telling the n8n poll a writer is running (bd startsim-m7fdm.19, constraint 4)', () => {
+  /** Every PATCH the route made against the tenant. */
+  function patches() {
+    return vi
+      .mocked(tenantFetch)
+      .mock.calls.filter(([, , init]) => (init as { method?: string } | undefined)?.method === 'PATCH');
+  }
+
+  it('stamps the topic AFTER the webhook accepted, so the poll skips it', async () => {
+    // The poll's dedup is "ready, and no draft carries this topic_ref" — correct,
+    // and blind for the whole length of a writer run, because the drafts it looks
+    // for do not exist yet. The stamp is the fact it is missing.
+    stubTenant({ topic: topicWire('ready'), drafts: [] });
+
+    const res = await POST(post({ story: story() }));
+
+    expect(res.status).toBe(202);
+    expect(patches()).toHaveLength(1);
+    const [path, , init] = patches()[0] as [string, string, { body?: { data?: Record<string, unknown> } }];
+    expect(path).toBe(`entities/${TOPIC_ID}`);
+    const stamp = init.body?.data?.[DISPATCH_STAMP_ATTR];
+    expect(typeof stamp).toBe('string');
+    expect(Date.parse(String(stamp))).toBeGreaterThan(0);
+  });
+
+  it('KEEPS the rest of the blob — the tenant PATCH replaces `data` wholesale', async () => {
+    // A body carrying only the stamp would empty the customer's topic.
+    stubTenant({
+      topic: { ...topicWire('ready'), data: { status: 'ready', title: 'Qatar customs', market: 'UAE' } },
+      drafts: [],
+    });
+
+    await POST(post({ story: story() }));
+
+    const [, , init] = patches()[0] as [string, string, { body?: { data?: Record<string, unknown> } }];
+    expect(init.body?.data).toMatchObject({ status: 'ready', title: 'Qatar customs', market: 'UAE' });
+  });
+
+  it('is stamped for the BUTTON too, not just for an approval', async () => {
+    // The retry is the press most likely to collide with the poll: a retry is by
+    // definition a `ready` topic with no draft, which is exactly what
+    // `Pick Unwritten Ready` selects on.
+    stubTenant({ topic: topicWire('ready'), drafts: [] });
+
+    await POST(post({ story: story(), trigger: GENERATE_BUTTON_TRIGGER }));
+
+    expect(patches()).toHaveLength(1);
+  });
+
+  it('never stamps a relay that did not happen', async () => {
+    stubTenant({ topic: topicWire('suggested') });
+    expect((await POST(post({ story: story() }))).status).toBe(403);
+    expect(patches()).toHaveLength(0);
+
+    resetGenerateClaims();
+    vi.mocked(tenantFetch).mockClear();
+    stubTenant({ topic: topicWire('ready'), drafts: [] });
+    global.fetch = vi.fn(async () => new Response('no', { status: 500 })) as unknown as typeof fetch;
+    expect((await POST(post({ story: story() }))).status).toBe(502);
+    expect(patches()).toHaveLength(0);
+  });
+
+  it('STILL answers 202 when the stamp write fails', async () => {
+    // By then the writer is already running. A 502 here would make the drawer
+    // end its run and the reviewer press the button again — manufacturing the
+    // duplicate the stamp exists to prevent.
+    stubTenant({ topic: topicWire('ready'), drafts: [] });
+    const reads = vi.mocked(tenantFetch).getMockImplementation()!;
+    vi.mocked(tenantFetch).mockImplementation(async (path: string, auth: string, init) => {
+      if ((init as { method?: string }).method === 'PATCH') {
+        throw new Error(`tenant PATCH ${path} responded 403`);
+      }
+      return reads(path, auth, init);
+    });
+
+    const res = await POST(post({ story: story() }));
+
+    expect(res.status).toBe(202);
+    expect(await res.json()).toMatchObject({ ok: true, deduped: false });
   });
 });

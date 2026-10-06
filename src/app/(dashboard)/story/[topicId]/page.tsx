@@ -38,12 +38,27 @@
  *                          absence as fact is the failure this page exists to
  *                          avoid, so it does not: it offers the drafts table.
  *
- * THIS PAGE DOES NOT START THE WRITER. startsim-rc92e owns that, and it has real
- * collisions to settle first (the n8n poll already auto-writes `ready` topics,
- * so app-side auto-fire races it; and the draft's `_trigger` provenance has to
- * stop claiming somebody pressed a button). Until then the existing gated
- * "Generate drafts" control is right here on the landing page, so the flow is
- * complete today without pre-empting that decision.
+ * THIS PAGE STILL DOES NOT START THE WRITER — THE APPROVAL DOES, AND IT ALREADY
+ * HAS BY THE TIME THIS RENDERS (bd startsim-m7fdm.19, which measured and replaced
+ * startsim-rc92e). The dispatch hangs off the approve TRANSITION on the surface
+ * the reviewer clicked, in `lib/approve-dispatch.ts`, and it claims the run in
+ * `lib/generate-run.ts` BEFORE navigating here. So `TopicDrafts` below seeds
+ * `generating` from that store and this page opens on "Generating… (~2 min)" with
+ * the Generate button already disabled, rather than on an enabled button that
+ * invites the second press this whole bead is about.
+ *
+ * WHY THE DISPATCH IS NOT HERE, now that there is one. An effect on this page
+ * would fire on every VISIT, not on every approval: re-opening a story, the Back
+ * button, a refresh mid-wait and the auto-step into a lone draft are all mounts,
+ * and none of them is a reviewer asking for a draft. The transition is the act;
+ * this page is where the act lands. Keeping them apart is also what lets the
+ * board and the table dispatch without this route being involved at all.
+ *
+ * The gated "Generate drafts" control stays exactly where it was. It is the retry
+ * path for a dispatch that failed, and the three collisions rc92e named are
+ * settled rather than skipped: the trigger is `topic_approved`
+ * (`lib/draft-origin.ts` renders it), the 6-hourly poll stays as the safety net,
+ * and the duplicate it could cause is handled by `lib/dispatch-stamp.ts`.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';

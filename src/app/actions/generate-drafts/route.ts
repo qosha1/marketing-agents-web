@@ -38,6 +38,21 @@
  * "Created by" column, and the difference between a draft that says "AI writer"
  * and one that says who asked for it.
  *
+ * TWO CALLERS NOW, SO `trigger` COMES FROM THE BODY — ALLOWLISTED
+ * (bd startsim-m7fdm.19). Approving a topic dispatches the writer with no second
+ * press, and a draft written that way must not claim somebody pressed a button:
+ * that would undo the "Created by" column three weeks after it was built to
+ * answer exactly this question. So the act is the caller's to name.
+ *
+ * THE SPLIT THAT MAKES ACCEPTING A BODY FIELD HONEST. `trigger` is a LABEL and
+ * `triggered_by` is an IDENTITY, and only one of them is worth defending. The
+ * identity is still resolved HERE, from the bearer, so a tab cannot attribute a
+ * draft to somebody else. The label is cosmetic by comparison — the worst a
+ * signed-in member can do with it is mis-describe their own act — so it is taken
+ * from the body and then checked against the vocabulary `draft-origin.ts`
+ * renders, rather than relayed verbatim. An unvetted string would let a tab
+ * write arbitrary text into a column every reviewer reads.
+ *
  * THE IDENTITY IS THE CALLER'S EMAIL, and the reason is not really a preference.
  * `whoami` returns `{sub, email, companyId, orgId, role}` — there is no display
  * name to choose, so the choice is email or `sub`, and `sub`
@@ -72,6 +87,22 @@
  * way, so the honest answer is "accepted", and a refusal would make the drawer
  * throw, end its own run and stop polling for drafts that are about to land.
  *
+ * AND ONE WRITER PER TOPIC ACROSS THE POLL (bd startsim-m7fdm.19). The claim
+ * above lives in this task's memory, which the n8n poll cannot read — and the
+ * poll's own dedup ("ready, and no draft carries this topic_ref") is blind for
+ * the whole length of a writer run, because the drafts it looks for do not exist
+ * yet. So a relay that succeeds also STAMPS the topic, which is the one fact the
+ * poll is missing. `lib/dispatch-stamp.ts` carries the argument for paying a
+ * write here rather than leaning on the record's own `updated_at`, why the stamp
+ * expires, and why nothing in this app refuses a dispatch on it. The poll's half
+ * of it is a one-line `continue` in n8n and is not in this repo.
+ *
+ * THE STAMP IS NEVER A REASON TO FAIL THE RELAY. By the time it is written the
+ * writer is already running, so answering 502 because a bookkeeping PATCH failed
+ * would make the drawer end its run and the reviewer press the button again —
+ * manufacturing the duplicate this is here to prevent. It has its own try/catch
+ * for the same reason `resolveCaller` does.
+ *
  * PATH NOTE: this handler lives at /actions/* NOT /api/* on purpose. In a deployed
  * tenant, nginx routes every /api/* request to the Django backend (which has no
  * such route → 404) before Next ever sees it; only non-/api paths reach the Next
@@ -80,6 +111,8 @@
  */
 import { NextResponse } from 'next/server';
 
+import { DISPATCH_STAMP_ATTR, withDispatchStamp } from '@/lib/dispatch-stamp';
+import { APPROVAL_TRIGGER, GENERATE_BUTTON_TRIGGER } from '@/lib/draft-origin';
 import { claimGenerateRun, releaseGenerateClaim } from '@/lib/generate-claim';
 import { recordScopePath, SCOPE_PATH_ATTR } from '@/lib/scope';
 import { tenantFetch } from '@/lib/tenant-fetch';
@@ -89,6 +122,34 @@ export const dynamic = 'force-dynamic';
 
 const DEFAULT_WEBHOOK_URL =
   'https://debugg.app.n8n.cloud/webhook/ogmc-generate-drafts-7h3k9x2q';
+
+/**
+ * The `trigger` this route is willing to relay, from what the caller claims.
+ *
+ * ABSENT MEANS `generate_button`, which is exactly what this route hardcoded
+ * before it had a second caller — so the drawer's existing `{ story }` POST is
+ * unchanged by this.
+ *
+ * AN UNRECOGNISED VALUE ALSO MEANS `generate_button`, not a 400 and not a
+ * pass-through. The two honest readings of an unknown string are "a caller we
+ * have not met" and "a tab making something up", and this route cannot tell them
+ * apart — so it falls back on the one value that cannot be a NEW kind of wrong
+ * (a POST here that is not an approval is a button press; the button is the only
+ * other caller) and LOGS the string, because a caller added later that quietly
+ * gets relabelled is a bug somebody has to be able to find.
+ *
+ * `schedule` is deliberately NOT accepted: the 6-hourly poller calls the webhook
+ * directly and never comes through here, so the only way that word could arrive
+ * is a caller claiming to be an automation it is not.
+ */
+function allowedTrigger(claimed: unknown): string {
+  if (claimed === undefined || claimed === null || claimed === '') return GENERATE_BUTTON_TRIGGER;
+  if (claimed === APPROVAL_TRIGGER || claimed === GENERATE_BUTTON_TRIGGER) return claimed;
+  console.warn('[generate-drafts] unrecognised trigger, relaying as a button press', {
+    claimed: typeof claimed === 'string' ? claimed.slice(0, 64) : typeof claimed,
+  });
+  return GENERATE_BUTTON_TRIGGER;
+}
 
 /**
  * Name the person behind this bearer, or nobody.
@@ -126,10 +187,12 @@ export async function POST(request: Request) {
   }
 
   let story: Record<string, unknown> | undefined;
+  let trigger: string = GENERATE_BUTTON_TRIGGER;
   try {
-    const body = (await request.json()) as { story?: unknown };
+    const body = (await request.json()) as { story?: unknown; trigger?: unknown };
     const candidate = body?.story;
     story = candidate && typeof candidate === 'object' ? (candidate as Record<string, unknown>) : undefined;
+    trigger = allowedTrigger(body?.trigger);
   } catch {
     return NextResponse.json({ error: 'Invalid JSON body.' }, { status: 400 });
   }
@@ -211,10 +274,11 @@ export async function POST(request: Request) {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         ...relayed,
-        // Explicit, though the webhook defaults to it: the caller that knows it
-        // is a button press should say so, and a default is a place a future
-        // caller can be silently wrong about.
-        trigger: 'generate_button',
+        // Explicit, though the webhook defaults to it: the caller that knows
+        // WHICH act this was should say so, and a default is a place a future
+        // caller can be silently wrong about. Allowlisted above — this is never
+        // the request's string.
+        trigger,
         ...(triggeredBy ? { triggered_by: triggeredBy } : {}),
         ...(scopePath ? { [SCOPE_PATH_ATTR]: scopePath } : {}),
       }),
@@ -226,6 +290,31 @@ export async function POST(request: Request) {
         { error: `Writer webhook responded ${res.status}.` },
         { status: 502 },
       );
+    }
+    // THE WRITER IS RUNNING. Tell the poll, so its next tick does not start a
+    // second one for the same topic (bd startsim-m7fdm.19). Written for BOTH
+    // callers, not just approvals: the manual retry is the press most likely to
+    // collide, because a retry is by definition a `ready` topic with no draft —
+    // the exact rows `Pick Unwritten Ready` selects.
+    //
+    // The blob comes from the topic this route already read to gate the press,
+    // so there is no extra GET; it is a read-modify-write because the tenant's
+    // PATCH REPLACES `data`. Server-side there is no snake→camel transform (see
+    // `tenant-fetch.ts`), so the stored spelling is written directly.
+    try {
+      await tenantFetch(`entities/${encodeURIComponent(String(topic.id))}`, auth, {
+        method: 'PATCH',
+        body: { data: withDispatchStamp(topic.data, Date.now()) },
+      });
+    } catch (error) {
+      // Logged and swallowed. The consequence of losing this is bounded and
+      // visible: the poll may dispatch this one topic a second time within the
+      // writer's window, which is the behaviour that existed before the stamp.
+      console.warn('[generate-drafts] could not stamp the dispatch', {
+        topicRef,
+        attr: DISPATCH_STAMP_ATTR,
+        detail: (error as Error).message,
+      });
     }
     return NextResponse.json({ ok: true, deduped: false }, { status: 202 });
   } catch {

@@ -22,6 +22,7 @@ import type { CollectionClient, EntityRecord } from '@startsimpli/ui/collection'
 
 const push = vi.fn();
 let searchString = '';
+const notify = { success: vi.fn(), error: vi.fn(), info: vi.fn() };
 
 interface TableStubProps {
   tableId?: string;
@@ -55,6 +56,12 @@ vi.mock('@startsimpli/ui', async () => {
     ScopeAbsence: () => null,
     ScopeNotice: () => null,
     BaseDialog: () => null,
+    // The approval's own acknowledgement goes through here (bd
+    // startsim-m7fdm.19). It is stubbed rather than omitted because
+    // `lib/approve-dispatch.ts` calls it on BOTH arms: an undefined `notify`
+    // would throw inside the dispatch's try, be caught, and throw again in the
+    // catch — an unhandled rejection that says nothing about the wiring.
+    notify,
   };
 });
 
@@ -113,6 +120,9 @@ vi.mock('@/components/entity-detail-drawer', () => ({
   TopicDrafts: () => null,
 }));
 vi.mock('@/components/record-form', () => ({ RecordForm: () => null }));
+// The dispatch sends the reviewer's own bearer, so the route can only start a
+// writer the person who approved could have started themselves.
+vi.mock('@/infrastructure/auth', () => ({ getRegisteredToken: vi.fn(async () => 'test.token.value') }));
 vi.mock('next/link', async () => {
   const React = await import('react');
   return {
@@ -182,6 +192,7 @@ vi.mock('@/lib/foundry-api', () => ({
   },
 }));
 
+const { resetGenerateRuns } = await import('@/lib/generate-run');
 const TypeRecordsPage = (await import('../page')).default;
 
 function renderPage() {
@@ -196,7 +207,16 @@ function renderPage() {
 beforeEach(() => {
   push.mockClear();
   updateEntity.mockClear();
+  notify.success.mockClear();
+  notify.error.mockClear();
+  // "One run per topic" is a property of a MODULE-LEVEL store that outlives a
+  // test (bd startsim-ozpjw.9), so a second approval of the same topic would
+  // otherwise be refused as a rejoin of the first test's run.
+  resetGenerateRuns();
   searchString = '';
+  // NOT OPTIONAL. Unstubbed, the dispatch POSTs /actions/generate-drafts, which
+  // in a deployed tenant relays the real n8n writer.
+  global.fetch = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 202 })) as unknown as typeof fetch;
 });
 
 describe('approving a topic from the table', () => {
@@ -234,5 +254,103 @@ describe('approving a topic from the table', () => {
     // not replace.
     await waitFor(() => expect(updateEntity).toHaveBeenCalledTimes(1));
     expect(updateEntity.mock.calls[0][1].data).toMatchObject({ status: 'ready' });
+  });
+});
+
+/**
+ * Approving a topic STARTS ITS DRAFT (bd startsim-m7fdm.19).
+ *
+ * The same reasoning as the navigation suite above: the predicate is proved in
+ * the node lane and what can still be wrong is the WIRING. Three mistakes are
+ * available here and all three type-check — dispatching on every save rather
+ * than on the approve transition, dispatching with the button's `trigger` so the
+ * draft claims somebody pressed it, and dispatching AFTER the push so the story
+ * page opens on an enabled button instead of on the writer's progress.
+ */
+describe('approving a topic starts its draft', () => {
+  /** The body POSTed to /actions/generate-drafts, if any. */
+  function dispatched(): Record<string, unknown> | null {
+    const call = vi.mocked(global.fetch).mock.calls.find(([url]) => String(url) === '/actions/generate-drafts');
+    if (!call) return null;
+    return JSON.parse(String((call[1] as RequestInit).body)) as Record<string, unknown>;
+  }
+
+  it('relays the topic’s story, named as an APPROVAL rather than a button press', async () => {
+    renderPage();
+    fireEvent.click(await screen.findByTestId('approve-topic-1'));
+
+    await waitFor(() => expect(dispatched()).not.toBeNull());
+    expect(dispatched()).toMatchObject({
+      trigger: 'topic_approved',
+      story: { topic_ref: 'topic-1', title: 'Qatar customs clearance timelines' },
+    });
+  });
+
+  it('tells the reviewer the draft is being written', async () => {
+    // Half the complaint. The writer is async and takes ~2 minutes, so an
+    // instant dispatch with no acknowledgement still looks like nothing
+    // happened — and the reviewer presses "Generate drafts" anyway.
+    renderPage();
+    fireEvent.click(await screen.findByTestId('approve-topic-1'));
+
+    await waitFor(() => expect(notify.success).toHaveBeenCalled());
+    expect(String(notify.success.mock.calls[0][0])).toMatch(/writing the draft/i);
+    expect(notify.error).not.toHaveBeenCalled();
+  });
+
+  it('claims the run BEFORE navigating, so the story page opens on the writer', async () => {
+    // `TopicDrafts` seeds `generating` from the run store AT MOUNT, so a run
+    // claimed after the push would leave the landing page showing an enabled
+    // Generate button — the second press this bead removes.
+    const { isGenerateRunning } = await import('@/lib/generate-run');
+    renderPage();
+    fireEvent.click(await screen.findByTestId('approve-topic-1'));
+
+    await waitFor(() => expect(push).toHaveBeenCalled());
+    expect(isGenerateRunning('topic-1')).toBe(true);
+  });
+
+  it('does NOT dispatch on a reject', async () => {
+    // The transition, not the save. A decision that is not an approval has not
+    // asked for a draft.
+    renderPage();
+    fireEvent.click(await screen.findByTestId('reject-topic-1'));
+
+    await waitFor(() => expect(updateEntity).toHaveBeenCalled());
+    await new Promise((r) => setTimeout(r, 20));
+    expect(dispatched()).toBeNull();
+  });
+
+  it('reports a refused dispatch instead of leaving a false "writing…" behind', async () => {
+    global.fetch = vi.fn(async () =>
+      new Response(JSON.stringify({ error: 'Could not verify the topic.' }), { status: 502 }),
+    ) as unknown as typeof fetch;
+    const { isGenerateRunning } = await import('@/lib/generate-run');
+    renderPage();
+    fireEvent.click(await screen.findByTestId('approve-topic-1'));
+
+    await waitFor(() => expect(notify.error).toHaveBeenCalled());
+    expect(String(notify.error.mock.calls[0][0])).toMatch(/^Approved, but/);
+    // ENDED IN THE STORE, so navigating back to this topic does not rejoin a run
+    // that never began and sit on "Generating…" for six minutes.
+    expect(isGenerateRunning('topic-1')).toBe(false);
+  });
+
+  it('stays SILENT when the topic already has drafts', async () => {
+    // Re-approving a drafted topic asked for nothing new. A red toast there is a
+    // failure report for a non-failure.
+    global.fetch = vi.fn(async () =>
+      new Response(
+        JSON.stringify({ error: 'Drafts have already been written for this topic.', reason: 'drafts_exist' }),
+        { status: 403 },
+      ),
+    ) as unknown as typeof fetch;
+    renderPage();
+    fireEvent.click(await screen.findByTestId('approve-topic-1'));
+
+    await waitFor(() => expect(dispatched()).not.toBeNull());
+    await new Promise((r) => setTimeout(r, 20));
+    expect(notify.error).not.toHaveBeenCalled();
+    expect(notify.success).not.toHaveBeenCalled();
   });
 });

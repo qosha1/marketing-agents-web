@@ -24,9 +24,12 @@
  * back, and all three have to hold:
  *
  *   1. THE TTL IS THE MEASURED LATENCY, not a round number. 130s is the max
- *      observed writer run, the same bound `GENERATE_WINDOW_MS` gives the
- *      client's own wait. A claim can therefore outlive its writer by seconds,
- *      never by minutes.
+ *      observed writer run (see `./generate-poll`, where the 11 retained runs
+ *      are listed). A claim can therefore outlive its writer by seconds, never
+ *      by minutes. It is deliberately TIGHTER than `GENERATE_WINDOW_MS` (360s),
+ *      which is how long the client keeps LOOKING: the two answer different
+ *      questions, and an earlier version of this paragraph claimed they were the
+ *      same number.
  *   2. EVERY FAILURE THIS ROUTE CAN SEE GIVES THE CLAIM BACK. A webhook that
  *      refuses, or one that cannot be reached, means the writer never started —
  *      so `releaseGenerateClaim` runs and the next press is free immediately.
@@ -46,9 +49,10 @@
  */
 
 /**
- * How long a claim is honoured. The measured maximum writer run (`generate-poll`
- * caps the client's own wait at the same number), so a claim outlives its writer
- * by seconds at worst.
+ * How long a claim is honoured: the measured maximum writer run, so a claim
+ * outlives its writer by seconds at worst. NOT `GENERATE_WINDOW_MS` — that is the
+ * longer window the client keeps polling for (360s), and conflating the two would
+ * hold this lock for three minutes after the writer could possibly still be alive.
  */
 export const GENERATE_CLAIM_TTL_MS = 130_000;
 
