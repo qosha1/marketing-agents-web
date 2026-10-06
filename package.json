@@ -11,10 +11,10 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@startsimpli/api": "^0.5.35",
-    "@startsimpli/auth": "^0.4.28",
-    "@startsimpli/forms": "^0.4.0",
-    "@startsimpli/llm": "^0.4.18",
+    "@startsimpli/api": "^0.5.66",
+    "@startsimpli/auth": "^0.4.38",
+    "@startsimpli/forms": "^0.4.11",
+    "@startsimpli/llm": "^0.4.23",
     "@startsimpli/ui": "^0.4.138",
     "@tanstack/react-query": "^5.62.0",
     "lucide-react": "^0.563.0",
