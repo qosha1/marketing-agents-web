@@ -163,8 +163,8 @@ export function TopicContextHeader({
       // including ones this form does not even show. It does not FIX the race
       // it narrows it from "since this page opened" to "since Save was pressed".
       //
-      // AND THAT REMAINING WINDOW IS NOW GUARDED (bd startsim-j19hf). This read
-      // is what tells lib/record-version.ts which version to assert, so a write
+      // AND THAT REMAINING WINDOW IS NOW GUARDED (bd startsim-j19hf). The save
+      // asserts THIS read's version (`basedOn`, bd startsim-jkkn7.19), so a write
       // that lands inside it is REFUSED with the server's own sentence rather
       // than silently applied. The re-read is still worth making: it is what
       // keeps the refusal rare.
@@ -191,10 +191,16 @@ export function TopicContextHeader({
       // into ['entity', <id>], which is the key both host pages read this topic
       // from — invalidation alone leaves the pre-edit blob on screen for the
       // next render (bd startsim-mk5qp).
-      await saveEntity(qc, topic.id, {
-        ...(nextName ? { name: nextName } : {}),
-        data: body,
-      });
+      await saveEntity(
+        qc,
+        topic.id,
+        {
+          ...(nextName ? { name: nextName } : {}),
+          data: body,
+        },
+        // Asserts THIS read's version, not whatever read happened last.
+        { basedOn: fresh },
+      );
       await qc.invalidateQueries({ queryKey: ['entities', type.key] });
       notify.success('Topic saved.');
       setEditing(false);

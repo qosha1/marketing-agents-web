@@ -34,7 +34,7 @@
  */
 import type { QueryClient } from '@tanstack/react-query';
 
-import { updateEntity, type EntityRecord } from './foundry-api';
+import { updateEntity, type EntityRecord, type EntityWriteOptions } from './foundry-api';
 
 /**
  * The react-query key for ONE entity. Ids arrive as UUID strings from the route
@@ -69,14 +69,16 @@ export function revisionsKey(
  * PATCH an entity and hand back what the server saved.
  *
  * NOTE: the backend REPLACES the whole `data` blob (no deep merge), so callers
- * still send the FULL merged blob — see {@link updateEntity}.
+ * still send the FULL merged blob — see {@link updateEntity} — and say which
+ * record they merged it over (`opts.basedOn`), so the write asserts THAT version.
  */
 export async function saveEntity(
   qc: QueryClient,
   id: number | string,
   input: { name?: string; data?: Record<string, unknown> },
+  opts?: EntityWriteOptions,
 ): Promise<EntityRecord> {
-  const saved = await updateEntity(id, input);
+  const saved = await updateEntity(id, input, opts);
   primeEntity(qc, id, saved);
   return saved;
 }

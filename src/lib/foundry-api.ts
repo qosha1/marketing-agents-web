@@ -19,6 +19,7 @@ import { readScopeAccess, type ScopeAccess } from '@startsimpli/ui';
 import type { CollectionClient } from '@startsimpli/ui/collection';
 import {
   preconditionFor,
+  versionFromRecord,
   type ConditionalWriteClient,
   type ConditionalWriteOutcome,
   type PreconditionSpelling,
@@ -477,8 +478,9 @@ async function wireSafeData(
  * field — so the fix for two reviewers colliding (bd startsim-m7fdm.2) is not to
  * stop sending the blob, it is to assert WHICH version of the row the blob was
  * merged over and let the server refuse a stale one. The version comes from ONE
- * source per request, never two: `opts.precondition` when the caller owns the
- * guard (the draft page, through `useConditionalSave`), otherwise the version
+ * source per request, never two, chosen in {@link preconditionOf}: the caller's
+ * own `precondition` (the draft page, through `useConditionalSave`), else the
+ * version of the record the blob was merged over (`basedOn`), else the version
  * lib/record-version.ts last saw for this id. See {@link EntityWriteOptions}.
  */
 export async function updateEntity(
@@ -527,6 +529,24 @@ export interface EntityWriteOptions {
     /** Merged at the TOP LEVEL of the body, never inside `data`. */
     body?: Record<string, unknown>;
   };
+  /**
+   * The record this write's blob was MERGED OVER — its version is the one to
+   * assert (bd startsim-jkkn7.19).
+   *
+   * WHY THE REGISTRY IS NOT ENOUGH ON ITS OWN. lib/record-version.ts holds the
+   * version of the LAST read of an id, and every list refetch moves it. A caller
+   * that merges onto a record it is holding — a drawer's snapshot, a board card,
+   * a pre-flight `getEntity` — owns a blob that is exactly as old as ITS read,
+   * not as old as the newest one. Asserting the registry there pairs an old blob
+   * with a newer version, the server accepts it, and whatever landed in between
+   * is erased with a 200. The version that belongs on the request is the one
+   * that travelled with the blob, so a caller that has it passes it here.
+   *
+   * A record without a readable version (a tenant build that predates the
+   * trail) falls back to the registry, which then holds nothing either.
+   * Ignored when `precondition` is given: that caller owns the guard outright.
+   */
+  basedOn?: { version?: unknown } | null;
 }
 
 function preconditionOf(
@@ -536,7 +556,11 @@ function preconditionOf(
   if (opts?.precondition) {
     return { headers: opts.precondition.headers ?? {}, body: opts.precondition.body ?? {} };
   }
-  const parts = preconditionFor(heldVersion(id), PRECONDITION_SPELLING);
+  // The blob's own version when the caller says what it merged over; the
+  // registry only for a caller that cannot (the shared CollectionClient's
+  // two-argument writes). Still one version, never a merge of two.
+  const version = versionFromRecord(opts?.basedOn) ?? heldVersion(id);
+  const parts = preconditionFor(version, PRECONDITION_SPELLING);
   return { headers: parts.headers, body: parts.body };
 }
 

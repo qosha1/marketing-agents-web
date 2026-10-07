@@ -238,18 +238,28 @@ export function RecordEditFields({
 }: {
   type: EntityTypeDef;
   record: EntityRecord;
-  /** Called after a successful save (the host closes / returns to read). */
-  onSaved: () => void;
+  /**
+   * Called after a successful save with the record the server SAVED, so a host
+   * that keeps the drawer open can move onto it — its version is the one the
+   * next write from that drawer must assert (bd startsim-jkkn7.19).
+   */
+  onSaved: (saved: EntityRecord) => void;
   /** Called when the user cancels out of the editor. */
   onCancel: () => void;
 }) {
   const qc = useQueryClient();
-  const [name, setName] = useState(record.name || '');
-  const [values, setValues] = useState<Record<string, unknown>>(() => initialValues(type, record));
+  // THE RECORD THESE FIELDS WERE FILLED FROM, frozen for the life of the form
+  // (bd startsim-jkkn7.19). The values below are seeded from it once, the blob
+  // is merged over it, and its version is what the save asserts. Reading the
+  // live prop at save time instead would pair a newer base with values typed
+  // over an older one — the overwrite this guards against, from the other side.
+  const [base] = useState(record);
+  const [name, setName] = useState(base.name || '');
+  const [values, setValues] = useState<Record<string, unknown>>(() => initialValues(type, base));
   const [saving, setSaving] = useState(false);
 
   async function save() {
-    const nextData: Record<string, unknown> = { ...record.data };
+    const nextData: Record<string, unknown> = { ...base.data };
     for (const attr of type.attributes) {
       const camel = toCamelKey(attr.name);
       let val = values[attr.name];
@@ -283,23 +293,30 @@ export function RecordEditFields({
     // log that lived inside the blob the backend replaces wholesale was losing
     // entries in exactly the collision it existed to record.
     //
-    // WHAT GUARDS THIS SAVE INSTEAD. `updateEntity` asserts the version
-    // lib/record-version.ts noted when this record was read, so a blob merged
-    // over a row somebody has since changed is REFUSED rather than written. There
-    // is no conflict dialog on this surface — the server's refusal sentence is
-    // reported by the catch below, which names both versions and says to reload.
-    // The full dialog lives where a reviewer types prose they cannot retype: the
-    // draft page.
+    // WHAT GUARDS THIS SAVE INSTEAD. The write asserts the version of `base` —
+    // the record this blob was merged over — so a row somebody has changed since
+    // the form was filled is REFUSED rather than written. Not the version
+    // lib/record-version.ts holds: any list refetch moves that one while the
+    // drawer sits open, and asserting it made a stale blob look current
+    // (bd startsim-jkkn7.19). There is no conflict dialog on this surface — the
+    // server's refusal sentence is reported by the catch below, which names both
+    // versions and says to reload. The full dialog lives where a reviewer types
+    // prose they cannot retype: the draft page.
     setSaving(true);
     try {
       // `saveEntity` also writes the server's answer into ['entity', <id>] — the
       // key the full-page editors read. Invalidating only the LIST left that entry
       // holding the pre-edit blob for five minutes, so opening /draft/<id> right
       // after an "Edit fields" save showed the old values back (bd startsim-mk5qp).
-      await saveEntity(qc, record.id, { name: name.trim() || record.name, data: nextData });
+      const saved = await saveEntity(
+        qc,
+        base.id,
+        { name: name.trim() || base.name, data: nextData },
+        { basedOn: base },
+      );
       await qc.invalidateQueries({ queryKey: ['entities', type.key] });
       notify.success('Saved.');
-      onSaved();
+      onSaved(saved);
     } catch (err) {
       notify.error(err instanceof Error ? err.message : 'Could not save.');
     } finally {
