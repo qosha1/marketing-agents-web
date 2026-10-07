@@ -1,13 +1,14 @@
 /**
- * Reviewer-feedback + AI-revise helpers (bd 768w.16.10.4/.5).
+ * Reviewer-feedback helpers (bd 768w.16.10.4).
  *
  * The full-page draft editor lets a reviewer record a structured judgement
- * (ReviewScorecard) plus section-level critique (ReviewNotes), then "Request
- * revision" hands that critique to an n8n webhook that GPT-rewrites the draft into
- * a NEW version. These are the pure, backend-free helpers that back that flow:
+ * (ReviewScorecard) plus section-level critique (ReviewNotes). The AI "Request
+ * revision" rewrite that used to consume this critique was removed (bd
+ * startsim-whwxd.6); drafts it created keep their `revised_from` lineage. These
+ * are the pure, backend-free helpers:
  *   - read the stored review / notes off a draft's `data` blob (camelCase-aware);
- *   - compile the scorecard + notes into the plain-text feedback the rewriter
- *     consumes;
+ *   - compile the scorecard + notes into plain-text feedback (whether the
+ *     reviewer has said what to change);
  *   - resolve a draft's revision lineage (revised_from) into an ordered chain for
  *     the "Revision history" affordance and the parent diff.
  * All pure so they unit-test without a running tenant.
@@ -41,11 +42,10 @@ export function revisedFrom(d: EntityRecord): string {
 }
 
 /**
- * Compile a reviewer's scorecard + notes into the plain-text feedback the revise
- * webhook feeds GPT: the overall note, then each scored dimension that carries a
- * note (`key: note`), then each UNRESOLVED section note (`[section] body`). Resolved
- * notes are dropped — they're already addressed, so re-feeding them to the rewriter
- * would fight edits the reviewer already accepted. Blank lines are filtered out.
+ * Compile a reviewer's scorecard + notes into plain-text feedback: the overall
+ * note, then each scored dimension that carries a note (`key: note`), then each
+ * UNRESOLVED section note (`[section] body`). Resolved notes are dropped — they're
+ * already addressed. Blank lines are filtered out.
  */
 export function compileFeedback(review: ReviewScore, notes: ReviewNote[]): string {
   return [

@@ -15,17 +15,18 @@
  *     here, always open, as a BUTTON that jumps the content pane to the offending
  *     field and marks the text. Validation below keeps the full detail + override.
  *   • Decision — a single verdict control (Approve / Request changes / Reject) that
- *     DRIVES the decision-bar's one primary action (Accept / Request revision /
- *     Reject). "Request changes" reveals ONE feedback box ("what should the rewrite
- *     fix?", stored on `review.overallNote` so compileFeedback keeps feeding the
- *     same n8n revise webhook) plus quick-add chips seeded from the judge's issues.
+ *     DRIVES the decision-bar's primary action (Approve / Reject; "Request changes"
+ *     has none since the AI rewrite was removed, bd startsim-whwxd.6). "Request
+ *     changes" reveals ONE feedback box ("what needs to change?", stored on
+ *     `review.overallNote` and autosaved with the review) plus quick-add chips
+ *     seeded from the judge's issues.
  *   • Adjust the AI's scores — collapsed; the five dimensions PRE-FILL from the AI's
  *     stored scores and the human overrides only what they disagree with (→
  *     review.dimensions[key].score). Not five blank inputs.
  *   • Validation — the shared ValidationChecklist (deterministic checks + the AI
  *     judge's issues/scores/summary + the reasoned-override affordance), kept intact.
- *   • Notes — a small ReviewNotes affordance (section notes still feed the revise
- *     loop). TODO 768w.16: true inline paragraph pins need an upstream anchor model.
+ *   • Notes — a small ReviewNotes affordance (section-scoped critique saved on the
+ *     draft). TODO 768w.16: true inline paragraph pins need an upstream anchor model.
  *   • Revision history — lineage chips + on-demand blog diff, unchanged.
  *   • History — WHO changed WHICH FIELD, from what to what, and whether a
  *     machine did it (bd startsim-j19hf). This is the SHARED
@@ -92,14 +93,14 @@ export interface QualityRailProps {
   // Decision + scores
   review: ReviewScore;
   onReviewChange: (next: ReviewScore) => void;
-  /** Whether the compiled feedback is non-empty (drives the revise-ready hint). */
+  /** Whether the compiled feedback is non-empty (drives the request-changes hint). */
   feedbackReady: boolean;
   /** Whether Accept is currently unlocked (checks ok + approve). */
   canAccept: boolean;
   /** The gating hint when Accept is blocked (null when unlocked). */
   acceptGateHint: string | null;
 
-  // Notes (small affordance — section notes still feed the revise loop)
+  // Notes (small affordance — section-scoped critique)
   notes: ReviewNote[];
   onAddNote: (body: string) => void;
   onResolveNote: (id: string) => void;
@@ -284,7 +285,7 @@ export function QualityRail(props: QualityRailProps) {
             {call === 'approve'
               ? 'This piece is publishable — the button below becomes Approve draft.'
               : call === 'revise'
-                ? 'You want changes — describe them, then send to the AI.'
+                ? 'You want changes — describe them here; they are saved on this draft.'
                 : call === 'reject'
                   ? 'You reject this candidate — sibling drafts stay.'
                   : 'Read it, then decide whether this PIECE is publishable — the topic was approved separately.'}
@@ -311,14 +312,14 @@ export function QualityRail(props: QualityRailProps) {
         {call === 'revise' ? (
           <div className="border-t border-border bg-muted/30 px-4 py-3">
             <label htmlFor="revise-feedback" className="mb-1.5 block text-xs font-semibold text-foreground">
-              What should the rewrite fix?
+              What needs to change?
             </label>
             <textarea
               id="revise-feedback"
               rows={3}
               value={review.overallNote ?? ''}
               onChange={(e) => setFeedback(e.target.value)}
-              placeholder="Tell the AI what to change (a fresher/second source, softer tone, fix a claim…)"
+              placeholder="What to change (a fresher/second source, softer tone, fix a claim…)"
               className="w-full resize-y rounded-md border border-border bg-background px-2.5 py-2 text-sm text-foreground outline-none focus:border-primary focus:ring-0"
             />
             {issueChips.length > 0 ? (
@@ -338,7 +339,7 @@ export function QualityRail(props: QualityRailProps) {
               </div>
             ) : null}
             {!feedbackReady ? (
-              <p className="mt-1.5 text-[11px] text-muted-foreground">Add feedback to enable Request revision.</p>
+              <p className="mt-1.5 text-[11px] text-muted-foreground">Add the changes you want so the next editor knows what to fix.</p>
             ) : null}
           </div>
         ) : null}
@@ -388,7 +389,7 @@ export function QualityRail(props: QualityRailProps) {
         />
       </CollapsiblePanel>
 
-      {/* Notes — small affordance; section notes still feed the revise loop. */}
+      {/* Notes — small affordance for section-scoped critique. */}
       <CollapsiblePanel
         title="Notes"
         badge={<span className="font-mono text-xs text-neutral-500">{notes.filter((n) => !n.resolved).length || ''}</span>}
@@ -419,7 +420,7 @@ export function QualityRail(props: QualityRailProps) {
           />
           <p className="text-[11px] text-neutral-400">
             {/* TODO 768w.16: inline paragraph pins need an upstream anchor model on the shared editor. */}
-            Notes are added to the rewrite feedback too.
+            Notes are saved on this draft with your decision.
           </p>
         </div>
       </CollapsiblePanel>

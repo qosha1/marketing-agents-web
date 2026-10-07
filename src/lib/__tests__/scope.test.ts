@@ -30,7 +30,7 @@ describe('recordScopePath', () => {
   it('reads the camelCase spelling the api client produces', () => {
     // The client camelCases the data blob, so this is what a browser-fetched
     // record actually looks like. Missing it would drop the scope on every
-    // client-side caller — i.e. on "Request revision", the whole bug.
+    // client-side caller.
     expect(recordScopePath({ scopePath: '/ogmc-agent-test' })).toBe('/ogmc-agent-test');
   });
 
