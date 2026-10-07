@@ -1,52 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import type { ReviewScore, ReviewNote } from '@startsimpli/ui';
 
-import { compileFeedback, readReview, readNotes, revisedFrom, revisionChain } from '../review';
+import { readReview, readNotes, revisedFrom, revisionChain } from '../review';
 import type { EntityRecord } from '@/lib/foundry-api';
 
 function draft(id: number, data: Record<string, unknown>): EntityRecord {
   return { id, entityType: 'draft', externalId: null, name: `#${id}`, data, createdAt: '' };
 }
-
-describe('compileFeedback', () => {
-  it('joins overall note, dimension notes, and unresolved section notes', () => {
-    const review: ReviewScore = {
-      verdict: 'revise',
-      overallNote: 'Sharpen the lede.',
-      dimensions: {
-        recency: { score: 2, note: 'Cite a 2026 figure.' },
-        accuracy: { score: 5 }, // no note → skipped
-        tone: { score: 3, note: 'Less breathless.' },
-      },
-    };
-    const notes: ReviewNote[] = [
-      { id: '1', body: 'Weak transition.', section: 'blog' },
-      { id: '2', body: 'Fix the hashtag.', section: 'linkedin' },
-    ];
-    expect(compileFeedback(review, notes)).toBe(
-      [
-        'Sharpen the lede.',
-        'recency: Cite a 2026 figure.',
-        'tone: Less breathless.',
-        '[blog] Weak transition.',
-        '[linkedin] Fix the hashtag.',
-      ].join('\n'),
-    );
-  });
-
-  it('drops resolved notes and defaults a missing section to "general"', () => {
-    const notes: ReviewNote[] = [
-      { id: '1', body: 'Addressed.', section: 'blog', resolved: true },
-      { id: '2', body: 'Still open.' },
-    ];
-    expect(compileFeedback({}, notes)).toBe('[general] Still open.');
-  });
-
-  it('is empty when there is nothing to say', () => {
-    expect(compileFeedback({}, [])).toBe('');
-    expect(compileFeedback({ overallNote: '   ' }, [])).toBe('');
-  });
-});
 
 describe('readReview / readNotes', () => {
   it('reads a stored review object and defaults to empty', () => {
@@ -54,6 +13,13 @@ describe('readReview / readNotes', () => {
     expect(readReview({})).toEqual({});
     expect(readReview(undefined)).toEqual({});
     expect(readReview({ review: 'nope' })).toEqual({});
+  });
+
+  // bd startsim-m7fdm.24: "Request changes" is no longer offered, but drafts that
+  // carry its stored value are read back exactly as stored, never coerced.
+  it('reads a legacy "revise" verdict back unchanged', () => {
+    const stored = { verdict: 'revise', overallNote: 'Use a fresher source.' };
+    expect(readReview({ review: stored })).toEqual(stored);
   });
 
   it('reads a stored notes array and defaults to empty', () => {

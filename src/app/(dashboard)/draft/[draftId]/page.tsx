@@ -156,7 +156,8 @@ import {
   type ChannelId,
   type StopKey,
 } from '@/lib/issue-jump';
-import { draftDecisionLabel } from '@/lib/review-vocabulary';
+import { DRAFT_DECISION_KEYS } from '@/lib/review-vocabulary';
+import { draftDecisionBar } from '@/lib/draft-decision-bar';
 import { shouldIgnoreShortcut } from '@/lib/keyboard';
 import {
   entityWriteClient,
@@ -168,7 +169,7 @@ import {
 import { acceptDraft } from '@/lib/accept-draft';
 import { entityKey, primeEntity } from '@/lib/entity-cache';
 import { revisionClient } from '@/lib/revisions';
-import { compileFeedback, readNotes, readReview, revisedFrom, revisionChain } from '@/lib/review';
+import { readNotes, readReview, revisedFrom, revisionChain } from '@/lib/review';
 import {
   coverageSummary,
   parseSourceEntry,
@@ -731,11 +732,6 @@ function DraftEditorScreen({
         ? 'Set your verdict to Approve to accept'
         : (sourceGap?.gateHint ?? null);
 
-  const feedbackReady = useMemo(
-    () => compileFeedback(review, notes).trim().length > 0,
-    [review, notes],
-  );
-
   const onChange = (key: string, value: unknown) =>
     setSections((prev) => prev.map((s) => (s.key === key ? { ...s, value } : s)));
 
@@ -899,7 +895,7 @@ function DraftEditorScreen({
     queueByRef.current = (delta) => goToDraft(delta === 1 ? nextDraft : prevDraft);
   });
 
-  // j/k walk the issues; a/r/x set the Decision; ? toggles the legend. Bound to the
+  // j/k walk the issues; a/x set the Decision; ? toggles the legend. Bound to the
   // document because the reviewer's focus is normally in the content pane, not the
   // rail — and guarded so a letter typed into the feedback box or the blog editor
   // can never flip the verdict (see shouldIgnoreShortcut).
@@ -924,13 +920,8 @@ function DraftEditorScreen({
           jumpByRef.current(-1);
           break;
         case 'a':
-          setVerdictRef.current('approve');
-          break;
-        case 'r':
-          setVerdictRef.current('revise');
-          break;
         case 'x':
-          setVerdictRef.current('reject');
+          setVerdictRef.current(DRAFT_DECISION_KEYS[e.key]);
           break;
         case ']':
           queueByRef.current(1); // next draft in the queue
@@ -1360,7 +1351,6 @@ function DraftEditorScreen({
       onOverride={setOverride}
       review={review}
       onReviewChange={onReviewChange}
-      feedbackReady={feedbackReady}
       canAccept={canAccept}
       acceptGateHint={acceptGateHint}
       notes={notes}
@@ -1384,53 +1374,27 @@ function DraftEditorScreen({
     />
   );
 
-  // The decision bar reflects the rail's "Decision" (locked decision #2): ONE primary
-  // action driven by the reviewer's verdict. approve → Accept (gated), reject →
-  // Reject, none → disabled "Choose a decision". revise ("Request changes") has NO
-  // action: the AI rewrite it used to send was removed (bd startsim-whwxd.6), and
-  // the verdict + feedback already autosave onto the draft like the rest of the
-  // review, so the bar only says whether the feedback is there.
+  // The decision bar reflects the rail's "Decision" (lib/draft-decision-bar.ts).
+  // A legacy 'revise' verdict (the removed "Request changes", bd
+  // startsim-m7fdm.24) reads as undecided and is named raw, never rewritten.
   const call = review.verdict;
-  const gateText = isApproved || isSent
-    ? null
-    : !call
-      ? 'Choose a decision'
-      : call === 'approve'
-        ? acceptGateHint ?? 'Ready to approve this draft'
-        : call === 'revise'
-          ? feedbackReady
-            ? 'Changes requested — your feedback is saved on this draft'
-            : 'Describe the changes you want in the rail'
-          : 'This candidate will be dropped';
-  const gateWarn =
-    call === 'approve'
-      ? !validationOk || !!sourceGap
-      : call === 'revise'
-        ? !feedbackReady
-        : false;
+  const bar = draftDecisionBar({
+    call,
+    isApproved,
+    isSent,
+    acceptGateHint,
+    validationOk,
+    sourceGap: !!sourceGap,
+    accepting,
+    rejecting,
+    canAccept,
+  });
+  const { gateText, gateWarn, primaryLabel, primaryDisabled, primaryVariant } = bar;
 
   const primaryAction = () => {
     if (call === 'approve') return accept();
     if (call === 'reject') return reject();
   };
-  // The bar says exactly what the rail says. It used to say "Accept" while the
-  // rail said "Approve" — one screen, two words, for one decision (b313v).
-  const primaryLabel =
-    call === 'approve'
-      ? accepting
-        ? 'Approving…'
-        : draftDecisionLabel('approve')
-      : call === 'reject'
-          ? rejecting
-            ? 'Rejecting…'
-            : draftDecisionLabel('reject')
-          : 'Choose a decision';
-  const primaryDisabled =
-    !call ||
-    accepting ||
-    rejecting ||
-    (call === 'approve' && !canAccept);
-  const primaryVariant = call === 'reject' ? 'destructive' : 'default';
 
   const decisionBar = (
     <>
@@ -1448,12 +1412,12 @@ function DraftEditorScreen({
         <Button variant="secondary" onClick={markSent} disabled={sending || isSent}>
           {isSent ? 'Sent' : sending ? 'Marking…' : 'Mark sent'}
         </Button>
-      ) : call === 'revise' ? null : (
+      ) : (
         <Button
           variant={primaryVariant}
           onClick={primaryAction}
           disabled={primaryDisabled}
-          title={call ? undefined : 'Pick a decision on this draft in the rail'}
+          title={primaryLabel === 'Choose a decision' ? 'Pick a decision on this draft in the rail' : undefined}
         >
           {primaryLabel}
         </Button>

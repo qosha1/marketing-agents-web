@@ -14,12 +14,11 @@
  *     names neither what failed nor where. So every non-passing check is listed
  *     here, always open, as a BUTTON that jumps the content pane to the offending
  *     field and marks the text. Validation below keeps the full detail + override.
- *   • Decision — a single verdict control (Approve / Request changes / Reject) that
- *     DRIVES the decision-bar's primary action (Approve / Reject; "Request changes"
- *     has none since the AI rewrite was removed, bd startsim-whwxd.6). "Request
- *     changes" reveals ONE feedback box ("what needs to change?", stored on
- *     `review.overallNote` and autosaved with the review) plus quick-add chips
- *     seeded from the judge's issues.
+ *   • Decision — a single verdict control (Approve draft / Reject draft) that
+ *     DRIVES the decision-bar's primary action. "Request changes" was removed
+ *     (bd startsim-m7fdm.24). A draft still carrying its stored 'revise' value
+ *     renders with no button pressed and the value named raw; feedback saved
+ *     with it (`review.overallNote`) stays visible, read-only. Nothing rewrites it.
  *   • Adjust the AI's scores — collapsed; the five dimensions PRE-FILL from the AI's
  *     stored scores and the human overrides only what they disagree with (→
  *     review.dimensions[key].score). Not five blank inputs.
@@ -65,7 +64,7 @@ import { RecordHistoryPanel, type RevisionClient } from '@startsimpli/ui/history
 import { cn } from '@startsimpli/ui/utils';
 import type { EntityRecord } from '@/lib/foundry-api';
 import type { IssueStop } from '@/lib/issue-jump';
-import { DRAFT_DECISIONS, draftDecisionLabel } from '@/lib/review-vocabulary';
+import { DRAFT_DECISIONS, draftDecisionLabel, isOfferedDraftDecision } from '@/lib/review-vocabulary';
 import { CollapsiblePanel, FLATTEN_CARD } from './CollapsiblePanel';
 
 type Call = NonNullable<ReviewScore['verdict']>;
@@ -93,8 +92,6 @@ export interface QualityRailProps {
   // Decision + scores
   review: ReviewScore;
   onReviewChange: (next: ReviewScore) => void;
-  /** Whether the compiled feedback is non-empty (drives the request-changes hint). */
-  feedbackReady: boolean;
   /** Whether Accept is currently unlocked (checks ok + approve). */
   canAccept: boolean;
   /** The gating hint when Accept is blocked (null when unlocked). */
@@ -181,7 +178,6 @@ function aiScoreFor(dim: ReviewDimension, scores?: Record<string, unknown>): num
 // distinction is stated and tested (bd startsim-b313v) — only the tone is local.
 const CALL_TONE: Record<string, string> = {
   approve: 'border-emerald-500 bg-emerald-50 text-emerald-700',
-  revise: 'border-amber-500 bg-amber-50 text-amber-700',
   reject: 'border-red-500 bg-red-50 text-red-700',
 };
 const CALLS: { id: Call; label: string; sel: string }[] = DRAFT_DECISIONS.map((d) => ({
@@ -204,7 +200,6 @@ export function QualityRail(props: QualityRailProps) {
     onOverride,
     review,
     onReviewChange,
-    feedbackReady,
     canAccept,
     acceptGateHint,
     notes,
@@ -236,21 +231,11 @@ export function QualityRail(props: QualityRailProps) {
   const hasHistory = chain.length > 1 || !!parentId;
 
   const setCall = (next: Call) => onReviewChange({ ...review, verdict: next });
-  const setFeedback = (text: string) => onReviewChange({ ...review, overallNote: text });
-
-  // Quick-add chips seeded from the judge's flagged issues → append to the feedback.
-  const issueChips = (judgeVerdict?.issues ?? [])
-    .map((i) => ({
-      label: i.guardrail || i.problem || 'issue',
-      text: i.fix || i.problem || i.guardrail || '',
-    }))
-    .filter((c) => c.text);
-
-  const appendFeedback = (text: string) => {
-    const cur = review.overallNote ?? '';
-    if (cur.toLowerCase().includes(text.toLowerCase())) return; // already added
-    setFeedback(cur ? `${cur.replace(/\s*$/, '')}\n- ${text}` : `- ${text}`);
-  };
+  // A stored verdict the rail no longer offers (the removed "Request changes"
+  // wrote 'revise'). Shown raw, never coerced: opening the draft must not
+  // rewrite what is on the record.
+  const legacyCall = call && !isOfferedDraftDecision(call) ? String(call) : '';
+  const savedFeedback = (review.overallNote ?? '').trim();
 
   return (
     <div className="flex flex-col gap-3">
@@ -284,10 +269,10 @@ export function QualityRail(props: QualityRailProps) {
           <div className="mt-0.5 text-xs text-muted-foreground">
             {call === 'approve'
               ? 'This piece is publishable — the button below becomes Approve draft.'
-              : call === 'revise'
-                ? 'You want changes — describe them here; they are saved on this draft.'
-                : call === 'reject'
-                  ? 'You reject this candidate — sibling drafts stay.'
+              : call === 'reject'
+                ? 'You reject this candidate — sibling drafts stay.'
+                : legacyCall
+                  ? `This draft carries an earlier decision (“${legacyCall}”) that is no longer offered. Choose one below.`
                   : 'Read it, then decide whether this PIECE is publishable — the topic was approved separately.'}
           </div>
         </div>
@@ -308,39 +293,11 @@ export function QualityRail(props: QualityRailProps) {
           ))}
         </div>
 
-        {/* revise → single feedback box + judge-seeded chips */}
-        {call === 'revise' ? (
+        {/* Feedback saved by the removed "Request changes" — read-only, kept visible. */}
+        {savedFeedback ? (
           <div className="border-t border-border bg-muted/30 px-4 py-3">
-            <label htmlFor="revise-feedback" className="mb-1.5 block text-xs font-semibold text-foreground">
-              What needs to change?
-            </label>
-            <textarea
-              id="revise-feedback"
-              rows={3}
-              value={review.overallNote ?? ''}
-              onChange={(e) => setFeedback(e.target.value)}
-              placeholder="What to change (a fresher/second source, softer tone, fix a claim…)"
-              className="w-full resize-y rounded-md border border-border bg-background px-2.5 py-2 text-sm text-foreground outline-none focus:border-primary focus:ring-0"
-            />
-            {issueChips.length > 0 ? (
-              <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                <span className="text-[11px] text-muted-foreground">From the judge:</span>
-                {issueChips.map((c, i) => (
-                  <button
-                    key={i}
-                    type="button"
-                    onClick={() => appendFeedback(c.text)}
-                    className="rounded-full border border-dashed border-amber-400 bg-background px-2.5 py-0.5 text-[11px] text-amber-700 hover:bg-amber-50"
-                    title={c.text}
-                  >
-                    + {c.label}
-                  </button>
-                ))}
-              </div>
-            ) : null}
-            {!feedbackReady ? (
-              <p className="mt-1.5 text-[11px] text-muted-foreground">Add the changes you want so the next editor knows what to fix.</p>
-            ) : null}
+            <div className="mb-1 text-xs font-semibold text-foreground">Earlier feedback on this draft</div>
+            <p className="whitespace-pre-wrap text-sm text-foreground">{savedFeedback}</p>
           </div>
         ) : null}
 
@@ -662,7 +619,6 @@ function ShortcutLegend() {
       'Next / previous issue',
     ],
     [<Key key="a">a</Key>, draftDecisionLabel('approve')],
-    [<Key key="r">r</Key>, draftDecisionLabel('revise')],
     [<Key key="x">x</Key>, draftDecisionLabel('reject')],
     [
       <>

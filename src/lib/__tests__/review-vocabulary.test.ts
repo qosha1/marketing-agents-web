@@ -8,7 +8,14 @@
 import { describe, it, expect } from 'vitest';
 import { resolveReviewConfig, reviewDecisions } from '@startsimpli/ui/collection';
 
-import { DRAFT_DECISIONS, draftDecisionLabel, TOPIC_ACTIONS_HEADER, TOPIC_DECISION_LABELS } from '@/lib/review-vocabulary';
+import {
+  DRAFT_DECISIONS,
+  DRAFT_DECISION_KEYS,
+  draftDecisionLabel,
+  isOfferedDraftDecision,
+  TOPIC_ACTIONS_HEADER,
+  TOPIC_DECISION_LABELS,
+} from '@/lib/review-vocabulary';
 import type { EntityTypeDef } from '@/lib/foundry-api';
 
 /** The live topic schema's status enum, as `resolveReviewConfig` reads it. */
@@ -35,8 +42,22 @@ describe('the draft decision names what it decides', () => {
     expect(draftDecisionLabel('reject')).toBe('Reject draft');
   });
 
-  it('leaves "Request changes" alone — it is already unambiguous', () => {
-    expect(draftDecisionLabel('revise')).toBe('Request changes');
+  // bd startsim-m7fdm.24: "Request changes" is removed (Quinn, 2026-10-07).
+  it('offers exactly Approve draft and Reject draft', () => {
+    expect(DRAFT_DECISIONS.map((d) => d.id)).toEqual(['approve', 'reject']);
+    expect(DRAFT_DECISIONS.map((d) => d.label)).not.toContain('Request changes');
+  });
+
+  it('gives the removed "revise" value no offered label, and says it is not offered', () => {
+    expect(draftDecisionLabel('revise')).toBe('');
+    expect(isOfferedDraftDecision('revise')).toBe(false);
+    expect(isOfferedDraftDecision('approve')).toBe(true);
+    expect(isOfferedDraftDecision('reject')).toBe(true);
+    expect(isOfferedDraftDecision(undefined)).toBe(false);
+  });
+
+  it('binds a and x to the two decisions, and r to nothing', () => {
+    expect(DRAFT_DECISION_KEYS).toEqual({ a: 'approve', x: 'reject' });
   });
 });
 
