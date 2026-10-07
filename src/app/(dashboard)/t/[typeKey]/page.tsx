@@ -42,9 +42,8 @@ import { buildRecordColumns, defaultVisibleColumns } from '@/components/record-c
 import { originColumn, ORIGIN_COLUMN_ID } from '@/components/origin-column';
 import {
   EntityDetailDrawer,
-  GoodExampleToggle,
   RecordEditFields,
-  TopicDrafts,
+  TopicReviewExtra,
 } from '@/components/entity-detail-drawer';
 import {
   actedOn,
@@ -1054,12 +1053,7 @@ export default function TypeRecordsPage() {
           renderEditFields={({ record: r, type: t, back, saved }) => (
             <RecordEditFields type={t} record={r} onSaved={saved} onCancel={back} />
           )}
-          renderExtra={(r) => (
-            <>
-              <GoodExampleToggle record={r} />
-              <TopicDrafts topic={r} type={type} />
-            </>
-          )}
+          renderExtra={(r) => <TopicReviewExtra record={r} type={type} />}
         />
       ) : (
         <EntityDetailDrawer

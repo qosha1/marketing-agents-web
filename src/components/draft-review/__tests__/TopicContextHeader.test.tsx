@@ -39,6 +39,7 @@ vi.mock('@/lib/entity-cache', () => ({
   saveEntity: (...args: unknown[]) => saveEntity(...(args as [])),
   primeEntity: vi.fn(),
   entityKey: (id: unknown) => ['entity', String(id)],
+  revisionsKey: (id: unknown, v?: unknown) => ['entity', String(id), 'revisions', v ?? null],
 }));
 vi.mock('@/lib/foundry-api', () => ({
   getEntity: (...args: unknown[]) => getEntity(...(args as [unknown])),
