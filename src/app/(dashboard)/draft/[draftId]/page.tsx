@@ -165,7 +165,8 @@ import {
   listTypes,
   type EntityRecord,
 } from '@/lib/foundry-api';
-import { entityKey, primeEntity, saveEntity } from '@/lib/entity-cache';
+import { acceptDraft } from '@/lib/accept-draft';
+import { entityKey, primeEntity } from '@/lib/entity-cache';
 import { revisionClient } from '@/lib/revisions';
 import { compileFeedback, readNotes, readReview, revisedFrom, revisionChain } from '@/lib/review';
 import { buildRevisionPayload } from '@/lib/revision-request';
@@ -1025,30 +1026,52 @@ function DraftEditorScreen({
     }
     setAccepting(true);
     try {
-      // Save pending edits + review and flip the draft to chosen+approved in one
-      // PATCH, then move the topic to 'written'. Stamp the override reason when set.
+      // Two writes to two records, ordered and compensated in lib/accept-draft.ts
+      // (bd startsim-jkkn7.13): re-read the topic and stop with nothing written if
+      // its decision moved; approve the draft (pending edits + review ride along,
+      // and `persist` reports its own failure or opens the conflict dialog); then
+      // move the topic, merged onto the blob just re-read and asserting THAT
+      // version; on a refusal re-read and retry once only if the decision still
+      // has not moved; and if the topic still will not move, put the draft back.
       //
-      // STOPS HERE IF THE SAVE DID NOT LAND. `persist` reports rather than
-      // throwing, so without this the topic would be moved to 'written' and the
-      // reviewer sent to the next draft over a draft that was never approved —
-      // and on a refusal, the dialog saying so would be on screen behind a
-      // "Accepted." toast.
-      const approved = await persist(
-        {
-          chosen: true,
-          status: 'approved',
-          ...(override.overridden ? { override_reason: override.reason } : {}),
-        },
-        'Could not accept.',
-      );
-      if (!approved) return;
-      // The topic gets the same treatment — its own ['entity', <id>] is read by
-      // this page's `topicQuery` and by the topic drawer.
-      // Its precondition comes from lib/record-version.ts — the version
-      // `topicQuery` read — because this is a write to a DIFFERENT record and the
-      // version this page's hook holds is the draft's. A 412 here throws and is
-      // reported by the catch below, carrying the server's own sentence.
-      await saveEntity(qc, topic.id, { data: { ...topic.data, status: 'written' } });
+      // The values the draft goes BACK to are what it held before this press —
+      // read off the page's own record, which `persist` has not touched yet in
+      // this closure. `undefined` keys drop out of the JSON body, so a draft
+      // that had no `override_reason` gets none back.
+      const before = {
+        chosen: readData(draft.data, 'chosen'),
+        status: readData(draft.data, 'status'),
+        override_reason: readData(draft.data, 'override_reason'),
+      };
+      const outcome = await acceptDraft({
+        qc,
+        topic,
+        approveDraft: () =>
+          persist(
+            {
+              chosen: true,
+              status: 'approved',
+              ...(override.overridden ? { override_reason: override.reason } : {}),
+            },
+            'Could not accept.',
+          ),
+        restoreDraft: () => persist(before, 'Could not put the draft back.'),
+      });
+      if (outcome.status === 'draft-not-saved') return;
+      if (outcome.status === 'topic-moved') {
+        notify.error(
+          `This topic changed since you opened the draft (it is now “${outcome.topicStatus || 'unset'}”). Nothing was accepted — reload to see the change.`,
+        );
+        return;
+      }
+      if (outcome.status === 'topic-refused') {
+        notify.error(
+          outcome.draftRestored
+            ? `The topic could not be moved to written: ${outcome.detail}. The draft was put back as it was — nothing was accepted.`
+            : `The draft is approved, but its topic could not be moved to written (${outcome.detail}) and the draft could not be put back. Reload and accept again, or set the topic to written from the topics table.`,
+        );
+        return;
+      }
       // No ['entity', draftId] invalidation: `persist` above just wrote the
       // server's own answer into that entry, so invalidating it would only buy a
       // round trip to fetch what is already there.
