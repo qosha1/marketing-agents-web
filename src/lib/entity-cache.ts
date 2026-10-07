@@ -47,6 +47,25 @@ export function entityKey(id: number | string): readonly [string, string] {
 }
 
 /**
+ * The key for one record's REVISION TRAIL, scoped under its entity key and keyed
+ * on the version the host is showing (bd startsim-jkkn7.16).
+ *
+ * WHY THE VERSION IS IN THE KEY. QueryProvider's staleTime is five minutes, and
+ * a save from the surface the panel sits on does not go through any one place
+ * that could invalidate the trail — the shared review drawer writes through its
+ * own `CollectionClient`. The host's record, though, DOES move to the saved
+ * version on every path (primed, or refetched after invalidating the list), so a
+ * key carrying it reads the new trail the next time anybody looks, and a version
+ * nobody changed keeps the cache.
+ */
+export function revisionsKey(
+  id: number | string,
+  version?: number | null,
+): readonly unknown[] {
+  return [...entityKey(id), 'revisions', version ?? null];
+}
+
+/**
  * PATCH an entity and hand back what the server saved.
  *
  * NOTE: the backend REPLACES the whole `data` blob (no deep merge), so callers

@@ -28,6 +28,7 @@ import {
 import { resolveReviewConfig } from '@startsimpli/ui/collection';
 
 import { AttributeField } from './attribute-field';
+import { RecordHistorySection } from './record-history-section';
 import { getRegisteredToken } from '@/infrastructure/auth';
 import { formatBearer } from '@/lib/bearer';
 import { readData, toCamelKey } from '@/lib/board';
@@ -411,6 +412,9 @@ function DrawerInner({
           <div className="flex-1 overflow-y-auto px-5 py-4">
             <RecordDetail fields={fields} showEmpty emptyMessage="No details captured for this item yet." />
             {type.key === CONTENT_TYPE_KEY ? <TopicDrafts topic={record} type={type} /> : null}
+            {/* Who changed this record (bd startsim-jkkn7.16) — the board and every
+                non-topic table edit through this drawer. */}
+            <RecordHistorySection record={record} className="mt-4" />
             {record.externalId ? (
               <p className="pt-4 text-xs text-neutral-400">external_id: {record.externalId}</p>
             ) : null}
@@ -433,6 +437,22 @@ function DrawerInner({
   );
 }
 
+
+/**
+ * What the topic review drawer on /t/topic shows under the decision controls:
+ * the good-example tag, the topic's drafts and — since bd startsim-jkkn7.16 —
+ * who changed the topic. One component rather than an inline fragment in the
+ * page's `renderExtra`, so the mount is testable without rendering the table.
+ */
+export function TopicReviewExtra({ record, type }: { record: EntityRecord; type: EntityTypeDef }) {
+  return (
+    <>
+      <GoodExampleToggle record={record} />
+      <TopicDrafts topic={record} type={type} />
+      <RecordHistorySection record={record} className="mt-3" />
+    </>
+  );
+}
 
 /**
  * Everything a host needs to know about a topic's drafts at one moment — the

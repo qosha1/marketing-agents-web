@@ -21,7 +21,7 @@
  * things with and without a writer in flight.
  */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import type { ReactNode } from 'react';
 
@@ -98,6 +98,8 @@ vi.mock('@/lib/foundry-api', () => ({
 vi.mock('@startsimpli/auth', () => ({
   useAuth: () => ({ user: { email: 'qa+ma@startsimpli.com' } }),
 }));
+// The topic's history reads the trail with the raw bearer (lib/revisions.ts).
+vi.mock('@/infrastructure/auth', () => ({ getRegisteredToken: vi.fn(async () => 'test.token.value') }));
 
 const StoryPage = (await import('../page')).default;
 
@@ -205,5 +207,35 @@ describe('the story page', () => {
     renderPage();
     await screen.findByTestId('topic-drafts');
     expect(screen.queryByText(/search the drafts table/i)).toBeNull();
+  });
+
+  // bd startsim-jkkn7.16: this page IS the topic, and before this bead it was the
+  // one place a reviewer could open a topic and still not see who changed it.
+  it('shows the topic’s own revision trail, by the topic’s id', async () => {
+    const page = {
+      count: 1,
+      next: null,
+      previous: null,
+      results: [
+        {
+          id: 'r1',
+          version: 2,
+          action: 'updated',
+          source: 'patch',
+          precondition: 'matched',
+          created_at: '2026-10-06T08:00:00Z',
+          actor_label: 'jurga@ogmc.example',
+          actor_kind: 'person',
+          actor_kind_source: 'claim',
+          metadata: { changed: { team_verdict: { before: '', after: 'good' } } },
+        },
+      ],
+    };
+    global.fetch = vi.fn(async () => new Response(JSON.stringify(page), { status: 200 })) as typeof fetch;
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /topic history/i }));
+    expect(await screen.findByText('team_verdict')).toBeInTheDocument();
+    const urls = vi.mocked(global.fetch).mock.calls.map(([u]) => String(u));
+    expect(urls.some((u) => u.startsWith('/api/v1/entities/topic-1/revisions?'))).toBe(true);
   });
 });

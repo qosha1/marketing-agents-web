@@ -71,6 +71,7 @@ import type { EntityRecord, EntityTypeDef } from '@startsimpli/ui/collection';
 import { useQueryClient } from '@tanstack/react-query';
 import { Button, Input, Label, Textarea, notify } from '@startsimpli/ui';
 
+import { RecordHistorySection } from '@/components/record-history-section';
 import { readData } from '@/lib/board';
 import { contentCategoryLabel } from '@/lib/content';
 import { saveEntity } from '@/lib/entity-cache';
@@ -331,6 +332,19 @@ export function TopicContextHeader({
             </div>
           ) : null}
         </div>
+      ) : null}
+
+      {/* WHO CHANGED THIS TOPIC (bd startsim-jkkn7.16). This header is where a
+          topic is edited on /story and /draft, so it is where its trail is read.
+          "Topic history", not "History": on /draft the rail carries the DRAFT's
+          trail under that name a few hundred pixels away. Not mounted while
+          editing — the form is the thing on screen then. */}
+      {topic && showBody && !editing ? (
+        <RecordHistorySection
+          record={topic}
+          title="Topic history"
+          className="mt-3 shadow-none"
+        />
       ) : null}
     </section>
   );

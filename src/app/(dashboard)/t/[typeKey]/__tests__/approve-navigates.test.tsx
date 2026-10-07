@@ -122,6 +122,7 @@ vi.mock('@/components/entity-detail-drawer', () => ({
   GoodExampleToggle: () => null,
   RecordEditFields: () => null,
   TopicDrafts: () => null,
+  TopicReviewExtra: () => null,
 }));
 vi.mock('@/components/record-form', () => ({ RecordForm: () => null }));
 // The dispatch sends the reviewer's own bearer, so the route can only start a
