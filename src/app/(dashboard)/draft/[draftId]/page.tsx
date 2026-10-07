@@ -1,8 +1,8 @@
 'use client';
 
 /**
- * Full-page draft editor (bd 768w.16.9 follow-up; reviewer-feedback + AI-revise
- * loop 768w.16.10.4/.5; two-pane review redesign P1).
+ * Full-page draft editor (bd 768w.16.9 follow-up; reviewer feedback
+ * 768w.16.10.4; two-pane review redesign P1).
  *
  * Promotes the draft editor from a cramped inline panel inside the topic drawer
  * to a first-tier dashboard route (/draft/<id>) so a full article is comfortable
@@ -31,13 +31,13 @@
  * scores, autosaved debounced) and a ReviewNotes thread (section-scoped critique,
  * saved on add/resolve).
  *
- * AI revise loop (768w.16.10.5): "Request revision" compiles the scorecard + notes
- * into a critique and POSTs it to the n8n revise webhook (via /actions/request-
- * revision), which GPT-rewrites the draft into a NEW candidate stamped
- * `revised_from = <this draft id>`; the draft flips to `under_review` and we poll
- * the draft set until the new version appears. The "Revision history" affordance
- * lists the lineage, and — when this draft was itself revised from a parent — a
- * "Compare to previous" diff shows the parent blog against the current one.
+ * Revision lineage: the AI "Request revision" rewrite (768w.16.10.5) was removed
+ * (bd startsim-whwxd.6), but drafts it already created still carry
+ * `revised_from = <parent draft id>`. The "Revision history" affordance lists
+ * that lineage, and — when this draft was revised from a parent — a "Compare to
+ * previous" diff shows the parent blog against the current one. "Request
+ * changes" is now a human verdict only: the feedback is saved on the draft and
+ * nothing is sent anywhere.
  *
  * Validate-before-accept (bd 768w.16.10.3): a live ValidationChecklist recomputes
  * the deterministic guardrail checks over the reviewer's EDITED sections (plus the
@@ -169,7 +169,6 @@ import { acceptDraft } from '@/lib/accept-draft';
 import { entityKey, primeEntity } from '@/lib/entity-cache';
 import { revisionClient } from '@/lib/revisions';
 import { compileFeedback, readNotes, readReview, revisedFrom, revisionChain } from '@/lib/review';
-import { buildRevisionPayload } from '@/lib/revision-request';
 import {
   coverageSummary,
   parseSourceEntry,
@@ -479,7 +478,6 @@ function DraftEditorScreen({
     enabled: !!topicRef,
   });
   const topic = topicQuery.data ?? null;
-  const topicMarket = topic ? String(readData(topic.data, 'market') ?? '') : '';
 
   // The content pane's channel + (narrow-only) visible pane are page state now that
   // jump-to-issue drives them. Seed the channel from `?channel=` so the shareable
@@ -518,7 +516,6 @@ function DraftEditorScreen({
   const [override, setOverride] = useState<ValidationOverride>({ overridden: false });
   const [accepting, setAccepting] = useState(false);
   const [sending, setSending] = useState(false);
-  const [revising, setRevising] = useState(false);
   const [rejecting, setRejecting] = useState(false);
   const [showDiff, setShowDiff] = useState(false);
 
@@ -560,9 +557,6 @@ function DraftEditorScreen({
   });
 
   const reviewSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const knownChildIdsRef = useRef<Set<string>>(new Set());
-  const notifiedReadyRef = useRef(false);
 
   const status = draftStatus(draft);
   const isApproved = status === 'approved';
@@ -576,12 +570,10 @@ function DraftEditorScreen({
   const verdict = draftJudgeVerdict(draft);
   const judgeVerdict = draftJudgeVerdictObj(draft);
 
-  // The full draft set backs both the "Revision history" lineage and the revise
-  // poll. It refetches on an interval only while a revision is in flight.
+  // The full draft set backs the "Revision history" lineage and the review queue.
   const draftsQuery = useQuery({
     queryKey: ['entities', DRAFT_TYPE, 'all'],
     queryFn: () => listAllEntities(DRAFT_TYPE),
-    refetchInterval: revising ? 8000 : false,
   });
   const allDrafts = useMemo(() => draftsQuery.data ?? [], [draftsQuery.data]);
 
@@ -1127,109 +1119,10 @@ function DraftEditorScreen({
     }
   }
 
-  // Compile the reviewer's critique and hand it to the n8n revise webhook, which
-  // GPT-rewrites the draft into a NEW candidate (stamped revised_from = this id).
-  // Flip this draft to under_review — the team's word for "someone is working on
-  // it" (bd startsim-wn2p.2) — then poll the draft set for the new version.
-  async function requestRevision() {
-    const feedback = compileFeedback(reviewRef.current, notesRef.current);
-    if (!feedback.trim()) {
-      notify.error('Add a scorecard note or a section note before requesting a revision.');
-      return;
-    }
-    // CHECKED BEFORE THE WEBHOOK, not after the status write it precedes. The
-    // n8n call below is the only irreversible, external, non-idempotent act on
-    // this page: it spends a model call and writes a NEW draft row. Its payload
-    // is built from this page's blob and this page's sections — the exact basis
-    // the server has already refused as stale — so firing it while a conflict is
-    // open asks for a rewrite of text that is not what the record says, and
-    // nothing can take it back afterwards.
-    if (save.paused) {
-      save.reopenConflict();
-      return;
-    }
-    setRevising(true);
-    knownChildIdsRef.current = new Set(children.map((c) => String(c.id)));
-    notifiedReadyRef.current = false;
-    try {
-      const blog = String(sectionValue(sectionsRef.current, 'blog') ?? '');
-      const linkedin = String(sectionValue(sectionsRef.current, 'linkedin') ?? '');
-      // Sources now live in the Sources tool — hand the rewriter the same newline
-      // text it always got (each row's original entry line).
-      const sources = sourceItemsRef.current
-        .map((s) => (s.raw?.trim() ? s.raw.trim() : s.url))
-        .filter(Boolean)
-        .join('\n');
-
-      const res = await fetch('/actions/request-revision', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        // The payload is the contract with a workflow that lives outside this
-        // repo, so it is built (and asserted) in lib/revision-request.ts — which
-        // is also where the draft's own SCOPE joins it (bd startsim-0r7ru): a
-        // revision inherits the scope of the draft it revises, or the tenant
-        // refuses it and nobody finds out.
-        body: JSON.stringify(
-          buildRevisionPayload({
-            draft,
-            contentType,
-            market: topicMarket,
-            feedback,
-            blog,
-            linkedin,
-            sources,
-          }),
-        ),
-      });
-      if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(body.error || `Revise request failed (${res.status}).`);
-      }
-      // Mark this draft as awaiting a revision (full-blob merge preserves edits +
-      // review + notes) and reflect the new status pill.
-      // `persist` primes ['entity', <id>] with the server's answer, so the status
-      // pill flips on the next render without a round trip.
-      //
-      // THE WEBHOOK HAS ALREADY FIRED by the time this line runs, so a refused
-      // status write does NOT undo the revision — it means a rewrite is coming
-      // and this draft's pill does not say so. Two facts, so two sentences; and
-      // the polling below starts either way, because the rewrite is real.
-      const marked = await persist(
-        { status: 'under_review' },
-        'Could not record the revision request.',
-      );
-      notify.success(
-        marked
-          ? 'Revision requested — GPT is rewriting the draft (~1 min).'
-          : 'Revision requested — GPT is rewriting the draft. This draft’s status was not updated.',
-      );
-      // Stop polling after ~90s even if nothing shows up.
-      if (pollTimeoutRef.current) clearTimeout(pollTimeoutRef.current);
-      pollTimeoutRef.current = setTimeout(() => setRevising(false), 90_000);
-    } catch (err) {
-      setRevising(false);
-      notify.error(err instanceof Error ? err.message : 'Could not request a revision.');
-    }
-  }
-
-  // When a fresh revision (a child id not present when we asked) appears while
-  // polling, announce it and stop — the banner + history surface the link.
-  useEffect(() => {
-    if (!revising) return;
-    const fresh = children.find((c) => !knownChildIdsRef.current.has(String(c.id)));
-    if (fresh && !notifiedReadyRef.current) {
-      notifiedReadyRef.current = true;
-      setRevising(false);
-      if (pollTimeoutRef.current) clearTimeout(pollTimeoutRef.current);
-      notify.success('A new revision is ready — open it below.');
-    }
-  }, [children, revising]);
-
   // Clear timers on unmount.
   useEffect(
     () => () => {
       if (reviewSaveTimer.current) clearTimeout(reviewSaveTimer.current);
-      if (pollTimeoutRef.current) clearTimeout(pollTimeoutRef.current);
     },
     [],
   );
@@ -1353,10 +1246,6 @@ function DraftEditorScreen({
           <Link href={`/draft/${latestChild.id}`} className="font-medium underline">
             Open the latest revision →
           </Link>
-        </div>
-      ) : revising ? (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">
-          Revising… GPT is rewriting the draft (~1 min). The new version will appear here.
         </div>
       ) : null}
 
@@ -1496,8 +1385,11 @@ function DraftEditorScreen({
   );
 
   // The decision bar reflects the rail's "Decision" (locked decision #2): ONE primary
-  // action driven by the reviewer's verdict. approve → Accept (gated), revise → Request
-  // revision (needs feedback), reject → Reject, none → disabled "Choose a decision".
+  // action driven by the reviewer's verdict. approve → Accept (gated), reject →
+  // Reject, none → disabled "Choose a decision". revise ("Request changes") has NO
+  // action: the AI rewrite it used to send was removed (bd startsim-whwxd.6), and
+  // the verdict + feedback already autosave onto the draft like the rest of the
+  // review, so the bar only says whether the feedback is there.
   const call = review.verdict;
   const gateText = isApproved || isSent
     ? null
@@ -1507,8 +1399,8 @@ function DraftEditorScreen({
         ? acceptGateHint ?? 'Ready to approve this draft'
         : call === 'revise'
           ? feedbackReady
-            ? 'Feedback ready'
-            : 'Describe the changes to enable Request revision'
+            ? 'Changes requested — your feedback is saved on this draft'
+            : 'Describe the changes you want in the rail'
           : 'This candidate will be dropped';
   const gateWarn =
     call === 'approve'
@@ -1519,7 +1411,6 @@ function DraftEditorScreen({
 
   const primaryAction = () => {
     if (call === 'approve') return accept();
-    if (call === 'revise') return requestRevision();
     if (call === 'reject') return reject();
   };
   // The bar says exactly what the rail says. It used to say "Accept" while the
@@ -1529,11 +1420,7 @@ function DraftEditorScreen({
       ? accepting
         ? 'Approving…'
         : draftDecisionLabel('approve')
-      : call === 'revise'
-        ? revising
-          ? 'Revising… (~1 min)'
-          : 'Request revision'
-        : call === 'reject'
+      : call === 'reject'
           ? rejecting
             ? 'Rejecting…'
             : draftDecisionLabel('reject')
@@ -1541,11 +1428,9 @@ function DraftEditorScreen({
   const primaryDisabled =
     !call ||
     accepting ||
-    revising ||
     rejecting ||
-    (call === 'approve' && !canAccept) ||
-    (call === 'revise' && !feedbackReady);
-  const primaryVariant = call === 'reject' ? 'destructive' : call === 'revise' ? 'secondary' : 'default';
+    (call === 'approve' && !canAccept);
+  const primaryVariant = call === 'reject' ? 'destructive' : 'default';
 
   const decisionBar = (
     <>
@@ -1563,7 +1448,7 @@ function DraftEditorScreen({
         <Button variant="secondary" onClick={markSent} disabled={sending || isSent}>
           {isSent ? 'Sent' : sending ? 'Marking…' : 'Mark sent'}
         </Button>
-      ) : (
+      ) : call === 'revise' ? null : (
         <Button
           variant={primaryVariant}
           onClick={primaryAction}

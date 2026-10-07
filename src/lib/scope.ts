@@ -3,12 +3,12 @@
  *
  * The tenant gates records by SCOPE: a row of a scoped type must carry a path,
  * and a reader only sees the scopes they hold. OGMC's content is `/ogmc`; an
- * agent test account has its own. Two triggers in this app hand a record to n8n,
- * which writes a NEW record back into the tenant — "Generate drafts" and
- * "Request revision" — so the path has to travel with them, or the write is
- * refused. Refused INVISIBLY: both webhooks answer "Workflow got started" before
- * anything is written, the routes return 202 on that, and nobody learns the
- * draft never landed. That is what happened to every revision from 2026-09-02.
+ * agent test account has its own. "Generate drafts" hands a record to n8n, which
+ * writes a NEW record back into the tenant, so the path has to travel with it, or
+ * the write is refused. Refused INVISIBLY: the webhook answers "Workflow got
+ * started" before anything is written, the route returns 202 on that, and nobody
+ * learns the draft never landed. That is what happened to every AI revision
+ * (the since-removed "Request revision", bd startsim-whwxd.6) from 2026-09-02.
  *
  * READ CAMEL-TOLERANTLY, SENT IN SNAKE, and the asymmetry is deliberate.
  * `readData` tries the camelised spelling first because the shared api client
@@ -16,11 +16,11 @@
  * spells it `scopePath` while Django's own JSON spells it `scope_path` — a
  * client caller and a server caller of this function are looking at the same
  * attribute under two names. What goes ON THE WIRE is always `scope_path`,
- * because both n8n Set nodes read `$json.body.scope_path` literally.
+ * because the n8n Set node reads `$json.body.scope_path` literally.
  *
  * IT NEVER INVENTS A PATH. Absent reads as `undefined` and the caller omits the
  * key, matching the n8n side, which omits rather than defaults for the same
- * reason: a WRONG scope is worse than a refusal. A test account's revision
+ * reason: a WRONG scope is worse than a refusal. A test account's draft
  * appearing in a paying customer's review queue is the failure the scope gate
  * exists to prevent, and a default in this app would hand it over directly.
  */
