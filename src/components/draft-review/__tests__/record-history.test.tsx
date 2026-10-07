@@ -71,7 +71,6 @@ function railProps(overrides: Partial<QualityRailProps> = {}): QualityRailProps 
     onOverride: vi.fn(),
     review: {} as QualityRailProps['review'],
     onReviewChange: vi.fn(),
-    feedbackReady: false,
     canAccept: false,
     acceptGateHint: null,
     notes: [],

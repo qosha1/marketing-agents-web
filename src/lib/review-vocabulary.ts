@@ -32,19 +32,33 @@ export interface DecisionLabel {
 /**
  * The DRAFT decision (the quality rail + the decision bar on /draft/<id>).
  *
- * "Request changes" needs no subject: it is already unambiguous, and nothing on
- * the topic side says anything like it.
+ * Two decisions, both of which dispose of the piece. "Request changes" was a
+ * third until bd startsim-m7fdm.24 (Quinn, 2026-10-07): once #93 removed the AI
+ * rewrite it fed, it only saved a verdict and a note. Drafts already carrying
+ * its value ('revise') are left as they are; `isOfferedDraftDecision` is how the
+ * read side tells such a stored value apart from a decision it can still offer,
+ * and shows it raw rather than under a label the app no longer uses.
  */
 export const DRAFT_DECISIONS: DecisionLabel[] = [
   { id: 'approve', label: 'Approve draft' },
-  { id: 'revise', label: 'Request changes' },
   { id: 'reject', label: 'Reject draft' },
 ];
 
-/** The draft decision's label by verdict id. */
+/** The draft decision's label by verdict id ('' for a value no longer offered). */
 export function draftDecisionLabel(id: string): string {
   return DRAFT_DECISIONS.find((d) => d.id === id)?.label ?? '';
 }
+
+/** Whether a stored verdict is one of the decisions the rail offers today. */
+export function isOfferedDraftDecision(id: string | undefined | null): boolean {
+  return !!id && DRAFT_DECISIONS.some((d) => d.id === id);
+}
+
+/** The single-key shortcuts on /draft/<id> that set the draft decision. */
+export const DRAFT_DECISION_KEYS: Readonly<Record<string, 'approve' | 'reject'>> = {
+  a: 'approve',
+  x: 'reject',
+};
 
 /**
  * The header over a table's inline decision cluster — the other half of the same

@@ -7,8 +7,6 @@
  * startsim-whwxd.6); drafts it created keep their `revised_from` lineage. These
  * are the pure, backend-free helpers:
  *   - read the stored review / notes off a draft's `data` blob (camelCase-aware);
- *   - compile the scorecard + notes into plain-text feedback (whether the
- *     reviewer has said what to change);
  *   - resolve a draft's revision lineage (revised_from) into an ordered chain for
  *     the "Revision history" affordance and the parent diff.
  * All pure so they unit-test without a running tenant.
@@ -39,27 +37,6 @@ export function readNotes(data: EntityRecord['data'] | undefined): ReviewNote[] 
 export function revisedFrom(d: EntityRecord): string {
   const v = readData(d.data, 'revised_from');
   return v == null ? '' : String(v);
-}
-
-/**
- * Compile a reviewer's scorecard + notes into plain-text feedback: the overall
- * note, then each scored dimension that carries a note (`key: note`), then each
- * UNRESOLVED section note (`[section] body`). Resolved notes are dropped — they're
- * already addressed. Blank lines are filtered out.
- */
-export function compileFeedback(review: ReviewScore, notes: ReviewNote[]): string {
-  return [
-    review.overallNote,
-    ...Object.entries(review.dimensions ?? {})
-      .filter(([, v]) => v?.note)
-      .map(([k, v]) => `${k}: ${v?.note}`),
-    ...notes
-      .filter((n) => !n.resolved)
-      .map((n) => `[${n.section || 'general'}] ${n.body}`),
-  ]
-    .map((line) => (line ?? '').trim())
-    .filter(Boolean)
-    .join('\n');
 }
 
 /**
