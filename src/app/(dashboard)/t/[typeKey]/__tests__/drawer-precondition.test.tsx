@@ -318,12 +318,17 @@ describe('Edit fields in the topic drawer', () => {
  * merge over the drawer's OWN `data` and write through the two-argument
  * `CollectionClient.updateEntity(id, input)`, which has no room for a
  * precondition — so the registry supplies it, and a refetch has moved that past
- * the blob. `it.fails` because it reproduces today: when the shared drawer
- * carries its base version and this app is bumped onto it, this starts FAILING,
- * which is the cue to drop `.fails` and keep it as a plain test.
+ * the blob.
+ *
+ * PINNED AS THE BUG'S EXACT SIGNATURE, not as `it.fails`: an `it.fails` passes
+ * on ANY failure, so a changed selector or a timeout would keep it green while it
+ * guarded nothing. This asserts what the overwrite looks like on the wire. When
+ * the shared drawer carries its base version and this app is bumped onto it,
+ * this FAILS — invert it then: the request asserts "3" and is refused, and the
+ * other writer's angle is kept.
  */
-describe('a decision in the topic drawer', () => {
-  it.fails('does not overwrite an edit that landed after the drawer opened (ui: startsim-jkkn7.20)', async () => {
+describe('a decision in the topic drawer — KNOWN BUG, bd startsim-jkkn7.20', () => {
+  it('still overwrites an edit that landed after the drawer opened, once the list refetched', async () => {
     renderPage();
     await openDrawer();
 
@@ -332,6 +337,7 @@ describe('a decision in the topic drawer', () => {
 
     await saveNote('a note made after the refetch');
 
-    expect(db.data.angle).toBe('THEIR angle');
+    expect(patches.at(-1)).toMatchObject({ ifMatch: '"4"', status: 200 });
+    expect(db.data.angle).toBe('the reviewer angle');
   });
 });
