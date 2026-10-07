@@ -146,9 +146,11 @@ describe('the rail’s History panel', () => {
     expect(panel.textContent).not.toContain('judgeVerdict');
   });
 
-  it('keeps the shared caveat that the trail has known silent write paths', async () => {
+  it('no longer claims write paths go unrecorded — all four record since bd startsim-jkkn7.6', async () => {
     renderRail({ historyOpen: true });
 
-    await waitFor(() => expect(screen.getByTestId('record-history-incomplete')).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId('record-history-panel')).toBeTruthy());
+    expect(screen.queryByTestId('record-history-incomplete')).toBeNull();
+    expect(screen.getByTestId('record-history-panel').textContent).not.toMatch(/bulk imports|scope moves/i);
   });
 });
