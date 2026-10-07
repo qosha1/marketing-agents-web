@@ -31,14 +31,22 @@
  * ONE source of a precondition per request, decided by one `if`, and never a
  * merge of two.
  *
- * ── A STALE ENTRY IS A CORRECT REFUSAL, NOT A BUG ──────────────────────────
+ * ── THE REGISTRY IS THE LAST READ, NOT THE BLOB'S READ ─────────────────────
  *
- * The version here is as old as the read that produced it. A table fetched ten
- * minutes ago leaves a ten-minute-old version, so a drawer edit over that row is
- * refused if anybody changed it since. That is the right answer and not a
- * limitation: the blob the drawer is about to PATCH is ALSO from that read, and
- * the backend replaces `data` wholesale, so sending it would destroy whatever
- * landed in between. The refusal is the feature.
+ * The version here is as new as the LAST read of an id — and every list refetch,
+ * detail read and relay report moves it. That is only the right precondition
+ * when the blob being written came from that same read. A caller holding an
+ * OLDER blob (a drawer's snapshot taken when the row was clicked, a board card, a
+ * pre-flight `getEntity`) would pair it with a NEWER version, and the server
+ * would accept a stale blob as current: whatever landed in between is erased
+ * with a 200 (bd startsim-jkkn7.19 — this header used to claim the blob was
+ * "ALSO from that read", which held only until the next refetch).
+ *
+ * So a caller that knows which record it merged over says so —
+ * `updateEntity(id, input, { basedOn: record })` — and THAT version is asserted.
+ * The registry is the fallback for a write that cannot say: the shared
+ * `CollectionClient.updateEntity(id, input)` the review drawer, the inline
+ * actions and the board's decisions write through.
  *
  * ── AND IT FAILS TOWARD SENDING NOTHING ────────────────────────────────────
  *

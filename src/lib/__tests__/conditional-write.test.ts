@@ -220,6 +220,48 @@ describe('a caller-owned precondition replaces the registry — never joins it',
   });
 });
 
+/**
+ * A write merged over a record it is HOLDING asserts that record's version
+ * (bd startsim-jkkn7.19). The registry is as new as the LAST read of an id, and
+ * every list refetch moves it; a drawer's snapshot or a board card is as old as
+ * ITS read. Pairing the second's blob with the first's version is a stale write
+ * the server cannot tell from a current one.
+ */
+describe('basedOn — the version that travelled with the blob', () => {
+  it('asserts the held record’s version even after a refetch moved the registry past it', async () => {
+    rememberVersion('d1', { version: 3 }); // the drawer opened on v3
+    rememberVersion('d1', { version: 4 }); // a list refetch saw somebody's v4
+    await updateEntity('d1', { data: { blog: 'merged over v3' } }, { basedOn: { version: 3 } });
+
+    expect(patched().headers['if-match']).toBe('"3"');
+  });
+
+  it('asserts version 0 rather than falling through to the registry', async () => {
+    rememberVersion('d1', { version: 5 });
+    await updateEntity('d1', { data: {} }, { basedOn: { version: 0 } });
+
+    expect(patched().headers['if-match']).toBe('"0"');
+  });
+
+  it('falls back to the registry for a record that carries no version', async () => {
+    rememberVersion('d1', { version: 7 });
+    await updateEntity('d1', { data: {} }, { basedOn: {} });
+
+    expect(patched().headers['if-match']).toBe('"7"');
+  });
+
+  it('is ignored when the caller owns the precondition — still one source per request', async () => {
+    await updateEntity(
+      'd1',
+      { data: {} },
+      { basedOn: { version: 3 }, precondition: { headers: { 'If-Match': '"9"' } } },
+    );
+
+    expect(patched().headers['if-match']).toBe('"9"');
+    expect(patched().body).not.toHaveProperty('expected_version');
+  });
+});
+
 describe('entityWriteClient — the 412 the shared client would otherwise swallow', () => {
   it('rebuilds detail AND current_version, because parseErrorResponse drops the latter', async () => {
     // `@startsimpli/api`'s `parseErrorResponse` keeps `detail` and `status` off a

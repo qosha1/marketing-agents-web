@@ -114,7 +114,14 @@ export async function acceptDraft({
 
   // 3 + 4. The topic, retried once on a refusal that did not move the decision.
   const write = (base: EntityRecord) =>
-    saveEntity(qc, topic.id, { data: { ...base.data, [statusAttr]: TOPIC_WRITTEN_STATUS } });
+    saveEntity(
+      qc,
+      topic.id,
+      { data: { ...base.data, [statusAttr]: TOPIC_WRITTEN_STATUS } },
+      // The read this blob came from, asserted as such — not the registry, which
+      // the draft write in step 2 or any refetch could have moved past it.
+      { basedOn: base },
+    );
   let failure: unknown;
   try {
     await write(fresh);

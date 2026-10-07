@@ -250,9 +250,15 @@ export function EntityBoard({
         // refreshing only the two lanes left the record's OWN entry holding the
         // pre-drag status for five minutes, so opening the card right after a
         // drag showed it back in the lane it came from (bd startsim-mk5qp).
-        await saveEntity(qc, record.id, {
-          data: laneMoveData(record.data, statusName, newStatus),
-        });
+        // `basedOn`: the card's blob is what was merged over, so its version is
+        // the one asserted — not whatever a later read left in the registry
+        // (bd startsim-jkkn7.19).
+        await saveEntity(
+          qc,
+          record.id,
+          { data: laneMoveData(record.data, statusName, newStatus) },
+          { basedOn: record },
+        );
         // Re-fetch BOTH lanes rather than the whole board. Dropping the trailing
         // ['page', n] segment invalidates EVERY page of the lane, not only the
         // one that was patched: removing a record shifts every later page up by
