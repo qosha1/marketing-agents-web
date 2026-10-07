@@ -438,16 +438,14 @@ export function QualityRail(props: QualityRailProps) {
             // The rail's own card and heading supply the chrome, so the panel's
             // title is hidden rather than repeated. Its DESCRIPTION stays: it is
             // what tells the reader this trail is per-field, not per-save.
-            // `incompleteNote` is deliberately left at the shared default — a
-            // fork must not decide it looks more complete than the trail is.
+            // `incompleteNote` and `historyEnabled` are left at the shared
+            // defaults — a fork must not decide the trail looks more complete
+            // than it is, and the declared-off policy is not on the revisions
+            // envelope yet (bd startsim-jkkn7.17).
             // `px-0` on both: the CollapsiblePanel already supplies the gutter,
-            // and the panel's own would cost 40px of a ~370px rail that the
-            // per-field before/after columns need. They are still tight here —
-            // the shared panel sizes that split on the VIEWPORT (`sm:flex-nowrap`)
-            // rather than on its container, so it reads as a full-width page even
-            // inside a narrow rail. Filed upstream rather than hacked around: a
-            // fork reaching into another component's utility classes would break
-            // silently on its next publish.
+            // and the panel's own would cost 40px of a ~370px rail. Since
+            // @startsimpli/ui 0.4.141 the per-field before/after split sizes on
+            // its CONTAINER and stacks here (bd startsim-jkkn7.12).
             classNames={{
               root: FLATTEN_CARD,
               header: 'border-b-0 px-0 pb-3 pt-0',
