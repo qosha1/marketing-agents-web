@@ -54,7 +54,7 @@ export function DraftReviewLayout({
       <div>{header}</div>
 
       {/* Narrow-only pane switch — one pane at a time; sticky so it stays reachable. */}
-      <div className="sticky top-0 z-10 -mx-8 border-b border-border bg-gray-50/95 px-8 py-2 backdrop-blur lg:hidden">
+      <div className="sticky top-0 z-10 -mx-4 border-b border-border bg-gray-50/95 px-4 py-2 sm:-mx-8 sm:px-8 backdrop-blur lg:hidden">
         <div className="inline-flex rounded-lg border border-border bg-card p-0.5" role="tablist" aria-label="Draft pane">
           {(['content', 'quality'] as const).map((p) => (
             <button
@@ -88,7 +88,7 @@ export function DraftReviewLayout({
       </div>
 
       {/* Decision bar — pinned to the bottom, spanning the full content width. */}
-      <div className="sticky bottom-0 -mx-8 flex flex-wrap items-center gap-3 border-t border-neutral-200 bg-gray-50/95 px-8 py-3 backdrop-blur">
+      <div className="sticky bottom-0 -mx-4 flex flex-wrap items-center gap-3 border-t border-neutral-200 bg-gray-50/95 px-4 py-3 sm:-mx-8 sm:px-8 backdrop-blur">
         {decisionBar}
       </div>
     </div>
