@@ -14,7 +14,15 @@ import * as React from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { EditorView } from '@codemirror/view';
+
 import { TrackedSection as BlogSection } from '../TrackedSection';
+
+function editorView(): EditorView {
+  const el = document.querySelector('.cm-editor') as HTMLElement | null;
+  if (!el) throw new Error('no editor mounted');
+  return EditorView.findFromDOM(el)!;
+}
 
 const noop = () => {};
 
@@ -157,12 +165,12 @@ describe('BlogSection autosave', () => {
 
     rerender(<BlogSection value="in flight" onChange={noop} onSave={onSave} />);
     await tick(1_200);
-    expect(screen.getByRole('status')).toHaveTextContent('Saving…');
+    expect(screen.getByText('Saving…')).toBeInTheDocument();
 
     await act(async () => {
       release?.();
     });
-    expect(screen.getByRole('status')).toHaveTextContent('Saved');
+    expect(screen.getByText('Saved')).toBeInTheDocument();
   });
 
   it('says so when the save fails, instead of claiming it saved', async () => {
@@ -172,22 +180,67 @@ describe('BlogSection autosave', () => {
     rerender(<BlogSection value="doomed" onChange={noop} onSave={onSave} />);
     await tick(1_200);
 
-    expect(screen.getByRole('status')).toHaveTextContent('Save failed');
+    expect(screen.getByText('Save failed')).toBeInTheDocument();
   });
 });
 
 describe('TrackedSection surface (bd startsim-q8sgy)', () => {
   beforeEach(() => vi.useRealTimers());
 
-  it('opens the blog rendered, and shows the source editor once the reviewer asks to edit', () => {
-    render(<BlogSection value="# A headline" onChange={noop} />);
+  it('opens the blog in the source editor with the caret in it: typing needs zero clicks (whwxd.17)', async () => {
+    const onChange = vi.fn();
+    render(<BlogSection value="# A headline" onChange={onChange} autoFocus />);
 
-    // Locked decision #3 — the blog opens in the rendered (Read) view.
-    expect(screen.getByTestId('tracked-read-view')).toBeInTheDocument();
-    expect(screen.queryByTestId('tracked-text-editor')).toBeNull();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    // Quinn 2026-10-08: no Read-then-Edit-then-click-in before a key lands.
     expect(screen.getByTestId('tracked-text-editor')).toBeInTheDocument();
+    expect(screen.queryByTestId('tracked-read-view')).toBeNull();
+    expect(screen.getByRole('tab', { name: 'Edit' })).toHaveAttribute('aria-selected', 'true');
+    const view = editorView();
+    expect(view.state.readOnly).toBe(false);
+    expect(view.contentDOM.contains(document.activeElement)).toBe(true);
+
+    act(() => {
+      view.dispatch(view.state.replaceSelection('Hi. '), { userEvent: 'input.type' });
+    });
+    expect(onChange).toHaveBeenLastCalledWith('Hi. # A headline');
+
+    // Read is still there, one choice away.
+    fireEvent.click(screen.getByRole('tab', { name: 'Read' }));
+    expect(screen.getByTestId('tracked-read-view')).toBeInTheDocument();
+  });
+
+  it('opening a draft saves nothing: no onChange, no autosave, no suggestion post (whwxd.17)', async () => {
+    vi.useFakeTimers();
+    for (const canEdit of [true, false]) {
+      const onChange = vi.fn();
+      const onSave = vi.fn();
+      const client = {
+        listSuggestions: vi.fn().mockResolvedValue({ offset_unit: 'utf16', version: 2, next_cursor: null, results: [] }),
+        listComments: vi.fn().mockResolvedValue({ offset_unit: 'utf16', version: 2, next_cursor: null, results: [] }),
+        propose: vi.fn().mockResolvedValue({}),
+      };
+      const props = { onChange, onSave, client, canEdit, currentActorSub: 'ada', autoFocus: true };
+      const { rerender, unmount } = render(<BlogSection value="Body." stored="Body." version={2} {...props} />);
+      // The stored text and version move under it (annotations load, a save
+      // echo, an accept elsewhere) while nobody types. A change to `value`
+      // itself is the page's to gate (editSeq, #96), not this card's.
+      rerender(<BlogSection value="Body." stored="Body. More." version={3} {...props} />);
+      await tick(10_000);
+      fireEvent.blur(editorView().contentDOM);
+      await tick(10_000);
+      unmount();
+      await tick(10_000);
+      expect(onChange).not.toHaveBeenCalled();
+      expect(onSave).not.toHaveBeenCalled();
+      expect(client.propose).not.toHaveBeenCalled();
+    }
+  });
+
+  it('a jump-to-issue shows the rendered blog, where its marks are painted', () => {
+    const { rerender } = render(<BlogSection value="This is game-changing." onChange={noop} />);
+    expect(screen.queryByTestId('tracked-read-view')).toBeNull();
+    rerender(<BlogSection value="This is game-changing." onChange={noop} highlight={['game-changing']} />);
+    expect(screen.getByTestId('tracked-read-view')).toBeInTheDocument();
   });
 
   it('opens LinkedIn in the source editor, plain text', () => {
@@ -217,14 +270,15 @@ describe('TrackedSection surface (bd startsim-q8sgy)', () => {
     };
     render(<BlogSection value="Before text" version={2} client={client} canEdit={false} currentActorSub="vee" onChange={noop} />);
     expect(await screen.findByTestId('rail-suggestion')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Suggest' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull();
+    expect(screen.getByRole('tab', { name: 'Suggest' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: 'Suggesting' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.queryByRole('tab', { name: 'Edit' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Accept' })).toBeNull();
   });
 
   it('draws what the server has stored, not the unsaved typing', async () => {
     render(<BlogSection value="typed but not saved" stored="as stored" onChange={noop} />);
-    expect(screen.getByTestId('tracked-read-view')).toHaveTextContent('as stored');
+    expect(editorView().state.doc.toString()).toBe('as stored');
     // The word count is the reviewer's own text.
     expect(screen.getByText('4 words')).toBeInTheDocument();
   });

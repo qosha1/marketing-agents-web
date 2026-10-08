@@ -980,7 +980,7 @@ function DraftEditorScreen({
   // Debounced autosave from the content editors. No list invalidation here — the
   // editors show their own "Saved" pill, and refetching mid-edit would churn it.
   // The DocumentEditor holds a SUBSET of the sections (the blog is edited in its
-  // own TrackedSection so it can open in Read — locked decision #3), so merge the
+  // own TrackedSection, under track changes), so merge the
   // edited subset back into the full section ref rather than replacing it, or a
   // section would drop out of the ref and the next full-blob PATCH would lose it.
   async function saveSections(edited?: DocSection[]) {
@@ -1275,7 +1275,7 @@ function DraftEditorScreen({
   const noteSections = ['general', 'blog', 'linkedin', 'seo', 'sources'];
 
   // Content is channel-tabbed (P2): Brief = the blog in its own TrackedSection (opens
-  // in Read — locked decision #3); LinkedIn + SEO render as single-section shared
+  // in the editor, caret in the text — bd startsim-whwxd.17); LinkedIn + SEO render as single-section shared
   // DocumentEditors; Sources is the dedicated tool. Each channel edits the SAME
   // `sections`/sources state and persistence — no change to the stored data shape.
   const blogValue = String(sectionValue(sections, 'blog') ?? '');
@@ -1404,7 +1404,8 @@ function DraftEditorScreen({
             id: 'brief',
             label: 'Brief',
             badge: blogValue ? `${words(blogValue)}w` : undefined,
-            // Blog opens in the rendered (Read) view by default (locked decision #3).
+            // Opens in the editor with the caret in the text: zero clicks to type
+            // (bd startsim-whwxd.17). Only the channel on screen takes focus.
             content: (
               <div className="space-y-2">
                 {attribution('blog')}
@@ -1421,6 +1422,7 @@ function DraftEditorScreen({
                     canEdit={canEdit}
                     runAccept={runAccept}
                     highlight={blogHighlight}
+                    autoFocus={channel === 'brief'}
                     onChange={(v) => onChange('blog', v)}
                     onSave={(v) => saveSections([{ key: 'blog', label: 'Blog post', kind: 'markdown', value: v }])}
                   />
@@ -1449,6 +1451,7 @@ function DraftEditorScreen({
                     currentActorSub={me.sub}
                     canEdit={canEdit}
                     runAccept={runAccept}
+                    autoFocus={channel === 'linkedin'}
                     onChange={(v) => onChange('linkedin', v)}
                     onSave={(v) => saveSections([{ key: 'linkedin', label: 'LinkedIn post', kind: 'text', value: v }])}
                   />

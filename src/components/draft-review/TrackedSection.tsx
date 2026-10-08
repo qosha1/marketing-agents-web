@@ -7,9 +7,11 @@
  * editor (rule 1).
  *
  * The surface is the shared `TrackedField` from @startsimpli/ui/track-changes:
- * the rendered Read view (the blog still opens there, locked decision #3) or
- * the source editor, show/hide changes, Current / Final / Original, and the
- * suggestions-and-comments rail. What this card adds is what is this page's:
+ * the source editor or the rendered Read view, show/hide changes, Current /
+ * Final / Original, and the suggestions-and-comments rail. Every field opens
+ * in the editor (bd startsim-whwxd.17, which retired locked decision #3's
+ * "the blog opens in Read"): Quinn wanted no clicks between opening a draft
+ * and typing. A jump-to-issue still flips to Read, where its marks paint. What this card adds is what is this page's:
  * the debounced autosave of the reviewer's own edits (BYO persistence, the
  * contract BlogSection had), the word count and save state, and the
  * jump-to-issue marks painted over the Read view.
@@ -29,6 +31,7 @@ import { wordCount } from '@startsimpli/ui';
 import {
   TrackedField,
   type AcceptResponseWire,
+  type TrackedFieldHandle,
   type TrackChangesClient,
 } from '@startsimpli/ui/track-changes';
 
@@ -62,9 +65,13 @@ export interface TrackedSectionProps {
   autosaveMs?: number;
   /**
    * Substrings a jump-to-issue wants marked in the rendered blog (bd 768w.16.15.3).
-   * Painted in the Read/Split preview only — see {@link useRangeHighlight}.
+   * Painted in the Read view only, so a non-empty list switches to it — see
+   * {@link useRangeHighlight}.
    */
   highlight?: string[];
+  /** Put the caret in the text on mount (the field on screen when the page
+   *  opens), so typing needs no click (bd startsim-whwxd.17). */
+  autoFocus?: boolean;
   className?: string;
 }
 
@@ -143,7 +150,7 @@ function textRanges(root: HTMLElement, needles: string[]): Range[] {
  * recompute live), which would yank the page out from under the writer.
  */
 function useRangeHighlight(
-  containerRef: React.RefObject<HTMLDivElement | null>,
+  root: HTMLElement | null,
   matches: string[],
   /** The rendered text; a change re-paints because the old Ranges are now stale. */
   content: string,
@@ -158,7 +165,6 @@ function useRangeHighlight(
       CSS.highlights.delete(HIGHLIGHT_NAME);
     };
 
-    const root = containerRef.current;
     const needles = key ? key.split(NEEDLE_SEP) : [];
     if (!root || needles.length === 0) {
       clear();
@@ -171,7 +177,7 @@ function useRangeHighlight(
     }
     CSS.highlights.set(HIGHLIGHT_NAME, new Highlight(...ranges));
     return clear;
-  }, [containerRef, key, content]);
+  }, [root, key, content]);
 }
 
 export function TrackedSection({
@@ -189,16 +195,23 @@ export function TrackedSection({
   onSave,
   autosaveMs = 1200,
   highlight = NO_HIGHLIGHT,
+  autoFocus = false,
   className,
 }: TrackedSectionProps) {
   const [status, setStatus] = React.useState<SaveStatus>('idle');
   const words = countWords(value);
 
   // Marks live in the rendered Read view only — the source editor paints its
-  // own decorations, so a jump into a field the reviewer is EDITING switches +
-  // scrolls without a mark.
-  const previewRef = React.useRef<HTMLDivElement | null>(null);
-  useRangeHighlight(previewRef, highlight, stored ?? value);
+  // own decorations — so a jump that has something to mark switches the field
+  // to Read. The Read view's element is STATE, not a ref: it mounts after that
+  // switch, and the paint has to run again when it does.
+  const [preview, setPreview] = React.useState<HTMLDivElement | null>(null);
+  useRangeHighlight(preview, highlight, stored ?? value);
+  const fieldRef = React.useRef<TrackedFieldHandle>(null);
+  const highlightKey = highlight.join(NEEDLE_SEP);
+  React.useEffect(() => {
+    if (highlightKey) fieldRef.current?.setSurface('read');
+  }, [highlightKey]);
 
   // Debounced autosave, mirroring DocumentEditor: fire onSave only on a real
   // content change, and keep the writer in a ref so the effect depends only on
@@ -252,6 +265,7 @@ export function TrackedSection({
       {/* Static, author-written CSS — never interpolates content. */}
       <style>{HIGHLIGHT_STYLE}</style>
       <TrackedField
+        ref={fieldRef}
         client={client}
         field={field}
         label={label}
@@ -262,9 +276,8 @@ export function TrackedSection({
         canEdit={canEdit}
         onChange={onChange}
         runAccept={runAccept}
-        // Locked decision #3: the blog opens in the rendered (Read) view.
-        defaultSurface={language === 'markdown' ? 'read' : 'source'}
-        readViewRef={previewRef}
+        autoFocus={autoFocus}
+        readViewRef={setPreview}
         headerExtra={
           <>
             <SaveStatusPill status={status} />
