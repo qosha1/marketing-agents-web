@@ -155,7 +155,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   }
 
   return (
-    <div className="flex min-h-screen bg-gray-50">
+    <div className="flex min-h-screen flex-col bg-gray-50 md:flex-row">
       <AppSidebar />
       {/* min-w-0 is load-bearing: main is a flex child, so without it its
           min-width is content-based and a wide board (kanban) grows main past the
@@ -175,9 +175,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             overflow-x: hidden -> rail bottom 6619, off screen, main width 853
             overflow-x: clip   -> rail bottom  614  = viewport, main width 853
           Width is unchanged because min-w-0 above is what bounds the flex track;
-          the two declarations do different jobs and both are needed. */}
+          the two declarations do different jobs and both are needed.
+
+          Below md the row becomes a column — the rail is hidden and AppSidebar's
+          top bar sits above main — and the gutter drops to px-4 (bd
+          startsim-g2m75). DraftReviewLayout's full-bleed sticky bars mirror this
+          gutter with -mx-4 sm:-mx-8, so change both together. */}
       <main className="flex-1 min-w-0 overflow-x-clip">
-        <div className="w-full px-8 py-8">{children}</div>
+        <div className="w-full px-4 py-4 sm:px-8 sm:py-8">{children}</div>
       </main>
     </div>
   );

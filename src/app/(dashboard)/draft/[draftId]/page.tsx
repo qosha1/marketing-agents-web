@@ -1320,7 +1320,7 @@ function DraftEditorScreen({
         {attribution('name', { nameColumn: true })}
         <LanguageSwitcher draft={draft} />
       </div>
-      <div className="flex shrink-0 flex-wrap items-center gap-2">
+      <div className="flex max-w-full shrink-0 flex-wrap items-center gap-2">
         {allDrafts.length > 0 && queueIndex >= 0 ? (
           <div className="flex items-center gap-1 rounded-md border border-border bg-neutral-50 px-1 text-xs text-neutral-500">
             <button

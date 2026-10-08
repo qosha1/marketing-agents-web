@@ -379,8 +379,11 @@ export default function BoardPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
+      {/* Wraps below the title on a narrow screen (bd startsim-g2m75): unwrapped,
+          the recency + assignee buttons ran ~200px past a 390px viewport and
+          main's overflow-x clip cut them off where nobody could reach them. */}
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
           <h1 className="text-lg font-semibold">
             {activeContentType ? contentCategoryLabel(activeContentType) : `${type?.label ?? typeKey} — Board`}
           </h1>
@@ -406,8 +409,8 @@ export default function BoardPage() {
             ) : null}
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5 text-xs">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1.5 text-xs">
             <span className="text-neutral-400">Showing</span>
             {RECENCY_WINDOWS.map((w) => (
               <button
@@ -423,7 +426,7 @@ export default function BoardPage() {
             ))}
           </div>
           {hasAssigneeAttr ? (
-            <div className="flex items-center gap-1.5 text-xs">
+            <div className="flex flex-wrap items-center gap-1.5 text-xs">
               <button
                 type="button"
                 onClick={() => setAssigneeParam(mySub && assigneeFilter?.value === mySub ? null : mySub ?? null)}
