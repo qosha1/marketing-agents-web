@@ -98,9 +98,11 @@ import {
   type DocSection,
 } from '@startsimpli/ui/document-editor';
 import {
+  FieldAttribution,
   StaleSaveDialog,
   unifiedTextDiff,
   useConditionalSave,
+  useFieldAuthors,
   type ConditionalSaveResult,
 } from '@startsimpli/ui/history';
 
@@ -168,7 +170,10 @@ import {
 } from '@/lib/foundry-api';
 import { acceptDraft } from '@/lib/accept-draft';
 import { entityKey, primeEntity } from '@/lib/entity-cache';
-import { revisionClient } from '@/lib/revisions';
+import { fieldAuthorsClient, revisionClient } from '@/lib/revisions';
+import { createWriteGate, restoreHooks } from '@/lib/restore-guard';
+import { rememberVersion } from '@/lib/record-version';
+import { actorEditsHref, renderNextLink } from '@/lib/activity-links';
 import { readNotes, readReview, revisedFrom, revisionChain } from '@/lib/review';
 import {
   coverageSummary,
@@ -538,6 +543,9 @@ function DraftEditorScreen({
   /** Whether the rail's History panel is open. Page state because the stale-save
    *  dialog's safe default action opens it. */
   const [historyOpen, setHistoryOpen] = useState(false);
+  /** The rail's History narrowed to one field (`?field=`), opened from a field's
+   *  "edited by" line. Null shows every field. */
+  const [historyField, setHistoryField] = useState<string | null>(null);
 
   // Refs mirror the latest local state so any async persist merges the freshest of
   // every field (sections + review + notes + sources) into the full data blob,
@@ -732,8 +740,15 @@ function DraftEditorScreen({
         ? 'Set your verdict to Approve to accept'
         : (sourceGap?.gateHint ?? null);
 
-  const onChange = (key: string, value: unknown) =>
-    setSections((prev) => prev.map((s) => (s.key === key ? { ...s, value } : s)));
+  /** Edits made vs edits saved, so a restore flushes only real unsaved typing
+   *  (lib/restore-guard.ts). A counter, not a flag: typing during a save in
+   *  flight must still count as unsaved when that save lands. */
+  const editSeq = useRef(0);
+  const savedSeq = useRef(0);
+  const onChange = (key: string, value: unknown) => {
+    editSeq.current += 1;
+    return setSections((prev) => prev.map((s) => (s.key === key ? { ...s, value } : s)));
+  };
 
   // The single source of truth for a PATCH body: the full existing blob with the
   // freshest sections + review + notes folded in, plus any explicit status/flag
@@ -826,8 +841,70 @@ function DraftEditorScreen({
     return false;
   };
 
-  const persist = async (overrides: Record<string, unknown> = {}, whatFailed = 'Could not save.') =>
-    report(await save.save({ data: mergedData(overrides) }), whatFailed);
+  /**
+   * EVERY WRITE GOES THROUGH THE GATE, so a restore can close it (bd
+   * startsim-vehzd). While a restore is in flight the debounced editors may still
+   * fire; through the gate they send nothing instead of PATCHing the old blob
+   * back over the restored one. See lib/restore-guard.ts.
+   */
+  const gate = useMemo(() => createWriteGate(), []);
+  const persist = (overrides: Record<string, unknown> = {}, whatFailed = 'Could not save.') =>
+    gate.run(async () => {
+      const seq = editSeq.current;
+      const ok = report(await save.save({ data: mergedData(overrides) }), whatFailed);
+      if (ok) savedSeq.current = Math.max(savedSeq.current, seq);
+      return ok;
+    }, false);
+
+  /** The version a restore asserts: the hook's LIVE one, never `draft.version` —
+   *  after one autosave the prop is stale and every restore would 412 against the
+   *  reviewer's own save. A ref, because the flush just before a restore advances
+   *  it inside the same tick, before React re-renders. */
+  const liveVersion = useRef<number | undefined>(save.version);
+  liveVersion.current = save.version ?? liveVersion.current;
+
+  const restore = restoreHooks({
+    gate,
+    cancelTimers: () => {
+      if (reviewSaveTimer.current) clearTimeout(reviewSaveTimer.current);
+    },
+    // What the editor holds NOW, straight through the conditional save (not the
+    // gate it has just closed). A byte-identical re-send records nothing.
+    hasUnsaved: () => editSeq.current > savedSeq.current,
+    flush: async () => {
+      const seq = editSeq.current;
+      const result = await save.save({ data: mergedData() });
+      if (result.status === 'saved') savedSeq.current = Math.max(savedSeq.current, seq);
+      report(result, 'Could not save your latest edits.');
+      if (result.status === 'saved' && result.version !== undefined) liveVersion.current = result.version;
+      return result.status;
+    },
+    reload,
+    remember: (record) => rememberVersion(draft.id, record),
+  });
+
+  /** Who last wrote each field. Keyed on the live version, so it re-reads after
+   *  every save this page makes. */
+  const authorsClient = useMemo(() => fieldAuthorsClient(draft.id), [draft.id]);
+  const authors = useFieldAuthors({
+    client: authorsClient,
+    queryKey: [...entityKey(draft.id), 'field-authors', save.version ?? null],
+  });
+  const openFieldHistory = (field: string) => {
+    setHistoryField(field);
+    setHistoryOpen(true);
+    setPane('quality');
+  };
+  const attribution = (field: string, opts: { nameColumn?: boolean } = {}) => (
+    <FieldAttribution
+      authors={authors.data}
+      field={field}
+      {...(opts.nameColumn ? { nameColumn: true } : {})}
+      onOpenHistory={openFieldHistory}
+      actorHref={actorEditsHref}
+      renderLink={renderNextLink}
+    />
+  );
 
   // Debounced autosave from the content editors. No list invalidation here — the
   // editors show their own "Saved" pill, and refetching mid-edit would churn it.
@@ -854,6 +931,7 @@ function DraftEditorScreen({
 
   // Scorecard autosave is debounced so per-keystroke note edits don't churn.
   function onReviewChange(next: ReviewScore) {
+    editSeq.current += 1;
     setReview(next);
     reviewRef.current = next;
     if (reviewSaveTimer.current) clearTimeout(reviewSaveTimer.current);
@@ -1167,6 +1245,7 @@ function DraftEditorScreen({
       <div className="flex flex-wrap items-start justify-between gap-3">
       <div className="min-w-0 space-y-1">
         <h1 className="text-xl font-semibold">{draft.name || draftTitle(draft)}</h1>
+        {attribution('name', { nameColumn: true })}
         <LanguageSwitcher draft={draft} />
       </div>
       <div className="flex shrink-0 flex-wrap items-center gap-2">
@@ -1215,6 +1294,7 @@ function DraftEditorScreen({
             {draftStatusLabel(status)}
           </span>
         ) : null}
+        {status ? attribution('status') : null}
         {candidateIndex > 0 ? (
           <span className="rounded-full border border-border bg-neutral-50 px-2.5 py-0.5 text-xs text-neutral-500">
             candidate #{candidateIndex}
@@ -1254,24 +1334,37 @@ function DraftEditorScreen({
             badge: blogValue ? `${words(blogValue)}w` : undefined,
             // Blog opens in the rendered (Read) view by default (locked decision #3).
             content: (
-              <BlogSection
-                value={blogValue}
-                highlight={blogHighlight}
-                onChange={(v) => onChange('blog', v)}
-                onSave={(v) => saveSections([{ key: 'blog', label: 'Blog post', kind: 'markdown', value: v }])}
-              />
+              <div className="space-y-2">
+                {attribution('blog')}
+                <BlogSection
+                  value={blogValue}
+                  highlight={blogHighlight}
+                  onChange={(v) => onChange('blog', v)}
+                  onSave={(v) => saveSections([{ key: 'blog', label: 'Blog post', kind: 'markdown', value: v }])}
+                />
+              </div>
             ),
           },
           {
             id: 'linkedin',
             label: 'LinkedIn',
             badge: linkedinValue ? `${words(linkedinValue)}w` : undefined,
-            content: <DocumentEditor sections={linkedinSection} onChange={onChange} onSave={saveSections} />,
+            content: (
+              <div className="space-y-2">
+                {attribution('linkedin')}
+                <DocumentEditor sections={linkedinSection} onChange={onChange} onSave={saveSections} />
+              </div>
+            ),
           },
           {
             id: 'seo',
             label: 'SEO',
-            content: <DocumentEditor sections={seoSection} onChange={onChange} onSave={saveSections} />,
+            content: (
+              <div className="space-y-2">
+                {attribution('seo')}
+                <DocumentEditor sections={seoSection} onChange={onChange} onSave={saveSections} />
+              </div>
+            ),
           },
           {
             id: 'sources',
@@ -1280,6 +1373,7 @@ function DraftEditorScreen({
             warn: sourcesCoverage.concern,
             content: (
               <div className="space-y-3">
+                {attribution('sources')}
                 {/* The check's basis, when there isn't one. Loading is a not-yet
                     (a quiet line); a genuine empty and a failed read are absences
                     with different fixes — so they are different cards, and neither
@@ -1362,6 +1456,21 @@ function DraftEditorScreen({
       revisions={revisions}
       historyOpen={historyOpen}
       onHistoryOpenChange={setHistoryOpen}
+      historyField={historyField}
+      onHistoryFieldChange={setHistoryField}
+      // RESTORE (bd startsim-vehzd). The live version, read at confirm time; the
+      // gate + flush before, and a refetch-and-remount after, so the editor's
+      // local copy is the restored record and no queued autosave clobbers it.
+      currentVersion={() => liveVersion.current}
+      beforeRestore={restore.beforeRestore}
+      onRestored={async (outcome) => {
+        await restore.onRestored(outcome);
+        notify.success(
+          outcome.summary.revision === null
+            ? 'Nothing to restore — the draft already matches that version.'
+            : `Restored from v${outcome.summary.restoredFrom}.`,
+        );
+      }}
       chain={chain}
       currentId={String(draft.id)}
       parentId={parentId}

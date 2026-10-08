@@ -210,12 +210,6 @@ export default function TypeRecordsPage() {
       }),
     [topicReview.statusName, qc],
   );
-  // Bumped by an "Edit fields" save, to remount the shared drawer on the saved
-  // record. `ReviewDrawer` seeds its own `data` once per record id and merges
-  // every later decision over it, so without the remount a decision made after
-  // an edit wrote the PRE-edit blob back over it (bd startsim-jkkn7.19). Not
-  // bumped on a decision: that would close the note box a decision opens.
-  const [drawerEpoch, setDrawerEpoch] = useState(0);
   // Where "back" returns to — the reviewer's own location, scope and all. Read
   // at click time rather than baked into a memo so a filter change between
   // render and decision still comes back correctly.
@@ -1033,7 +1027,6 @@ export default function TypeRecordsPage() {
         // approve / reject / note, ↑↓/j-k to the next, deep field-edit behind
         // "Edit fields"). Walks the currently-visible list for prev/next.
         <ReviewDrawer
-          key={drawerEpoch}
           client={approveWatch.client}
           type={type}
           // Same vocabulary as the inline cluster on this table: the drawer's
@@ -1071,10 +1064,14 @@ export default function TypeRecordsPage() {
             <RecordEditFields
               type={t}
               record={r}
+              // The drawer moves onto the SAVED record — its data and its
+              // version — so a decision after an edit merges over the edit and
+              // asserts the version it produced (@startsimpli/ui, bd
+              // startsim-jkkn7.20). This replaced a remount key that existed
+              // only because the drawer could not be told.
               onSaved={(rec) => {
-                saved();
+                saved(rec);
                 setSelected(rec);
-                setDrawerEpoch((n) => n + 1);
               }}
               onCancel={back}
             />

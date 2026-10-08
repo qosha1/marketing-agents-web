@@ -40,7 +40,19 @@
  * history (and `useConditionalSave` maps the same 404 to `identityGap:
  * 'forbidden'` rather than to "nobody changed it").
  */
-import type { RevisionClient, RevisionPage, RevisionQuery } from '@startsimpli/ui/history';
+import {
+  revisionFeedParams,
+  type FieldAuthorsClient,
+  type FieldAuthorsResponse,
+  type RestoreOutcome,
+  type RestoreRequest,
+  type RevisionClient,
+  type RevisionFeedClient,
+  type RevisionFeedPage,
+  type RevisionFeedQuery,
+  type RevisionPage,
+  type RevisionQuery,
+} from '@startsimpli/ui/history';
 
 import { getRegisteredToken } from '@/infrastructure/auth';
 import { formatBearer } from '@/lib/bearer';
@@ -55,16 +67,85 @@ class RevisionsError extends Error {
   }
 }
 
-/** The injected reader for ONE record's trail. */
+async function authHeaders(): Promise<Record<string, string>> {
+  return { authorization: formatBearer(await getRegisteredToken()) };
+}
+
+async function readJson(res: Response): Promise<unknown> {
+  try {
+    return await res.json();
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * The injected reader — and restorer — for ONE record's trail.
+ *
+ * `restore` (bd startsim-vehzd; route bd startsim-ti1yv) POSTs to
+ * `/entities/<id>/revisions/<N>/restore` with the precondition in ONE spelling,
+ * the body's `expected_version`, and never also `If-Match`: the server checks
+ * both and refuses if EITHER disagrees, so two spellings can refuse a request by
+ * themselves. It RESOLVES every answer with its status and body — a 412 carries
+ * `current_version`, which the shared panel needs — rather than throwing it away.
+ */
 export function revisionClient(id: number | string): RevisionClient {
   return {
-    list: async ({ page = 1, pageSize = 50 }: RevisionQuery): Promise<RevisionPage> => {
+    list: async ({ page = 1, pageSize = 50, field }: RevisionQuery): Promise<RevisionPage> => {
       const query = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
+      // ?field= narrowing (bd startsim-jkkn7.8). Declared name, verbatim.
+      if (typeof field === 'string' && field) query.set('field', field);
       const res = await fetch(`/api/v1/entities/${id}/revisions?${query}`, {
-        headers: { authorization: formatBearer(await getRegisteredToken()) },
+        headers: await authHeaders(),
       });
       if (!res.ok) throw new RevisionsError(res.status);
       return (await res.json()) as RevisionPage;
+    },
+    restore: async ({ version, fields, expectedVersion }: RestoreRequest): Promise<RestoreOutcome> => {
+      const res = await fetch(`/api/v1/entities/${id}/revisions/${version}/restore`, {
+        method: 'POST',
+        headers: { ...(await authHeaders()), 'content-type': 'application/json' },
+        body: JSON.stringify({
+          ...(fields && fields.length ? { fields } : {}),
+          expected_version: expectedVersion,
+        }),
+      });
+      return { status: res.status, body: await readJson(res), headers: res.headers };
+    },
+  };
+}
+
+/**
+ * "Last edited by X, when" for every field of one record (bd startsim-5n9ha;
+ * route bd startsim-6sso4). Raw for the same reason as the trail: its `fields`
+ * map is keyed by the tenant's declared attribute names.
+ */
+export function fieldAuthorsClient(id: number | string): FieldAuthorsClient {
+  return {
+    get: async (): Promise<FieldAuthorsResponse> => {
+      const res = await fetch(`/api/v1/entities/${id}/field-authors`, { headers: await authHeaders() });
+      if (!res.ok) throw new RevisionsError(res.status);
+      return (await res.json()) as FieldAuthorsResponse;
+    },
+  };
+}
+
+/**
+ * Every edit across records, newest first (bd startsim-1pqb9; route bd
+ * startsim-ivr3n). CURSOR paged — there is no count and `?page=` is a 400 — and
+ * the route also 400s an unknown parameter and a BLANK `actor` or `scope`, so
+ * the filters go through the shared allowlist, which drops blanks.
+ */
+export function revisionFeedClient(): RevisionFeedClient {
+  return {
+    list: async (q: RevisionFeedQuery): Promise<RevisionFeedPage> => {
+      const query = new URLSearchParams(revisionFeedParams(q) as Record<string, string>);
+      if (typeof q.cursor === 'string' && q.cursor) query.set('cursor', q.cursor);
+      if (typeof q.pageSize === 'number') query.set('page_size', String(q.pageSize));
+      const qs = query.toString();
+      const res = await fetch(`/api/v1/revisions${qs ? `?${qs}` : ''}`, { headers: await authHeaders() });
+      if (!res.ok) throw new RevisionsError(res.status);
+      return (await res.json()) as RevisionFeedPage;
     },
   };
 }

@@ -59,7 +59,11 @@ import {
   type ReviewDimension,
 } from '@startsimpli/ui';
 
-import { RecordHistoryPanel, type RevisionClient } from '@startsimpli/ui/history';
+import {
+  RecordHistoryPanel,
+  type RecordHistoryPanelProps,
+  type RevisionClient,
+} from '@startsimpli/ui/history';
 
 import { cn } from '@startsimpli/ui/utils';
 import type { EntityRecord } from '@/lib/foundry-api';
@@ -115,6 +119,15 @@ export interface QualityRailProps {
    *  dialog's safe default action has to be able to open it from outside. */
   historyOpen: boolean;
   onHistoryOpenChange: (open: boolean) => void;
+  /** The panel narrowed to one field (`?field=`), set by a field's "edited by"
+   *  line. Null or absent shows every field. */
+  historyField?: string | null;
+  onHistoryFieldChange?: (field: string | null) => void;
+  /** RESTORE (bd startsim-vehzd), straight through to the shared panel. Absent,
+   *  the panel offers no restore. */
+  currentVersion?: RecordHistoryPanelProps['currentVersion'];
+  beforeRestore?: RecordHistoryPanelProps['beforeRestore'];
+  onRestored?: RecordHistoryPanelProps['onRestored'];
 
   // Revision history
   chain: EntityRecord[];
@@ -211,6 +224,11 @@ export function QualityRail(props: QualityRailProps) {
     revisions,
     historyOpen,
     onHistoryOpenChange,
+    historyField,
+    onHistoryFieldChange,
+    currentVersion: heldVersion,
+    beforeRestore,
+    onRestored,
     chain,
     currentId,
     parentId,
@@ -393,13 +411,25 @@ export function QualityRail(props: QualityRailProps) {
           <RecordHistoryPanel
             client={revisions}
             queryKey={['entity', currentId, 'revisions']}
+            recordLabel="this draft"
+            {...(historyField ? { field: historyField } : {})}
+            {...(onHistoryFieldChange
+              ? {
+                  onClearField: () => onHistoryFieldChange(null),
+                  onNarrowToField: (f: string) => onHistoryFieldChange(f),
+                }
+              : {})}
+            {...(heldVersion !== undefined ? { currentVersion: heldVersion } : {})}
+            {...(beforeRestore ? { beforeRestore } : {})}
+            {...(onRestored ? { onRestored } : {})}
             // The rail's own card and heading supply the chrome, so the panel's
             // title is hidden rather than repeated. Its DESCRIPTION stays: it is
             // what tells the reader this trail is per-field, not per-save.
             // `incompleteNote` and `historyEnabled` are left at the shared
             // defaults — a fork must not decide the trail looks more complete
-            // than it is, and the declared-off policy is not on the revisions
-            // envelope yet (bd startsim-jkkn7.17).
+            // than it is, and since @startsimpli/ui reads the declared-off
+            // policy off the revisions envelope itself (bd startsim-jkkn7.17),
+            // passing it here would only be a second, staler copy.
             // `px-0` on both: the CollapsiblePanel already supplies the gutter,
             // and the panel's own would cost 40px of a ~370px rail. Since
             // @startsimpli/ui 0.4.141 the per-field before/after split sizes on

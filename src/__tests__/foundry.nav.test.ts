@@ -40,6 +40,12 @@ describe('buildNav', () => {
     expect(items[0]).toMatchObject({ href: '/', label: 'Dashboard' });
   });
 
+  it('has an Activity link to every edit across records (bd startsim-1pqb9)', () => {
+    expect(items.find((e) => !isGroup(e) && (e as { href?: string }).href === '/activity')).toMatchObject({
+      label: 'Activity',
+    });
+  });
+
   it('lists each content TYPE as its own sidebar item, between Topics and Drafts', () => {
     // The three kinds used to be reachable only as a "Kind:" filter chip inside
     // the Topics table. They are top-level destinations now.

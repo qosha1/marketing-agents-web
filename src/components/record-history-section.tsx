@@ -18,12 +18,23 @@
  *
  * The draft page's Quality rail keeps its own mount: it is CONTROLLED there,
  * because the stale-save dialog's "See what changed" opens it from outside.
+ *
+ * RESTORE (bd startsim-vehzd). Every surface that mounts this edits the record
+ * through a re-read-then-merge save asserting the version it read, so there is no
+ * local editor copy to clobber here — what a restore must refresh is the CACHE:
+ * the record's own key (both host pages read the topic from it) and the lists
+ * that show it. The precondition is the newer of the version the host shows and
+ * the one this tab last saw (lib/record-version.ts), because a drawer's record
+ * can be a snapshot older than the registry.
  */
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { notify } from '@startsimpli/ui';
 import { RecordHistoryPanel, versionFromRecord } from '@startsimpli/ui/history';
 
 import { CollapsiblePanel, FLATTEN_CARD } from '@/components/draft-review/CollapsiblePanel';
-import { revisionsKey } from '@/lib/entity-cache';
+import { entityKey, revisionsKey } from '@/lib/entity-cache';
+import { heldVersion, rememberVersion } from '@/lib/record-version';
 import { revisionClient } from '@/lib/revisions';
 
 export interface RecordHistorySectionProps {
@@ -32,23 +43,63 @@ export interface RecordHistorySectionProps {
   /** Card title. Name the record when another record's history may sit nearby. */
   title?: string;
   className?: string;
+  /** CONTROLLED open state, for a host whose field attribution opens it. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  /** Narrow to one field (`?field=`). */
+  field?: string | null;
+  onFieldChange?: (field: string | null) => void;
+  /** "this topic" — for the restore and stale dialogs. */
+  recordLabel?: string;
 }
 
 export function RecordHistorySection({
   record,
   title = 'History',
   className,
+  open,
+  onOpenChange,
+  field,
+  onFieldChange,
+  recordLabel = 'this record',
 }: RecordHistorySectionProps) {
   const recordId = record.id;
+  const qc = useQueryClient();
   // Read through the shared helper: the topic header holds the collection
   // package's `EntityRecord`, which does not declare `version`.
   const version = versionFromRecord(record);
   const client = useMemo(() => revisionClient(recordId), [recordId]);
+  // Uncontrolled hosts can still narrow from inside a row.
+  const [ownField, setOwnField] = useState<string | null>(null);
+  const narrowed = field !== undefined ? field : ownField;
+  const setNarrowed = onFieldChange ?? setOwnField;
+  const controlled = open !== undefined ? { open, onOpenChange: onOpenChange ?? (() => {}) } : {};
   return (
-    <CollapsiblePanel title={title} className={className}>
+    <CollapsiblePanel title={title} className={className} {...controlled}>
       <RecordHistoryPanel
         client={client}
         queryKey={revisionsKey(recordId, version)}
+        recordLabel={recordLabel}
+        {...(narrowed ? { field: narrowed } : {})}
+        onClearField={() => setNarrowed(null)}
+        onNarrowToField={(f) => setNarrowed(f)}
+        currentVersion={() => {
+          const held = heldVersion(recordId);
+          if (version === undefined) return held;
+          return held === undefined ? version : Math.max(version, held);
+        }}
+        onRestored={async (outcome) => {
+          rememberVersion(recordId, outcome.record);
+          // The record's own key first — both host pages read the topic from it —
+          // then every list that shows it.
+          await qc.invalidateQueries({ queryKey: entityKey(recordId) });
+          await qc.invalidateQueries({ queryKey: ['entities'] });
+          notify.success(
+            outcome.summary.revision === null
+              ? 'Nothing to restore — it already matches that version.'
+              : `Restored from v${outcome.summary.restoredFrom}.`,
+          );
+        }}
         // The card supplies the title and the gutter, so the panel's own are
         // dropped; its DESCRIPTION and its incompleteness note stay — they are
         // what tell the reader the trail is per-field and may be partial.
