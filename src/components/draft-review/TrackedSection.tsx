@@ -1,34 +1,60 @@
 'use client';
 
 /**
- * BlogSection — the draft's blog card, defaulting to the RENDERED (Read) view
- * (P1 of the redesigned review flow; locked product decision #3).
+ * TrackedSection — one draft text field (the blog, the LinkedIn post) under
+ * track changes (bd startsim-q8sgy; design startsim-xyn25). It replaced the
+ * blog's textarea card and the LinkedIn DocumentEditor, so each field has ONE
+ * editor (rule 1).
  *
- * The shared @startsimpli/ui DocumentEditor hardcodes its markdown sub-section to
- * open in Split and exposes no prop to seed the initial view mode, so a blog that
- * "opens in Read" cannot be expressed from the consumer side via the DocumentEditor.
- * This fork-local card reuses the shared MarkdownRenderer to render Read by default;
- * Edit is opt-in and Split only appears in edit context. It's controlled (value +
- * onChange) with a debounced autosave (BYO persistence), mirroring DocumentEditor's
- * contract so persistence stays identical. Extracted to a shared composer later —
- * at which point DocumentEditor should gain an initial-markdown-mode prop and this
- * goes away. (TODO: upstream `initialMarkdownMode`/per-section `defaultMode` on
- * @startsimpli/ui DocumentEditor.)
+ * The surface is the shared `TrackedField` from @startsimpli/ui/track-changes:
+ * the rendered Read view (the blog still opens there, locked decision #3) or
+ * the source editor, show/hide changes, Current / Final / Original, and the
+ * suggestions-and-comments rail. What this card adds is what is this page's:
+ * the debounced autosave of the reviewer's own edits (BYO persistence, the
+ * contract BlogSection had), the word count and save state, and the
+ * jump-to-issue marks painted over the Read view.
+ *
+ * TWO TEXTS, ON PURPOSE. `value` is what the reviewer has typed (the page's
+ * section state); it is what autosaves and what the word count counts.
+ * `stored` is the text as saved at `version`; it is what every server offset
+ * (authorship, suggestions, comments) describes, so it is what the tracked
+ * surface is given. Handing the surface unsaved keystrokes would make every
+ * anchor look orphaned until the save landed.
  */
 import * as React from 'react';
-import { Columns2, Eye, Pencil, Loader2, Check, AlertCircle } from 'lucide-react';
+import { Loader2, Check, AlertCircle } from 'lucide-react';
 
 import { cn } from '@startsimpli/ui/utils';
 import { wordCount } from '@startsimpli/ui';
-import { MarkdownRenderer } from '@startsimpli/ui/blog';
+import {
+  TrackedField,
+  type AcceptResponseWire,
+  type TrackChangesClient,
+} from '@startsimpli/ui/track-changes';
 
-export type BlogViewMode = 'read' | 'edit' | 'split';
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
-export interface BlogSectionProps {
+const NO_CLIENT: TrackChangesClient = {};
+
+export interface TrackedSectionProps {
+  /** What the reviewer has typed: the page's section state. */
   value: string;
+  /** The text as stored at `version`. Defaults to `value`. */
+  stored?: string;
+  /** The version the page's next write asserts. */
+  version?: number | null;
+  /** The record field (`blog`, `linkedin`). */
+  field?: string;
   label?: string;
-  /** Controlled edit — the parent updates its blog section state. */
+  /** `markdown` (blog) or `plain` (LinkedIn). */
+  language?: 'markdown' | 'plain';
+  client?: TrackChangesClient;
+  currentActorSub?: string | null;
+  /** False for a view-only reviewer: suggest and comment only. */
+  canEdit?: boolean;
+  /** The page's accept: hold writes, accept at its live version, fold. */
+  runAccept?: (accept: (expectedVersion: number) => Promise<AcceptResponseWire>) => Promise<unknown>;
+  /** Controlled edit — the parent updates its section state. */
   onChange(next: string): void;
   /** Debounced autosave (BYO persistence). Receives the current value. */
   onSave?(value: string): void | Promise<void>;
@@ -148,24 +174,31 @@ function useRangeHighlight(
   }, [containerRef, key, content]);
 }
 
-export function BlogSection({
+export function TrackedSection({
   value,
+  stored,
+  version = null,
+  field = 'blog',
   label = 'Blog post',
+  language = 'markdown',
+  client = NO_CLIENT,
+  currentActorSub = null,
+  canEdit = true,
+  runAccept,
   onChange,
   onSave,
   autosaveMs = 1200,
   highlight = NO_HIGHLIGHT,
   className,
-}: BlogSectionProps) {
-  // Locked decision #3: the blog opens in the rendered (Read) view.
-  const [mode, setMode] = React.useState<BlogViewMode>('read');
+}: TrackedSectionProps) {
   const [status, setStatus] = React.useState<SaveStatus>('idle');
   const words = countWords(value);
 
-  // Marks live in the rendered preview only — a textarea has no text nodes to paint,
-  // so a jump into a blog the reviewer is EDITING switches + scrolls without a mark.
+  // Marks live in the rendered Read view only — the source editor paints its
+  // own decorations, so a jump into a field the reviewer is EDITING switches +
+  // scrolls without a mark.
   const previewRef = React.useRef<HTMLDivElement | null>(null);
-  useRangeHighlight(previewRef, highlight, value);
+  useRangeHighlight(previewRef, highlight, stored ?? value);
 
   // Debounced autosave, mirroring DocumentEditor: fire onSave only on a real
   // content change, and keep the writer in a ref so the effect depends only on
@@ -214,79 +247,31 @@ export function BlogSection({
     };
   }, [value, autosaveMs]);
 
-  const showEditor = mode === 'edit' || mode === 'split';
-  const showPreview = mode === 'read' || mode === 'split';
-
   return (
-    <section className={cn('rounded-lg border border-border bg-card', className)}>
+    <div className={className}>
       {/* Static, author-written CSS — never interpolates content. */}
       <style>{HIGHLIGHT_STYLE}</style>
-      <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-2">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{label}</h3>
-        <div className="flex items-center gap-3">
-          <SaveStatusPill status={status} />
-          <span className="text-xs text-muted-foreground">{words} words</span>
-          <ModeToggle mode={mode} onMode={setMode} />
-        </div>
-      </div>
-      <div className={cn('grid gap-0', mode === 'split' && 'lg:grid-cols-2 lg:divide-x lg:divide-border')}>
-        {showEditor && (
-          <textarea
-            value={value}
-            onChange={(e) => onChange(e.target.value)}
-            aria-label={`${label} markdown`}
-            className="min-h-[16rem] w-full resize-y border-0 bg-transparent p-4 font-mono text-sm leading-relaxed text-foreground outline-none placeholder:text-muted-foreground focus:ring-0"
-            spellCheck
-          />
-        )}
-        {showPreview && (
-          <div ref={previewRef} className="min-h-[16rem] overflow-x-auto p-4">
-            {value ? (
-              <MarkdownRenderer content={value} />
-            ) : (
-              <p className="text-sm italic text-muted-foreground">Nothing to preview yet.</p>
-            )}
-          </div>
-        )}
-      </div>
-    </section>
-  );
-}
-
-function ModeToggle({ mode, onMode }: { mode: BlogViewMode; onMode: (m: BlogViewMode) => void }) {
-  // Split only appears in edit context (decision #3): it's disabled/hidden until
-  // the reviewer opts into editing — but we keep it in the group on wide screens
-  // once editing so the split affordance is one click away.
-  const opts: { value: BlogViewMode; label: string; icon: React.ReactNode; editOnly?: boolean }[] = [
-    { value: 'read', label: 'Read', icon: <Eye className="h-3 w-3" /> },
-    { value: 'edit', label: 'Edit', icon: <Pencil className="h-3 w-3" /> },
-    { value: 'split', label: 'Split', icon: <Columns2 className="h-3 w-3" />, editOnly: true },
-  ];
-  const editing = mode === 'edit' || mode === 'split';
-  return (
-    <div className="inline-flex overflow-hidden rounded-md border border-border" role="group" aria-label="Blog view mode">
-      {opts.map((o) => {
-        // Split shows only once the reviewer is editing, and only on wide screens.
-        if (o.editOnly && !editing) return null;
-        return (
-          <button
-            key={o.value}
-            type="button"
-            onClick={() => onMode(o.value)}
-            aria-pressed={mode === o.value}
-            className={cn(
-              'inline-flex items-center gap-1 px-2 py-1 text-xs transition-colors',
-              o.editOnly && 'hidden lg:inline-flex',
-              mode === o.value
-                ? 'bg-primary text-primary-foreground'
-                : 'bg-transparent text-muted-foreground hover:bg-muted',
-            )}
-          >
-            {o.icon}
-            {o.label}
-          </button>
-        );
-      })}
+      <TrackedField
+        client={client}
+        field={field}
+        label={label}
+        language={language}
+        value={stored ?? value}
+        version={version}
+        currentActorSub={currentActorSub}
+        canEdit={canEdit}
+        onChange={onChange}
+        runAccept={runAccept}
+        // Locked decision #3: the blog opens in the rendered (Read) view.
+        defaultSurface={language === 'markdown' ? 'read' : 'source'}
+        readViewRef={previewRef}
+        headerExtra={
+          <>
+            <SaveStatusPill status={status} />
+            <span className="text-xs text-muted-foreground">{words} words</span>
+          </>
+        }
+      />
     </div>
   );
 }

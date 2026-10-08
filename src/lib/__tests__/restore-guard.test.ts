@@ -174,3 +174,45 @@ describe('restoreHooks — no queued autosave lands after a restore', () => {
     expect(order).toEqual(['remember v7', 'reload']);
   });
 });
+
+describe('beforeAccept — an accepted suggestion is held like a restore (bd startsim-q8sgy)', () => {
+  function hooksFor(p: ReturnType<typeof page>, typed: () => boolean, flushResult: 'saved' | 'refused' = 'saved') {
+    return restoreHooks({
+      gate: p.gate,
+      cancelTimers: () => {},
+      hasUnsaved: typed,
+      flush: async () => {
+        await p.flushNow();
+        return flushResult;
+      },
+      reload: async () => {},
+      remember: () => {},
+    });
+  }
+
+  it('flushes nothing when nothing was typed (#96), and holds the autosave until released', async () => {
+    const p = page();
+    const hooks = hooksFor(p, () => false);
+    const release = await hooks.beforeAccept();
+    expect(p.patches).toEqual([]);
+    expect(await p.persist()).toBe(false); // held
+    release();
+    expect(await p.persist()).toBe(true);
+  });
+
+  it('flushes real typing first, so the accept asserts the version that typing produced', async () => {
+    const p = page();
+    p.type('typed before accepting');
+    const hooks = hooksFor(p, () => true);
+    const release = await hooks.beforeAccept();
+    expect(p.patches).toEqual(['typed before accepting']);
+    release();
+  });
+
+  it('accepts nothing when the flush was refused, and says so in accept words', async () => {
+    const p = page();
+    const hooks = hooksFor(p, () => true, 'refused');
+    await expect(hooks.beforeAccept()).rejects.toThrow(/nothing was accepted/);
+    expect(p.gate.blocked).toBe(false);
+  });
+});

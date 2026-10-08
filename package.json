@@ -11,11 +11,16 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@codemirror/commands": "^6.11.1",
+    "@codemirror/lang-markdown": "^6.5.2",
+    "@codemirror/language": "^6.13.1",
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.43.14",
     "@startsimpli/api": "^0.5.66",
     "@startsimpli/auth": "^0.4.38",
     "@startsimpli/forms": "^0.4.11",
     "@startsimpli/llm": "^0.4.23",
-    "@startsimpli/ui": "^0.4.142",
+    "@startsimpli/ui": "^0.4.144",
     "@tanstack/react-query": "^5.62.0",
     "lucide-react": "^0.563.0",
     "next": "16.1.6",
