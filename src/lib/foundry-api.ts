@@ -735,7 +735,23 @@ export function listRelationships(page = 1) {
  * consume — this app's authed same-origin client, injected so the workspaces stay
  * app-agnostic (the ~10-LOC wrappers in page.tsx / drafts/page.tsx pass it in).
  */
-export const collectionClient: CollectionClient = { listTypes, listAllEntities, updateEntity };
+/**
+ * The shared CollectionClient over this app's writes. Its optional third
+ * argument (`{ expectedVersion }`, @startsimpli/ui bd startsim-jkkn7.20) is the
+ * version of the blob the shared drawer / inline actions MERGED OVER, so it maps
+ * to `basedOn` — the one precondition source per request — and the registry is
+ * consulted only when a caller holds no version.
+ */
+export const collectionClient: CollectionClient = {
+  listTypes,
+  listAllEntities,
+  updateEntity: (id, input, options) =>
+    updateEntity(
+      id,
+      input,
+      options?.expectedVersion !== undefined ? { basedOn: { version: options.expectedVersion } } : undefined,
+    ),
+};
 
 // ---- tags (generic entity classification, startsim-iegx) ----
 // A tag is just {entity, label} — no category/taxonomy, so any UI (the "good

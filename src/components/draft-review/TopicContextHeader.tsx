@@ -70,8 +70,12 @@ import { resolveReviewConfig } from '@startsimpli/ui/collection';
 import type { EntityRecord, EntityTypeDef } from '@startsimpli/ui/collection';
 import { useQueryClient } from '@tanstack/react-query';
 import { Button, Input, Label, Textarea, notify } from '@startsimpli/ui';
+import { FieldAttribution, useFieldAuthors, versionFromRecord } from '@startsimpli/ui/history';
 
 import { RecordHistorySection } from '@/components/record-history-section';
+import { actorEditsHref, renderNextLink } from '@/lib/activity-links';
+import { entityKey } from '@/lib/entity-cache';
+import { fieldAuthorsClient } from '@/lib/revisions';
 import { readData } from '@/lib/board';
 import { contentCategoryLabel } from '@/lib/content';
 import { saveEntity } from '@/lib/entity-cache';
@@ -124,6 +128,36 @@ export function TopicContextHeader({
   const summary = str(data, cfg.summaryAttr);
   const status = str(data, cfg.statusName);
   const notes = str(data, cfg.noteAttr);
+  const verdict = str(data, cfg.verdictAttr);
+
+  // WHO LAST WROTE EACH FIELD (bd startsim-5n9ha). Keyed on the topic's version,
+  // so a save from this header — or anywhere that refreshes the topic — re-reads
+  // it. Clicking a line opens the history below, narrowed to that field.
+  const topicId = topic?.id;
+  const authorsClient = useMemo(
+    () => fieldAuthorsClient(topicId ?? ''),
+    [topicId],
+  );
+  const authors = useFieldAuthors({
+    client: authorsClient,
+    queryKey: [...entityKey(topicId ?? ''), 'field-authors', versionFromRecord(topic) ?? null],
+    enabled: topicId !== undefined && topicId !== null,
+  });
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyField, setHistoryField] = useState<string | null>(null);
+  const attribution = (field: string) => (
+    <FieldAttribution
+      authors={authors.data}
+      field={field}
+      onOpenHistory={(f) => {
+        setHistoryField(f);
+        setHistoryOpen(true);
+        setOpen(true);
+      }}
+      actorHref={actorEditsHref}
+      renderLink={renderNextLink}
+    />
+  );
   const chips = cfg.metaAttrs
     .map((a) => ({ attr: a, value: str(data, a) }))
     .filter((c) => c.value !== '');
@@ -230,9 +264,13 @@ export function TopicContextHeader({
                 {status.replace(/_/g, ' ')}
               </span>
             ) : null}
+            {status && topic ? attribution(cfg.statusName) : null}
           </div>
           {topic ? (
-            <h2 className="text-base font-semibold leading-snug text-neutral-900">{title}</h2>
+            <>
+              <h2 className="text-base font-semibold leading-snug text-neutral-900">{title}</h2>
+              {attribution(cfg.titleAttr)}
+            </>
           ) : (
             <p className="text-sm text-neutral-400">
               This draft is not linked to a topic.
@@ -313,9 +351,27 @@ export function TopicContextHeader({
 
       {topic && showBody && !editing ? (
         <div className="mt-2 space-y-2">
-          {subtitle ? <p className="text-sm text-neutral-600">{subtitle}</p> : null}
+          {subtitle ? (
+            <div>
+              <p className="text-sm text-neutral-600">{subtitle}</p>
+              {attribution(SUBTITLE_ATTR)}
+            </div>
+          ) : null}
           {summary && summary !== subtitle ? (
-            <p className="whitespace-pre-line text-sm leading-relaxed text-neutral-700">{summary}</p>
+            <div>
+              <p className="whitespace-pre-line text-sm leading-relaxed text-neutral-700">{summary}</p>
+              {attribution(cfg.summaryAttr)}
+            </div>
+          ) : null}
+          {verdict ? (
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-neutral-500">
+              {verdict ? (
+                <span className="inline-flex flex-wrap items-center gap-1">
+                  Decision: <span className="capitalize text-neutral-700">{verdict.replace(/_/g, ' ')}</span>
+                  {attribution(cfg.verdictAttr)}
+                </span>
+              ) : null}
+            </div>
           ) : null}
           {chips.length > 0 ? (
             <div className="flex flex-wrap items-center gap-1.5">
@@ -335,6 +391,7 @@ export function TopicContextHeader({
                 What the reviewer asked for
               </p>
               <p className="mt-0.5 whitespace-pre-line text-sm text-amber-900">{notes}</p>
+              {attribution(cfg.noteAttr)}
             </div>
           ) : null}
         </div>
@@ -350,6 +407,11 @@ export function TopicContextHeader({
           record={topic}
           title="Topic history"
           className="mt-3 shadow-none"
+          recordLabel="this topic"
+          open={historyOpen}
+          onOpenChange={setHistoryOpen}
+          field={historyField}
+          onFieldChange={setHistoryField}
         />
       ) : null}
     </section>

@@ -8,6 +8,7 @@
  *
  * The tree:
  *   - Dashboard (/)               — the review/system-health home
+ *   - Activity (/activity)        — every edit across records, by person or machine
  *   - Content group               — the content data tables:
  *       · Topics (/t/topic)       — every idea (all kinds), click → review/edit
  *       · one item PER content_type — the same table pre-filtered to that kind,
@@ -25,7 +26,7 @@
  * `.ts` module and the pure `buildNav` logic is unit-testable without a DOM.
  */
 import { createElement } from 'react';
-import { LayoutDashboard, FileText, Lightbulb, LayoutGrid, Layers, Table } from 'lucide-react';
+import { History, LayoutDashboard, FileText, Lightbulb, LayoutGrid, Layers, Table } from 'lucide-react';
 import type { GroupedNavEntry } from '@startsimpli/ui';
 
 import { CONTENT_TYPE_KEY, contentTabHref, declaredContentTypes } from '@/lib/content';
@@ -51,6 +52,9 @@ export function buildNav(types: EntityTypeDef[]): GroupedNavEntry[] {
 
   const items: GroupedNavEntry[] = [
     { href: '/', label: 'Dashboard', icon: createElement(LayoutDashboard) },
+    // Every edit across records — who changed what, person or machine
+    // (bd startsim-1pqb9). Its filters live in its own URL.
+    { href: '/activity', label: 'Activity', icon: createElement(History) },
     {
       label: 'Content',
       items: [

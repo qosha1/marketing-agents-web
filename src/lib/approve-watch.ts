@@ -102,10 +102,11 @@ export function createApproveWatch(
 
   const client: CollectionClient = {
     ...base,
-    async updateEntity(id, input) {
+    async updateEntity(id, input, options) {
       const key = String(id);
       const before = seen.get(key);
-      const saved = await base.updateEntity(id, input);
+      // The precondition passes straight through (bd startsim-jkkn7.20).
+      const saved = await base.updateEntity(id, input, options);
       const after = fieldStr(saved?.data, statusName);
       last = { id: key, before, after };
       seen.set(key, after);
