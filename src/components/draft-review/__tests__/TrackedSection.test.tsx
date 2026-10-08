@@ -1,5 +1,6 @@
 /**
- * BlogSection's debounced autosave (bd startsim-mcoza / startsim-edb00).
+ * TrackedSection (was BlogSection): its debounced autosave (bd startsim-mcoza /
+ * startsim-edb00) and, since bd startsim-q8sgy, the tracked surface it mounts.
  *
  * The draft editor holds a SUBSET of a draft's sections and merges each save
  * back into the whole, so a save that fires with the wrong text — or with a
@@ -11,11 +12,19 @@
  */
 import * as React from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { BlogSection } from '../BlogSection';
+import { TrackedSection as BlogSection } from '../TrackedSection';
 
 const noop = () => {};
+
+beforeAll(() => {
+  // jsdom has no layout; CodeMirror measures text with these.
+  const rect = { x: 0, y: 0, top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, toJSON() {} };
+  Range.prototype.getBoundingClientRect = () => rect as DOMRect;
+  Range.prototype.getClientRects = () =>
+    ({ length: 0, item: () => null, [Symbol.iterator]: [][Symbol.iterator] }) as unknown as DOMRectList;
+});
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -167,26 +176,56 @@ describe('BlogSection autosave', () => {
   });
 });
 
-describe('BlogSection editing surface', () => {
-  it('opens rendered, and only shows the textarea once the reviewer asks to edit', () => {
+describe('TrackedSection surface (bd startsim-q8sgy)', () => {
+  beforeEach(() => vi.useRealTimers());
+
+  it('opens the blog rendered, and shows the source editor once the reviewer asks to edit', () => {
     render(<BlogSection value="# A headline" onChange={noop} />);
 
     // Locked decision #3 — the blog opens in the rendered (Read) view.
-    expect(screen.queryByLabelText('Blog post markdown')).toBeNull();
+    expect(screen.getByTestId('tracked-read-view')).toBeInTheDocument();
+    expect(screen.queryByTestId('tracked-text-editor')).toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: /edit/i }));
-    expect(screen.getByLabelText('Blog post markdown')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    expect(screen.getByTestId('tracked-text-editor')).toBeInTheDocument();
   });
 
-  it('is controlled — a keystroke goes to the parent, not to local state', () => {
-    const onChange = vi.fn();
-    render(<BlogSection value="before" onChange={onChange} />);
+  it('opens LinkedIn in the source editor, plain text', () => {
+    render(<BlogSection field="linkedin" label="LinkedIn post" language="plain" value="A post" onChange={noop} />);
+    expect(screen.getByTestId('tracked-text-editor')).toBeInTheDocument();
+  });
 
-    fireEvent.click(screen.getByRole('button', { name: /edit/i }));
-    fireEvent.change(screen.getByLabelText('Blog post markdown'), { target: { value: 'after' } });
+  it('gives a view-only reviewer Suggest instead of Edit, and no Accept', async () => {
+    const client = {
+      listSuggestions: vi.fn().mockResolvedValue({
+        offset_unit: 'utf16',
+        version: 2,
+        next_cursor: null,
+        results: [
+          {
+            id: 's1',
+            field: 'blog',
+            status: 'open',
+            anchor: { from: 0, to: 6, quote: 'Before' },
+            position: { state: 'mapped', from: 0, to: 6, version: 2 },
+            replacement: 'After',
+            author: { sub: 'vee', label: 'vee@x.io', kind: 'person' },
+          },
+        ],
+      }),
+      accept: vi.fn(),
+    };
+    render(<BlogSection value="Before text" version={2} client={client} canEdit={false} currentActorSub="vee" onChange={noop} />);
+    expect(await screen.findByTestId('rail-suggestion')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Suggest' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Accept' })).toBeNull();
+  });
 
-    expect(onChange).toHaveBeenCalledWith('after');
-    // Still showing what the parent gave it.
-    expect(screen.getByLabelText('Blog post markdown')).toHaveValue('before');
+  it('draws what the server has stored, not the unsaved typing', async () => {
+    render(<BlogSection value="typed but not saved" stored="as stored" onChange={noop} />);
+    expect(screen.getByTestId('tracked-read-view')).toHaveTextContent('as stored');
+    // The word count is the reviewer's own text.
+    expect(screen.getByText('4 words')).toBeInTheDocument();
   });
 });

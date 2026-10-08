@@ -86,23 +86,31 @@ export interface RestoreHookDeps {
 }
 
 export function restoreHooks({ gate, cancelTimers, flush, hasUnsaved, reload, remember }: RestoreHookDeps) {
+  /**
+   * Hold every page write while a SERVER-SIDE write lands (a restore, or an
+   * accepted suggestion, bd startsim-q8sgy): close the gate, settle what is in
+   * flight, and flush only what was really typed (#96). Resolves the release;
+   * throws, with the gate reopened, when the flush could not land.
+   */
+  const hold = async (nothing: string, then: string): Promise<() => void> => {
+    const release = gate.block();
+    cancelTimers();
+    await gate.drain();
+    if (hasUnsaved && !hasUnsaved()) return release;
+    const result = await flush();
+    if (result !== 'saved') {
+      release();
+      throw new Error(
+        result === 'refused' || result === 'paused'
+          ? `This draft changed while you were editing, so ${nothing}. Resolve that first, then ${then}.`
+          : `Your latest edits could not be saved first, so ${nothing}. Try again.`,
+      );
+    }
+    return release;
+  };
   return {
-    beforeRestore: async (): Promise<() => void> => {
-      const release = gate.block();
-      cancelTimers();
-      await gate.drain();
-      if (hasUnsaved && !hasUnsaved()) return release;
-      const result = await flush();
-      if (result !== 'saved') {
-        release();
-        throw new Error(
-          result === 'refused' || result === 'paused'
-            ? 'This draft changed while you were editing, so nothing was restored. Resolve that first, then restore.'
-            : 'Your latest edits could not be saved first, so nothing was restored. Try again.',
-        );
-      }
-      return release;
-    },
+    beforeRestore: () => hold('nothing was restored', 'restore'),
+    beforeAccept: () => hold('nothing was accepted', 'accept'),
     onRestored: async (outcome: Extract<ParsedRestoreOutcome, { kind: 'restored' }>) => {
       remember(outcome.record);
       await reload();

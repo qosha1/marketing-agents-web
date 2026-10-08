@@ -14,8 +14,9 @@
  * the content behind a Content|Quality toggle. The presentational shell + rail +
  * blog card are fork-local (src/components/draft-review/*) pending extraction to a
  * shared composer — this page still owns ALL section state and persistence. The
- * blog opens in the rendered (Read) view by default (BlogSection); the remaining
- * sections stay in the shared DocumentEditor. Accept is gated on the deterministic
+ * blog and LinkedIn are under track changes (TrackedSection, bd startsim-q8sgy):
+ * the blog opens in the rendered (Read) view by default; SEO stays in the shared
+ * DocumentEditor. Accept is gated on the deterministic
  * checks (with reasoned override) AND a human `approve` verdict — the AI judge is
  * advisory only and never blocks Accept.
  *
@@ -136,7 +137,7 @@ import {
 } from '@/components/draft-review/TopicContextHeader';
 import { draftHref, FROM_PARAM, returnTarget, safeReturnPath } from '@/lib/story-nav';
 import { QualityRail } from '@/components/draft-review/QualityRail';
-import { BlogSection } from '@/components/draft-review/BlogSection';
+import { TrackedSection } from '@/components/draft-review/TrackedSection';
 import { ContentChannels } from '@/components/draft-review/ContentChannels';
 import { SourcesTool } from '@/components/draft-review/SourcesTool';
 import {
@@ -166,8 +167,17 @@ import {
   getEntity,
   listAllEntities,
   listTypes,
+  whoami,
   type EntityRecord,
 } from '@/lib/foundry-api';
+import {
+  canEditRecords,
+  foldAccepted,
+  trackChangesClient,
+  trackedText,
+  withTrackedText,
+} from '@/lib/track-changes';
+import type { AcceptResponseWire } from '@startsimpli/ui/track-changes';
 import { acceptDraft } from '@/lib/accept-draft';
 import { entityKey, primeEntity } from '@/lib/entity-cache';
 import { fieldAuthorsClient, revisionClient } from '@/lib/revisions';
@@ -516,6 +526,13 @@ function DraftEditorScreen({
   const topicType = (schemaQuery.data?.results ?? []).find((t) => t.key === CONTENT_TYPE_KEY);
 
   const [sections, setSections] = useState<DocSection[]>(() => draftSections(draft));
+  /**
+   * The blog and LinkedIn text AS STORED at the version the next write asserts
+   * (bd startsim-q8sgy). Every track-changes offset describes this text, not
+   * the reviewer's unsaved typing in `sections`. Moved by a save that landed
+   * and by an accept, nothing else.
+   */
+  const [stored, setStored] = useState(() => trackedText(draft.data));
   const [review, setReview] = useState<ReviewScore>(() => readReview(draft.data));
   const [notes, setNotes] = useState<ReviewNote[]>(() => readNotes(draft.data));
   const [noteSection, setNoteSection] = useState<string>('general');
@@ -818,7 +835,10 @@ function DraftEditorScreen({
       // the reviewer reopened the draft and her edit was gone (bd
       // startsim-ug09d / startsim-mk5qp). See lib/entity-cache.ts.
       const saved = result.outcome.body as EntityRecord | undefined;
-      if (saved?.id !== undefined) primeEntity(qc, draft.id, saved);
+      if (saved?.id !== undefined) {
+        primeEntity(qc, draft.id, saved);
+        setStored(trackedText(saved.data));
+      }
       return true;
     }
     if (result.status === 'failed') {
@@ -883,6 +903,57 @@ function DraftEditorScreen({
     remember: (record) => rememberVersion(draft.id, record),
   });
 
+  /**
+   * TRACK CHANGES (bd startsim-q8sgy). Who may edit is the account's role:
+   * a viewer suggests and comments only (Quinn). The editor is not mounted
+   * until that is known, so an editor never starts out held in suggesting.
+   */
+  const meQuery = useQuery({ queryKey: ['whoami'], queryFn: () => whoami(), staleTime: 5 * 60_000 });
+  const me = meQuery.data;
+  const canEdit = canEditRecords(me?.role);
+  const tcClient = useMemo(() => trackChangesClient(draft.id), [draft.id]);
+  // Until the role is known the editor is not mounted; a failed read says so
+  // and offers a retry, rather than "Loading" for ever.
+  const editorPending = meQuery.isError ? (
+    <p className="text-sm text-muted-foreground">
+      Could not check whether you may edit this draft.{' '}
+      <button type="button" className="underline" onClick={() => void meQuery.refetch()}>
+        Try again
+      </button>
+    </p>
+  ) : (
+    <p className="text-sm text-muted-foreground">Loading the editor…</p>
+  );
+
+  /**
+   * An accept is a server-side write, so it is run like a restore: hold every
+   * page write, flush only what was really typed, accept at the LIVE version,
+   * then FOLD the answer into the page before any write can go out. Without
+   * the fold the next scorecard autosave would PATCH the pre-accept text back
+   * over it, at a version the accept already moved past.
+   */
+  const runAccept = async (doAccept: (expectedVersion: number) => Promise<AcceptResponseWire>) => {
+    const release = await restore.beforeAccept();
+    try {
+      const at = liveVersion.current ?? save.version;
+      if (at === undefined) throw new Error('This draft has no version yet, so nothing can be accepted.');
+      const res = await doAccept(at);
+      const folded = foldAccepted(res);
+      const next = withTrackedText(sectionsRef.current, folded.text);
+      sectionsRef.current = next;
+      setSections(next);
+      setStored(folded.text);
+      if (folded.version !== undefined) {
+        save.setVersion(folded.version);
+        liveVersion.current = folded.version;
+      }
+      if (res.id !== undefined) primeEntity(qc, draft.id, res as unknown as EntityRecord);
+      return res;
+    } finally {
+      release();
+    }
+  };
+
   /** Who last wrote each field. Keyed on the live version, so it re-reads after
    *  every save this page makes. */
   const authorsClient = useMemo(() => fieldAuthorsClient(draft.id), [draft.id]);
@@ -909,7 +980,7 @@ function DraftEditorScreen({
   // Debounced autosave from the content editors. No list invalidation here — the
   // editors show their own "Saved" pill, and refetching mid-edit would churn it.
   // The DocumentEditor holds a SUBSET of the sections (the blog is edited in its
-  // own BlogSection so it can open in Read — locked decision #3), so merge the
+  // own TrackedSection so it can open in Read — locked decision #3), so merge the
   // edited subset back into the full section ref rather than replacing it, or a
   // section would drop out of the ref and the next full-blob PATCH would lose it.
   async function saveSections(edited?: DocSection[]) {
@@ -926,6 +997,11 @@ function DraftEditorScreen({
     // that was saving nothing and saying nothing. The debounce still cannot
     // repaint a modal per keystroke: `reopenConflict` only clears a flag, so the
     // second burst and the hundredth are both no-ops against an open dialog.
+    // NOTHING TYPED, NOTHING SENT (#96, bd startsim-q8sgy). An accepted
+    // suggestion folds the server's text into the sections, which looks like a
+    // change to the field's debounce; without this it would PATCH the whole
+    // blob a second later and record a revision nobody made.
+    if (editSeq.current === savedSeq.current) return;
     await persist({}, 'Could not save the draft.');
   }
 
@@ -1198,16 +1274,12 @@ function DraftEditorScreen({
 
   const noteSections = ['general', 'blog', 'linkedin', 'seo', 'sources'];
 
-  // Content is channel-tabbed (P2): Brief = the blog in its own BlogSection (opens
+  // Content is channel-tabbed (P2): Brief = the blog in its own TrackedSection (opens
   // in Read — locked decision #3); LinkedIn + SEO render as single-section shared
   // DocumentEditors; Sources is the dedicated tool. Each channel edits the SAME
   // `sections`/sources state and persistence — no change to the stored data shape.
   const blogValue = String(sectionValue(sections, 'blog') ?? '');
   const linkedinValue = String(sectionValue(sections, 'linkedin') ?? '');
-  const linkedinSection = useMemo(
-    () => sections.filter((s) => s.key === 'linkedin'),
-    [sections],
-  );
   const seoSection = useMemo(() => sections.filter((s) => s.key === 'seo'), [sections]);
   const sourcesCoverage = coverageSummary(sourceItems, today);
 
@@ -1336,12 +1408,25 @@ function DraftEditorScreen({
             content: (
               <div className="space-y-2">
                 {attribution('blog')}
-                <BlogSection
-                  value={blogValue}
-                  highlight={blogHighlight}
-                  onChange={(v) => onChange('blog', v)}
-                  onSave={(v) => saveSections([{ key: 'blog', label: 'Blog post', kind: 'markdown', value: v }])}
-                />
+                {me ? (
+                  <TrackedSection
+                    field="blog"
+                    label="Blog post"
+                    language="markdown"
+                    value={blogValue}
+                    stored={stored.blog}
+                    version={save.version ?? null}
+                    client={tcClient}
+                    currentActorSub={me.sub}
+                    canEdit={canEdit}
+                    runAccept={runAccept}
+                    highlight={blogHighlight}
+                    onChange={(v) => onChange('blog', v)}
+                    onSave={(v) => saveSections([{ key: 'blog', label: 'Blog post', kind: 'markdown', value: v }])}
+                  />
+                ) : (
+                  editorPending
+                )}
               </div>
             ),
           },
@@ -1352,7 +1437,24 @@ function DraftEditorScreen({
             content: (
               <div className="space-y-2">
                 {attribution('linkedin')}
-                <DocumentEditor sections={linkedinSection} onChange={onChange} onSave={saveSections} />
+                {me ? (
+                  <TrackedSection
+                    field="linkedin"
+                    label="LinkedIn post"
+                    language="plain"
+                    value={linkedinValue}
+                    stored={stored.linkedin}
+                    version={save.version ?? null}
+                    client={tcClient}
+                    currentActorSub={me.sub}
+                    canEdit={canEdit}
+                    runAccept={runAccept}
+                    onChange={(v) => onChange('linkedin', v)}
+                    onSave={(v) => saveSections([{ key: 'linkedin', label: 'LinkedIn post', kind: 'text', value: v }])}
+                  />
+                ) : (
+                  editorPending
+                )}
               </div>
             ),
           },
