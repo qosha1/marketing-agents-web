@@ -284,6 +284,7 @@ export function QualityRail(props: QualityRailProps) {
         onJumpToCheck={onJumpToCheck}
         legendOpen={legendOpen}
         onToggleLegend={onToggleLegend}
+        canDecide={mayEdit}
       />
 
       {/* THE one decision */}
@@ -293,7 +294,11 @@ export function QualityRail(props: QualityRailProps) {
             Decision on this draft
           </div>
           <div className="mt-0.5 text-xs text-muted-foreground">
-            {call === 'approve'
+            {!mayEdit
+              ? call && !legacyCall
+                ? `Decision so far: ${draftDecisionLabel(call)}. You can view this draft but not decide on it.`
+                : 'No decision yet. You can view this draft but not decide on it.'
+              : call === 'approve'
               ? 'This piece is publishable — the button below becomes Approve draft.'
               : call === 'reject'
                 ? 'You reject this candidate — sibling drafts stay.'
@@ -302,14 +307,15 @@ export function QualityRail(props: QualityRailProps) {
                   : 'Read it, then decide whether this PIECE is publishable — the topic was approved separately.'}
           </div>
         </div>
+        {/* Hidden, not disabled, for someone who cannot change this draft
+            (bd startsim-whwxd.22): a control they cannot use is not shown. */}
+        {mayEdit ? (
         <div className="flex gap-2 px-4 pb-3 pt-2.5">
           {CALLS.map((c) => (
             <button
               key={c.id}
               type="button"
               aria-pressed={call === c.id}
-              disabled={!mayEdit}
-              title={mayEdit ? undefined : 'You can view this draft but not decide on it'}
               onClick={() => setCall(c.id)}
               className={cn(
                 'flex-1 rounded-lg border px-1 py-2 text-sm font-semibold transition-colors',
@@ -320,6 +326,7 @@ export function QualityRail(props: QualityRailProps) {
             </button>
           ))}
         </div>
+        ) : null}
 
         {/* Feedback saved by the removed "Request changes" — read-only, kept visible. */}
         {savedFeedback ? (
@@ -330,7 +337,7 @@ export function QualityRail(props: QualityRailProps) {
         ) : null}
 
         {/* approve → gate note */}
-        {call === 'approve' ? (
+        {mayEdit && call === 'approve' ? (
           <div
             className={cn(
               'border-t px-4 py-3 text-xs',
@@ -344,7 +351,7 @@ export function QualityRail(props: QualityRailProps) {
         ) : null}
 
         {/* reject → note */}
-        {call === 'reject' ? (
+        {mayEdit && call === 'reject' ? (
           <div className="border-t border-red-200 bg-red-50 px-4 py-3 text-xs text-red-700">
             This candidate is dropped (marked not-chosen). Its sibling drafts stay available.
           </div>
@@ -550,6 +557,7 @@ function IssuePanel({
   onJumpToCheck,
   legendOpen,
   onToggleLegend,
+  canDecide,
 }: {
   checks: ContentCheck[];
   stops: IssueStop[];
@@ -557,6 +565,9 @@ function IssuePanel({
   onJumpToCheck: (checkId: string) => void;
   legendOpen: boolean;
   onToggleLegend: () => void;
+  /** False drops the a / x decision shortcuts, which the page ignores for a
+   *  view-only reader (bd startsim-whwxd.22). */
+  canDecide: boolean;
 }) {
   const failing = checks.filter((c) => c.status !== 'pass');
   if (failing.length === 0) return null;
@@ -583,7 +594,7 @@ function IssuePanel({
         Jump to what failed — or press <Key>j</Key> / <Key>k</Key>.
       </p>
 
-      {legendOpen ? <ShortcutLegend /> : null}
+      {legendOpen ? <ShortcutLegend canDecide={canDecide} /> : null}
 
       <ul className="px-2 pb-2 pt-1">
         {failing.map((c) => {
@@ -653,7 +664,7 @@ function Key({ children }: { children: React.ReactNode }) {
   );
 }
 
-function ShortcutLegend() {
+function ShortcutLegend({ canDecide }: { canDecide: boolean }) {
   const rows: [React.ReactNode, string][] = [
     [
       <>
@@ -661,8 +672,12 @@ function ShortcutLegend() {
       </>,
       'Next / previous issue',
     ],
-    [<Key key="a">a</Key>, draftDecisionLabel('approve')],
-    [<Key key="x">x</Key>, draftDecisionLabel('reject')],
+    ...(canDecide
+      ? ([
+          [<Key key="a">a</Key>, draftDecisionLabel('approve')],
+          [<Key key="x">x</Key>, draftDecisionLabel('reject')],
+        ] as [React.ReactNode, string][])
+      : []),
     [
       <>
         <Key>[</Key> / <Key>]</Key>

@@ -45,6 +45,7 @@ import {
   existingTranslationQuery,
 } from '@/lib/draft-translation';
 import { tenantFetch } from '@/lib/tenant-fetch';
+import { permissionsFromWire } from '@/lib/topic-gate';
 import { translationEnv } from '@/lib/translation-config';
 import type { EntityRecord } from '@/lib/foundry-api';
 
@@ -68,10 +69,10 @@ async function runTranslation(
   route: TranslationRoute,
   provider: ILLMProvider,
   auth: string,
-  draftId: string | number,
+  draft: EntityRecord,
   targetLocale: string,
 ): Promise<void> {
-  const draft = await tenantFetch<EntityRecord>(`entities/${draftId}`, auth, { method: 'GET' });
+  const draftId = draft.id;
 
   // BEFORE the model, not after. The durable external_id refuses a duplicate from
   // the same person, but the unique constraint includes `owner_sub` — measured:
@@ -197,6 +198,36 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Missing targetLocale.' }, { status: 400 });
   }
 
+  // THE CALLER MUST BE ABLE TO EDIT THE DRAFT (bd startsim-whwxd.22, epic
+  // startsim-768w.71). A translation is a new draft written into the same space
+  // with this person's token. The tenant refuses that write for a view-only
+  // reader (space_not_editable), but only at the end of the detached job: by
+  // then this route had said 202 and the model had been paid. So the draft's
+  // own `permissions`, read with the caller's bearer, decide here first. Raw
+  // Django JSON, so `can_edit` is snake_case: read it through the shared
+  // parser. A tenant that sends no permissions yet keeps the old behaviour.
+  let draft: EntityRecord;
+  try {
+    draft = await tenantFetch<EntityRecord>(`entities/${draftId}`, auth, { method: 'GET' });
+  } catch (error) {
+    // "Could not check" is not "allowed": an unreadable draft is refused now.
+    console.error('[translate-draft] could not read the draft', {
+      draftId,
+      detail: (error as Error).message,
+    });
+    return NextResponse.json({ error: 'Could not verify the draft.' }, { status: 502 });
+  }
+  const permissions = permissionsFromWire((draft as { permissions?: unknown }).permissions);
+  if (permissions && permissions.canEdit !== true) {
+    return NextResponse.json(
+      {
+        error: 'You can view this draft but not change it, so you cannot translate it.',
+        reason: 'view_only',
+      },
+      { status: 403 },
+    );
+  }
+
   // Boot-shaped failures answer NOW rather than dying invisibly in the detached
   // job: a misconfigured deployment is a 500 the clicker can see.
   let route: TranslationRoute;
@@ -215,7 +246,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Translation provider unavailable.' }, { status: 503 });
   }
 
-  void runTranslation(route, provider, auth, draftId, targetLocale.trim()).catch(
+  void runTranslation(route, provider, auth, draft, targetLocale.trim()).catch(
     (error: unknown) => {
       // Every Error this file constructs carries only a method, a path and a
       // status — never a body — so the message is safe to log and is the only
