@@ -23,8 +23,8 @@
  *    read first. Once the topic is approved and a draft exists it ranks nothing,
  *    and a number with no live meaning next to a decision is noise.
  *  - The topic's `source_1..3` chips. The draft page already owns sources, and
- *    owns them better: SourcesTool plus the Quality rail's approved-source
- *    checks, tier-validated against the live source registry. A second source
+ *    owns them better: SourcesTool, tier-badged against the live source
+ *    registry. A second source
  *    list at the top of the same page would be two lists disagreeing about which
  *    sources matter. Filed rather than guessed — see the bead.
  *

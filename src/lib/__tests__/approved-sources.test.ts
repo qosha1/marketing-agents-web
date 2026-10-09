@@ -21,17 +21,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
-import { runContentChecks, overallStatus, type ContentCheck } from '@startsimpli/ui';
-
 import {
   approvedHostsFromSources,
   approvedSourceBasis,
-  approvedSourceCheckConfig,
   approvedSourceGap,
-  approvedSourceStandIn,
-  contentFieldsFromSections,
-  type ApprovedSourceBasis,
-} from '@/lib/content-checks';
+} from '@/lib/approved-sources';
 
 const rec = (data: Record<string, unknown>) => ({ data });
 
@@ -161,27 +155,6 @@ describe('approvedSourceBasis — four states, never a substitute list', () => {
   });
 });
 
-describe('approvedSourceCheckConfig — an unknown basis omits the key entirely', () => {
-  it('passes the tenant hosts when the basis is ready', () => {
-    const config = approvedSourceCheckConfig({ state: 'ready', hosts: LIVE_HOSTS });
-    expect(config).toEqual({ approvedHosts: LIVE_HOSTS });
-  });
-
-  it.each<[string, ApprovedSourceBasis]>([
-    ['loading', { state: 'loading' }],
-    ['failed', { state: 'failed' }],
-    ['undeclared', { state: 'undeclared', recordCount: 0 }],
-  ])('omits approvedHosts entirely when the basis is %s', (_name, basis) => {
-    const config = approvedSourceCheckConfig(basis);
-
-    // NOT `{ approvedHosts: [] }`. runContentChecks runs the check whenever the
-    // KEY is present (`if (approvedHosts !== undefined)`), so an empty array
-    // fails every host on earth — the opposite drift, and just as wrong.
-    expect('approvedHosts' in config).toBe(false);
-    expect(config).toEqual({});
-  });
-});
-
 describe('approvedSourceGap — three unknown states, three different sentences', () => {
   it('is null when the basis is ready — there is nothing to disclose', () => {
     expect(approvedSourceGap({ state: 'ready', hosts: LIVE_HOSTS })).toBeNull();
@@ -214,20 +187,10 @@ describe('approvedSourceGap — three unknown states, three different sentences'
       approvedSourceGap({ state: 'undeclared', recordCount: 0 }),
       approvedSourceGap({ state: 'failed' }),
     ];
-    const rendered = gaps.map((g) => `${g?.title}|${g?.description}|${g?.detail}|${g?.gateHint}`);
+    const rendered = gaps.map((g) => `${g?.title}|${g?.description}`);
 
     expect(new Set(rendered).size).toBe(3);
     expect(gaps.every((g) => g !== null)).toBe(true);
-  });
-
-  it('gives the decision bar something truer than "Ready to accept"', () => {
-    // An unchecked basis does not BLOCK Accept (a blip must not stall the queue),
-    // so the bar the reviewer clicks has to carry the disclosure instead.
-    expect(approvedSourceGap({ state: 'failed' })?.gateHint).toMatch(/unchecked/i);
-    expect(approvedSourceGap({ state: 'undeclared', recordCount: 0 })?.gateHint).toMatch(
-      /unchecked/i,
-    );
-    expect(approvedSourceGap({ state: 'loading' })?.gateHint).toMatch(/not checked yet|loading/i);
   });
 
   it('never claims a verdict about the draft', () => {
@@ -242,100 +205,15 @@ describe('approvedSourceGap — three unknown states, three different sentences'
   });
 });
 
-describe('approvedSourceStandIn — the checklist slot is held, never silently dropped', () => {
-  it('is null when the basis is ready (the real check runs instead)', () => {
-    expect(approvedSourceStandIn({ state: 'ready', hosts: LIVE_HOSTS })).toBeNull();
-  });
-
-  it('warns — it does not fail the draft for a broken read', () => {
-    const check = approvedSourceStandIn({ state: 'failed' });
-
-    expect(check?.id).toBe('approved-sources');
-    expect(check?.label).toBe('Approved sources');
-    // 'fail' would block the whole review queue on a network blip — the same
-    // outage 768w.18.14 fixed, arrived at from the other direction.
-    expect(check?.status).toBe('warn');
-    expect(check?.detail).toMatch(/not checked/i);
-  });
-
-  it('sends the reviewer to the sources channel, where the absence is explained', () => {
-    expect(approvedSourceStandIn({ state: 'failed' })?.locations).toEqual([{ field: 'sources' }]);
-  });
-});
-
-describe('the check, end to end', () => {
-  const sourced = (urls: string[]) =>
-    contentFieldsFromSections(
-      [{ key: 'sources', label: 'Sources', kind: 'list', value: urls }],
-      'A headline of exactly eight words here now',
-    );
-
-  const withStandIn = (basis: ApprovedSourceBasis, urls: string[]): ContentCheck[] => {
-    const checks = runContentChecks(sourced(urls), approvedSourceCheckConfig(basis));
-    const standIn = approvedSourceStandIn(basis);
-    return standIn ? [...checks, standIn] : checks;
-  };
-
-  const approvedSources = (checks: ContentCheck[]) => checks.filter((c) => c.id === 'approved-sources');
-
-  it('passes a draft citing tenant-approved hosts — the live happy path is unchanged', () => {
-    // Prod 2026-08-20: 59 of 59 drafts-with-sources pass against the tenant list.
-    const checks = withStandIn({ state: 'ready', hosts: LIVE_HOSTS }, [
-      'https://www.zawya.com/en/story-a',
-      'https://gulfnews.com/business/story-b',
-    ]);
-
-    expect(approvedSources(checks)).toHaveLength(1);
-    expect(approvedSources(checks)[0]?.status).toBe('pass');
-  });
-
-  it('still fails a genuinely unapproved host when the basis is ready', () => {
-    const checks = withStandIn({ state: 'ready', hosts: LIVE_HOSTS }, [
-      'https://randomblog.example/x',
-    ]);
-
-    expect(approvedSources(checks)[0]?.status).toBe('fail');
-    expect(approvedSources(checks)[0]?.detail).toMatch(/randomblog\.example/);
-  });
-
-  it('refuses to compute against anything else when the read failed', () => {
-    const urls = ['https://www.zawya.com/en/story-a'];
-    const failed = withStandIn({ state: 'failed' }, urls);
-
-    // Exactly one row, and it is the stand-in: the real check did not run.
-    expect(approvedSources(failed)).toHaveLength(1);
-    expect(approvedSources(failed)[0]?.status).toBe('warn');
-    expect(approvedSources(failed)[0]?.detail).toMatch(/not checked/i);
-
-    // The row count matches the ready path, so "7/8" never quietly becomes "7/7".
-    const ready = withStandIn({ state: 'ready', hosts: LIVE_HOSTS }, urls);
-    expect(failed).toHaveLength(ready.length);
-  });
-
-  it('does not flip a draft to blocked because the list did not load', () => {
-    // The regression this bead names: with the old fallback, 27 of the 59 live
-    // drafts changed verdict on an empty read. A host approved by the tenant
-    // must never come back FAILED just because the read broke.
-    const urls = ['https://agbi.com/story', 'https://www.zawya.com/en/story-a'];
-
-    expect(overallStatus(approvedSources(withStandIn({ state: 'ready', hosts: LIVE_HOSTS }, urls)))).toBe('pass');
-    expect(overallStatus(approvedSources(withStandIn({ state: 'failed' }, urls)))).toBe('warn');
-    expect(overallStatus(approvedSources(withStandIn({ state: 'loading' }, urls)))).toBe('warn');
-    expect(
-      overallStatus(approvedSources(withStandIn({ state: 'undeclared', recordCount: 0 }, urls))),
-    ).toBe('warn');
-  });
-});
-
 describe('no second list survives in this repo', () => {
   it('exports no hardcoded host list', async () => {
-    const mod = await import('@/lib/content-checks');
+    const mod = await import('@/lib/approved-sources');
     expect(Object.keys(mod)).not.toContain('OGMC_APPROVED_HOSTS');
   });
 
   it('holds no domain literals at all — the tenant table is the only list', () => {
     const src = fs.readFileSync(
-      path.join(process.cwd(), 'src/lib/content-checks.ts'),
+      path.join(process.cwd(), 'src/lib/approved-sources.ts'),
       'utf8',
     );
     // Quoted `something.tld` literals. Module specifiers ('@startsimpli/ui')

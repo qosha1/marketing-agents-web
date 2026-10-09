@@ -1,14 +1,14 @@
 'use client';
 
 /**
- * CollapsiblePanel — a single collapsible card for the draft-review Quality rail
- * (P1 of the redesigned review flow). Fork-local for now; extracted to a shared
- * composer once the two-pane design is confirmed.
+ * CollapsiblePanel — a single collapsible card for the draft page's History rail
+ * and the record drawers. Fork-local for now; extracted to a shared composer
+ * once the two-pane design is confirmed.
  *
  * A bordered card whose header toggles a body open/closed. The body is meant to
- * hold a shared review primitive (ValidationChecklist / ReviewScorecard /
- * ReviewNotes) FLATTENED (card chrome stripped) so the panel supplies the single
- * card + title and the primitive stays otherwise intact.
+ * hold a shared primitive (e.g. RecordHistoryPanel) FLATTENED (card chrome
+ * stripped) so the panel supplies the single card + title and the primitive
+ * stays otherwise intact.
  */
 import * as React from 'react';
 import { ChevronRight } from 'lucide-react';

@@ -1,37 +1,15 @@
 /**
- * Reviewer-feedback helpers (bd 768w.16.10.4).
+ * Draft revision lineage (bd 768w.16.10.4).
  *
- * The full-page draft editor lets a reviewer record a structured judgement
- * (ReviewScorecard) plus section-level critique (ReviewNotes). The AI "Request
- * revision" rewrite that used to consume this critique was removed (bd
- * startsim-whwxd.6); drafts it created keep their `revised_from` lineage. These
- * are the pure, backend-free helpers:
- *   - read the stored review / notes off a draft's `data` blob (camelCase-aware);
- *   - resolve a draft's revision lineage (revised_from) into an ordered chain for
- *     the "Revision history" affordance and the parent diff.
- * All pure so they unit-test without a running tenant.
+ * The AI "Request revision" rewrite was removed (bd startsim-whwxd.6); drafts it
+ * created keep their `revised_from` lineage, which this resolves into an ordered
+ * chain for the "Revision history" affordance and the parent diff. The stored
+ * review scorecard and notes readers went with the decision and Notes panel (bd
+ * startsim-m7fdm.25); the data stays on the record.
+ * Pure, so it unit-tests without a running tenant.
  */
-import type { ReviewScore, ReviewNote } from '@startsimpli/ui';
-
 import { readData } from '@/lib/board';
 import type { EntityRecord } from '@/lib/foundry-api';
-
-/**
- * The reviewer's stored scorecard off a draft's data blob, or an empty score when
- * absent/malformed. The tenant client round-trips the camelCase ReviewScore keys
- * (verdict / dimensions / overallNote) through the wire's snake_case, so a plain
- * read gives them back camelCased.
- */
-export function readReview(data: EntityRecord['data'] | undefined): ReviewScore {
-  const r = readData(data, 'review');
-  return r && typeof r === 'object' && !Array.isArray(r) ? (r as ReviewScore) : {};
-}
-
-/** The reviewer's stored section notes off a draft's data blob ([] when absent). */
-export function readNotes(data: EntityRecord['data'] | undefined): ReviewNote[] {
-  const n = readData(data, 'notes');
-  return Array.isArray(n) ? (n as ReviewNote[]) : [];
-}
 
 /** The parent draft id a draft was revised from ('' when this is an original). */
 export function revisedFrom(d: EntityRecord): string {

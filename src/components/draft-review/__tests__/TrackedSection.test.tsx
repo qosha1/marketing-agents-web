@@ -236,13 +236,6 @@ describe('TrackedSection surface (bd startsim-q8sgy)', () => {
     }
   });
 
-  it('a jump-to-issue shows the rendered blog, where its marks are painted', () => {
-    const { rerender } = render(<BlogSection value="This is game-changing." onChange={noop} />);
-    expect(screen.queryByTestId('tracked-read-view')).toBeNull();
-    rerender(<BlogSection value="This is game-changing." onChange={noop} highlight={['game-changing']} />);
-    expect(screen.getByTestId('tracked-read-view')).toBeInTheDocument();
-  });
-
   it('opens LinkedIn in the source editor, plain text', () => {
     render(<BlogSection field="linkedin" label="LinkedIn post" language="plain" value="A post" onChange={noop} />);
     expect(screen.getByTestId('tracked-text-editor')).toBeInTheDocument();

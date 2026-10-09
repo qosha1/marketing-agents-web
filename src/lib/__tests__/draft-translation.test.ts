@@ -106,7 +106,7 @@ describe('draftSegments — what actually goes to the model', () => {
   it('reads camelCased keys too, because the client transforms responses', () => {
     // The shared api client camelCases the data blob on arrival, so a live
     // `seo.meta_description` can show up as `metaDescription` — the same trap
-    // board.ts and content-checks.ts already handle.
+    // board.ts already handles.
     const draft = sourceDraft();
     (draft.data as Record<string, unknown>).seo = { metaDescription: 'Camel form.' };
 

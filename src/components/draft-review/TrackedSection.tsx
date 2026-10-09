@@ -11,10 +11,11 @@
  * Final / Original, and the suggestions-and-comments rail. Every field opens
  * in the editor (bd startsim-whwxd.17, which retired locked decision #3's
  * "the blog opens in Read"): Quinn wanted no clicks between opening a draft
- * and typing. A jump-to-issue still flips to Read, where its marks paint. What this card adds is what is this page's:
- * the debounced autosave of the reviewer's own edits (BYO persistence, the
- * contract BlogSection had), the word count and save state, and the
- * jump-to-issue marks painted over the Read view.
+ * and typing. What this card adds is what is this page's: the debounced
+ * autosave of the reviewer's own edits (BYO persistence, the contract
+ * BlogSection had), and the word count and save state. The jump-to-issue
+ * marks it used to paint over the Read view went with the Checks section
+ * (bd startsim-m7fdm.25).
  *
  * TWO TEXTS, ON PURPOSE. `value` is what the reviewer has typed (the page's
  * section state); it is what autosaves and what the word count counts.
@@ -31,7 +32,6 @@ import { wordCount } from '@startsimpli/ui';
 import {
   TrackedField,
   type AcceptResponseWire,
-  type TrackedFieldHandle,
   type TrackChangesClient,
 } from '@startsimpli/ui/track-changes';
 
@@ -63,38 +63,11 @@ export interface TrackedSectionProps {
   onSave?(value: string): void | Promise<void>;
   /** Autosave debounce, ms. Default 1200 (matches DocumentEditor). */
   autosaveMs?: number;
-  /**
-   * Substrings a jump-to-issue wants marked in the rendered blog (bd 768w.16.15.3).
-   * Painted in the Read view only, so a non-empty list switches to it — see
-   * {@link useRangeHighlight}.
-   */
-  highlight?: string[];
   /** Put the caret in the text on mount (the field on screen when the page
    *  opens), so typing needs no click (bd startsim-whwxd.17). */
   autoFocus?: boolean;
   className?: string;
 }
-
-/**
- * Separator for the paint-effect key. The needles are PHRASES ("on earth",
- * "world leading"), so joining on anything that can occur inside one would split it.
- */
-const NEEDLE_SEP = '\u0000';
-
-/** Stable identity for "nothing to highlight" so the paint effect doesn't churn. */
-const NO_HIGHLIGHT: string[] = [];
-
-/** The CSS Custom Highlight registry key, styled by {@link HIGHLIGHT_STYLE}. */
-const HIGHLIGHT_NAME = 'draft-issue';
-
-/**
- * The mark's paint. Injected as a <style> tag rather than living in globals.css
- * because the build's CSS optimizer rejects `::highlight()` as an unknown
- * pseudo-element and fails the whole build on it. Inline, it reaches the browser
- * untouched — and a browser that doesn't know the selector drops just this rule,
- * which is exactly the degradation we want.
- */
-const HIGHLIGHT_STYLE = `::highlight(${HIGHLIGHT_NAME}){background-color:#fde68a;color:#78350f;}`;
 
 /**
  * The SHARED counter (bd startsim-wn2p.28). This was a local `split(/\s+/)`,
@@ -103,81 +76,6 @@ const HIGHLIGHT_STYLE = `::highlight(${HIGHLIGHT_NAME}){background-color:#fde68a
  */
 function countWords(s: string): number {
   return wordCount(s);
-}
-
-/**
- * Every Range under `root` whose text matches one of `needles`, case-insensitively
- * (the hype scan lowercases, so the rendered casing rarely matches the needle).
- *
- * A needle split across text nodes by inline markup (`**game**-changing`) is not
- * found — markdown decides where the nodes break, and stitching across them would
- * be the brittle-text-walk this deliberately avoids. Missing a mark is acceptable;
- * the caller has already switched channel and scrolled, so the issue is not lost.
- */
-function textRanges(root: HTMLElement, needles: string[]): Range[] {
-  const ranges: Range[] = [];
-  const lowered = needles.map((n) => n.toLowerCase()).filter(Boolean);
-  if (lowered.length === 0) return ranges;
-
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-    const text = node.nodeValue?.toLowerCase();
-    if (!text) continue;
-    for (const needle of lowered) {
-      for (let at = text.indexOf(needle); at !== -1; at = text.indexOf(needle, at + needle.length)) {
-        const range = document.createRange();
-        range.setStart(node, at);
-        range.setEnd(node, at + needle.length);
-        ranges.push(range);
-      }
-    }
-  }
-  return ranges;
-}
-
-/**
- * Mark `matches` inside the rendered markdown WITHOUT touching its DOM.
- *
- * The blog goes through the shared MarkdownRenderer, which takes only `content` —
- * there is no seam to wrap <mark> at the React level. Rewriting its output
- * (innerHTML / text replace) would both fight React's reconciliation and reintroduce
- * an injection surface, so we use the CSS Custom Highlight API instead: it paints
- * Ranges over the existing text nodes and mutates nothing. Where it is unsupported
- * nothing paints and nothing breaks — the caller still switched channel and scrolled.
- *
- * Scrolling the first match into view is deliberately NOT done here: the jump already
- * scrolls the content pane, and this effect re-runs on every keystroke (the checks
- * recompute live), which would yank the page out from under the writer.
- */
-function useRangeHighlight(
-  root: HTMLElement | null,
-  matches: string[],
-  /** The rendered text; a change re-paints because the old Ranges are now stale. */
-  content: string,
-) {
-  // The `matches` ARRAY identity churns on every recompute — key on its values.
-  const key = matches.join(NEEDLE_SEP);
-
-  React.useEffect(() => {
-    if (typeof CSS === 'undefined' || !('highlights' in CSS)) return;
-    // Wrapped: registry.delete returns a boolean, which is not a valid cleanup.
-    const clear = () => {
-      CSS.highlights.delete(HIGHLIGHT_NAME);
-    };
-
-    const needles = key ? key.split(NEEDLE_SEP) : [];
-    if (!root || needles.length === 0) {
-      clear();
-      return;
-    }
-    const ranges = textRanges(root, needles);
-    if (ranges.length === 0) {
-      clear();
-      return;
-    }
-    CSS.highlights.set(HIGHLIGHT_NAME, new Highlight(...ranges));
-    return clear;
-  }, [root, key, content]);
 }
 
 export function TrackedSection({
@@ -194,24 +92,11 @@ export function TrackedSection({
   onChange,
   onSave,
   autosaveMs = 1200,
-  highlight = NO_HIGHLIGHT,
   autoFocus = false,
   className,
 }: TrackedSectionProps) {
   const [status, setStatus] = React.useState<SaveStatus>('idle');
   const words = countWords(value);
-
-  // Marks live in the rendered Read view only — the source editor paints its
-  // own decorations — so a jump that has something to mark switches the field
-  // to Read. The Read view's element is STATE, not a ref: it mounts after that
-  // switch, and the paint has to run again when it does.
-  const [preview, setPreview] = React.useState<HTMLDivElement | null>(null);
-  useRangeHighlight(preview, highlight, stored ?? value);
-  const fieldRef = React.useRef<TrackedFieldHandle>(null);
-  const highlightKey = highlight.join(NEEDLE_SEP);
-  React.useEffect(() => {
-    if (highlightKey) fieldRef.current?.setSurface('read');
-  }, [highlightKey]);
 
   // Debounced autosave, mirroring DocumentEditor: fire onSave only on a real
   // content change, and keep the writer in a ref so the effect depends only on
@@ -262,10 +147,7 @@ export function TrackedSection({
 
   return (
     <div className={className}>
-      {/* Static, author-written CSS — never interpolates content. */}
-      <style>{HIGHLIGHT_STYLE}</style>
       <TrackedField
-        ref={fieldRef}
         client={client}
         field={field}
         label={label}
@@ -277,7 +159,6 @@ export function TrackedSection({
         onChange={onChange}
         runAccept={runAccept}
         autoFocus={autoFocus}
-        readViewRef={setPreview}
         headerExtra={
           <>
             <SaveStatusPill status={status} />

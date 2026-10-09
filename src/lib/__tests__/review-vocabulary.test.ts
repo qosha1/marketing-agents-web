@@ -9,10 +9,6 @@ import { describe, it, expect } from 'vitest';
 import { resolveReviewConfig, reviewDecisions } from '@startsimpli/ui/collection';
 
 import {
-  DRAFT_DECISIONS,
-  DRAFT_DECISION_KEYS,
-  draftDecisionLabel,
-  isOfferedDraftDecision,
   TOPIC_ACTIONS_HEADER,
   TOPIC_DECISION_LABELS,
 } from '@/lib/review-vocabulary';
@@ -34,39 +30,7 @@ const TOPIC_TYPE = {
   ],
 } satisfies EntityTypeDef;
 
-const topicLabels = () => reviewDecisions(resolveReviewConfig(TOPIC_TYPE)).map((d) => d.label);
-
-describe('the draft decision names what it decides', () => {
-  it('says "draft" on the two decisions that dispose of the piece', () => {
-    expect(draftDecisionLabel('approve')).toBe('Approve draft');
-    expect(draftDecisionLabel('reject')).toBe('Reject draft');
-  });
-
-  // bd startsim-m7fdm.24: "Request changes" is removed (Quinn, 2026-10-07).
-  it('offers exactly Approve draft and Reject draft', () => {
-    expect(DRAFT_DECISIONS.map((d) => d.id)).toEqual(['approve', 'reject']);
-    expect(DRAFT_DECISIONS.map((d) => d.label)).not.toContain('Request changes');
-  });
-
-  it('gives the removed "revise" value no offered label, and says it is not offered', () => {
-    expect(draftDecisionLabel('revise')).toBe('');
-    expect(isOfferedDraftDecision('revise')).toBe(false);
-    expect(isOfferedDraftDecision('approve')).toBe(true);
-    expect(isOfferedDraftDecision('reject')).toBe(true);
-    expect(isOfferedDraftDecision(undefined)).toBe(false);
-  });
-
-  it('binds a and x to the two decisions, and r to nothing', () => {
-    expect(DRAFT_DECISION_KEYS).toEqual({ a: 'approve', x: 'reject' });
-  });
-});
-
-describe('the two decisions are no longer the same word', () => {
-  it('shares no label between the topic decision and the draft decision', () => {
-    const shared = DRAFT_DECISIONS.map((d) => d.label).filter((l) => topicLabels().includes(l));
-    expect(shared).toEqual([]);
-  });
-
+describe('the topic decision names its subject', () => {
   it('names the subject over the table’s inline decision cluster', () => {
     // The cluster used to sit under a blank header, so a row of tick/cross
     // buttons on the Topics table said nothing about what it decided.
@@ -102,9 +66,8 @@ describe('the SHARED half, which this fork cannot fix yet', () => {
 
 describe('TOPIC_DECISION_LABELS', () => {
   it('names the subject on both terminal decisions, matching the draft side', () => {
-    // The draft side says "Approve draft" / "Reject draft". If these two ever
-    // drift apart, the collision this module exists to fix is half-fixed, which
-    // reads as an inconsistency rather than a distinction.
+    // The draft page said "Approve draft" / "Reject draft" until its decision
+    // was removed (bd startsim-m7fdm.25); the topic side still names its subject.
     expect(TOPIC_DECISION_LABELS.approve).toBe('Approve topic');
     expect(TOPIC_DECISION_LABELS.reject).toBe('Reject topic');
   });

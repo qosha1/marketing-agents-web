@@ -9,43 +9,34 @@
  * to write. It renders inside the (dashboard) layout (sidebar + full-width main).
  *
  * Two-pane layout (P1): the content pane (blog/LinkedIn/SEO/Sources) sits LEFT and
- * a Quality rail (validation + AI-judge + reviewer scorecard/notes + revision
- * history) sits RIGHT, over a pinned decision bar; below `lg` the rail drops under
- * the content behind a Content|Quality toggle. The presentational shell + rail +
- * blog card are fork-local (src/components/draft-review/*) pending extraction to a
+ * the History rail (who changed what, plus revision lineage) sits RIGHT; below
+ * `lg` the rail stacks under the content. The presentational shell + rail + blog
+ * card are fork-local (src/components/draft-review/*) pending extraction to a
  * shared composer — this page still owns ALL section state and persistence. The
- * blog and LinkedIn are under track changes (TrackedSection, bd startsim-q8sgy):
- * the blog opens in the rendered (Read) view by default; SEO stays in the shared
- * DocumentEditor. Accept is gated on the deterministic
- * checks (with reasoned override) AND a human `approve` verdict — the AI judge is
- * advisory only and never blocks Accept.
+ * blog and LinkedIn are under track changes (TrackedSection, bd startsim-q8sgy);
+ * SEO stays in the shared DocumentEditor.
+ *
+ * REMOVED (bd startsim-m7fdm.25, Quinn 2026-10-08): the Checks / AI judge /
+ * validation section ("it does nothing and is confusing and poorly designed"),
+ * the "AI judge suggests" header pill, the Approve draft / Reject draft decision
+ * with the checks gate and reasoned override on it, Notes, and their keyboard
+ * shortcuts. Nothing stored was rewritten: `judge_verdict`, `review`, `notes` and
+ * `override_reason` stay on every draft and ride through `mergedData()`
+ * untouched. Topics still reach `written` through the n8n poll that marks any
+ * ready topic with a draft. "Mark sent" stays for a draft that is approved.
  *
  * The editor is CONTROLLED: this page owns the section values (via onChange) and
  * ALL persistence. The backend PATCH REPLACES the whole `data` blob (no deep
  * merge), so every write goes through `mergedData()` — which merges the section
- * patch, the reviewer's scorecard (`review`) and section notes (`notes`) into the
- * FULL existing draft.data — never a partial — or untouched attributes would drop.
- * Refs mirror the latest local state so an async write (debounced review autosave,
- * a note add, Accept) always folds in the freshest of every field.
- *
- * Reviewer feedback (768w.16.10.4): a ReviewScorecard (verdict + per-guardrail
- * scores, autosaved debounced) and a ReviewNotes thread (section-scoped critique,
- * saved on add/resolve).
+ * patch and sources into the FULL existing draft.data — never a partial — or
+ * untouched attributes would drop. Refs mirror the latest local state so an
+ * async write always folds in the freshest of every field.
  *
  * Revision lineage: the AI "Request revision" rewrite (768w.16.10.5) was removed
  * (bd startsim-whwxd.6), but drafts it already created still carry
  * `revised_from = <parent draft id>`. The "Revision history" affordance lists
  * that lineage, and — when this draft was revised from a parent — a "Compare to
- * previous" diff shows the parent blog against the current one. "Request
- * changes" is now a human verdict only: the feedback is saved on the draft and
- * nothing is sent anywhere.
- *
- * Validate-before-accept (bd 768w.16.10.3): a live ValidationChecklist recomputes
- * the deterministic guardrail checks over the reviewer's EDITED sections (plus the
- * stored AI-judge verdict), and "Accept" is gated on those checks not failing —
- * unless the reviewer records a reasoned override. Accept flips the draft
- * (chosen + approved) and its parent topic (written) together; once approved, a
- * "Mark sent" hands off (status → sent, posting stays manual).
+ * previous" diff shows the parent blog against the current one.
  *
  * Conditional saves and the history (bd startsim-j19hf; server bd startsim-3c2wc /
  * bd startsim-o1qib). Every write from this page asserts the version it loaded, so
@@ -59,8 +50,8 @@
  *      refusal names is exactly the overwrite the 412 prevented. Only an explicit
  *      "Save mine anyway" does that, and a person has to press it.
  *   2. `save.paused` IS CHECKED BEFORE EVERY WRITE, and the debounced ones are the
- *      reason: the content editor autosaves at 1,200 ms and the scorecard at 800 ms,
- *      so an unguarded path would repaint the dialog per keystroke burst.
+ *      reason: the content editor autosaves at 1,200 ms, so an unguarded path
+ *      would repaint the dialog per keystroke burst.
  *   3. `save()` REPORTS INSTEAD OF THROWING. Every call site below handles the
  *      result union, because a `{status: 'failed'}` never reaches a `.catch` and a
  *      500 would otherwise render as a success.
@@ -70,11 +61,8 @@
  * existed to record, and `human_edits` then held the log itself against machine
  * writes. The trail is server-side now and the panel in the rail is shared.
  *
- * Jump-to-issue (P3, bd 768w.16.15.3): the checks now report WHERE they failed, so
- * this page owns the jump — the active channel + pane (both shells took an optional
- * controlled mode for it) and the active issue. The reviewer clicks an issue in the
- * rail (or presses j/k) and lands on the offending field with the text marked,
- * instead of decoding "Checks 7/8". a/r/x set the Decision from the keyboard.
+ * Keyboard: [ / ] step the queue (lib/keyboard.ts). j/k (issues), a/x (decision)
+ * and ? (legend) went with the sections they served.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useSearchParams, useRouter } from 'next/navigation';
@@ -85,13 +73,6 @@ import {
   Absence,
   Button,
   notify,
-  runContentChecks,
-  resolveCheckPolicy,
-  overallStatus,
-  type JudgeVerdict,
-  type ValidationOverride,
-  type ReviewScore,
-  type ReviewNote,
 } from '@startsimpli/ui';
 import {
   DocumentEditor,
@@ -115,45 +96,24 @@ import { CONTENT_TYPE_KEY } from '@/lib/content';
 import { draftStatusLabel } from '@/lib/draft-status';
 import {
   draftCandidateIndex,
-  draftJudgeVerdict,
-  draftLang,
   draftStatus,
   draftTitle,
   DRAFT_TYPE,
 } from '@/lib/topic-drafts';
-import { DraftReviewLayout, type Pane } from '@/components/draft-review/DraftReviewLayout';
+import { DraftReviewLayout } from '@/components/draft-review/DraftReviewLayout';
 import {
   TopicBackLink,
   TopicContextHeader,
 } from '@/components/draft-review/TopicContextHeader';
 import { draftHref, FROM_PARAM, returnTarget, safeReturnPath } from '@/lib/story-nav';
-import { QualityRail } from '@/components/draft-review/QualityRail';
+import { HistoryRail } from '@/components/draft-review/HistoryRail';
 import { LanguageSwitcher } from '@/components/draft-review/LanguageSwitcher';
 import { TrackedSection } from '@/components/draft-review/TrackedSection';
 import { ContentChannels } from '@/components/draft-review/ContentChannels';
 import { SourcesTool } from '@/components/draft-review/SourcesTool';
-import {
-  approvedSourceBasis,
-  approvedSourceCheckConfig,
-  OGMC_CHECK_POLICY,
-  approvedSourceGap,
-  approvedSourceStandIn,
-  contentFieldsFromSections,
-  SOURCE_TYPE,
-} from '@/lib/content-checks';
-import {
-  findStopIndex,
-  isChannelId,
-  issueStops,
-  nextStopIndex,
-  prevStopIndex,
-  stopIndexForCheck,
-  type ChannelId,
-  type StopKey,
-} from '@/lib/issue-jump';
-import { DRAFT_DECISION_KEYS } from '@/lib/review-vocabulary';
-import { draftDecisionBar } from '@/lib/draft-decision-bar';
-import { shouldIgnoreShortcut } from '@/lib/keyboard';
+import { approvedSourceBasis, approvedSourceGap, SOURCE_TYPE } from '@/lib/approved-sources';
+import { isChannelId, type ChannelId } from '@/lib/draft-channels';
+import { draftShortcut, shouldIgnoreShortcut } from '@/lib/keyboard';
 import {
   entityWriteClient,
   getEntity,
@@ -170,13 +130,12 @@ import {
   withTrackedText,
 } from '@/lib/track-changes';
 import type { AcceptResponseWire } from '@startsimpli/ui/track-changes';
-import { acceptDraft } from '@/lib/accept-draft';
 import { entityKey, primeEntity } from '@/lib/entity-cache';
 import { fieldAuthorsClient, revisionClient } from '@/lib/revisions';
 import { createWriteGate, restoreHooks } from '@/lib/restore-guard';
 import { rememberVersion } from '@/lib/record-version';
 import { actorEditsHref, renderNextLink } from '@/lib/activity-links';
-import { readNotes, readReview, revisedFrom, revisionChain } from '@/lib/review';
+import { revisedFrom, revisionChain } from '@/lib/review';
 import {
   coverageSummary,
   parseSourceEntry,
@@ -213,12 +172,6 @@ const STATUS_PILL_TONE: Record<string, string> = {
   not_for_publication: 'bg-neutral-200 text-neutral-700',
   for_repurpose: 'bg-violet-100 text-violet-700',
 };
-
-/** The stored AI-judge verdict object, or undefined when absent/malformed. */
-function draftJudgeVerdictObj(draft: EntityRecord): JudgeVerdict | undefined {
-  const j = readData(draft.data, 'judge_verdict');
-  return j && typeof j === 'object' && !Array.isArray(j) ? (j as JudgeVerdict) : undefined;
-}
 
 /** camelCase-aware read of a draft data value as a string. */
 function draftStr(data: EntityRecord['data'], name: string): string {
@@ -270,8 +223,6 @@ function words(s: string): number {
   return wordCount(s);
 }
 
-/** Stable "nothing to highlight" identity — keeps the paint effect from churning. */
-const NO_MATCHES: string[] = [];
 
 export default function DraftPage() {
   const params = useParams<{ draftId: string }>();
@@ -352,16 +303,23 @@ function DraftEditorScreen({
   });
   const topic = topicQuery.data ?? null;
 
-  // The content pane's channel + (narrow-only) visible pane are page state now that
-  // jump-to-issue drives them. Seed the channel from `?channel=` so the shareable
-  // URL still opens the right tab — ContentChannels can no longer do it for us once
-  // it is controlled, and it keeps writing the param back on every switch.
+  // The content pane's channel is page state. Seed it from `?channel=` so the
+  // shareable URL still opens the right tab — ContentChannels keeps writing the
+  // param back on every switch.
   const searchParams = useSearchParams();
   const [channel, setChannel] = useState<ChannelId>(() => {
     const q = searchParams.get('channel');
     return isChannelId(q) ? q : 'brief';
   });
-  const [pane, setPane] = useState<Pane>('content');
+  // Below `lg` the History rail is stacked under the content, so opening History
+  // from elsewhere (a field's "edited by" line, the stale-save dialog) has to
+  // bring it into view or nothing visible happens. On `lg` it is already beside
+  // the content, sticky, and scrolling would only yank the page.
+  const railRef = useRef<HTMLDivElement | null>(null);
+  const revealHistory = () => {
+    if (typeof window !== 'undefined' && window.matchMedia?.('(min-width: 1024px)').matches) return;
+    requestAnimationFrame(() => railRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  };
 
   // WHERE "BACK" GOES (bd startsim-z384k). The 2026-09-08 meeting asked for back
   // navigation to return to the TOPIC TABLE with its scope intact, so the
@@ -375,7 +333,6 @@ function DraftEditorScreen({
     () => returnTarget(safeReturnPath(searchParams.get(FROM_PARAM)), contentType),
     [searchParams, contentType],
   );
-  const backHref = back.href;
 
   // The topic's own schema, for the context header's field map. Same ['types']
   // key as the translation query below, so it is one request either way.
@@ -387,16 +344,10 @@ function DraftEditorScreen({
    * The blog and LinkedIn text AS STORED at the version the next write asserts
    * (bd startsim-q8sgy). Every track-changes offset describes this text, not
    * the reviewer's unsaved typing in `sections`. Moved by a save that landed
-   * and by an accept, nothing else.
+   * and by a track-changes accept, nothing else.
    */
   const [stored, setStored] = useState(() => trackedText(draft.data));
-  const [review, setReview] = useState<ReviewScore>(() => readReview(draft.data));
-  const [notes, setNotes] = useState<ReviewNote[]>(() => readNotes(draft.data));
-  const [noteSection, setNoteSection] = useState<string>('general');
-  const [override, setOverride] = useState<ValidationOverride>({ overridden: false });
-  const [accepting, setAccepting] = useState(false);
   const [sending, setSending] = useState(false);
-  const [rejecting, setRejecting] = useState(false);
   const [showDiff, setShowDiff] = useState(false);
 
   // Sources are managed as parsed rows so the tool can show tier/recency, but the
@@ -422,24 +373,18 @@ function DraftEditorScreen({
   const [historyField, setHistoryField] = useState<string | null>(null);
 
   // Refs mirror the latest local state so any async persist merges the freshest of
-  // every field (sections + review + notes + sources) into the full data blob,
+  // every field (sections + sources) into the full data blob,
   // regardless of which one triggered the write.
   const sectionsRef = useRef(sections);
-  const reviewRef = useRef(review);
-  const notesRef = useRef(notes);
   const sourceItemsRef = useRef(sourceItems);
   const sourceMetaRef = useRef(sourceMeta);
   // Sync the mirrors after each commit. Handlers that persist immediately also set
   // their own ref inline (below) so they never wait on this effect.
   useEffect(() => {
     sectionsRef.current = sections;
-    reviewRef.current = review;
-    notesRef.current = notes;
     sourceItemsRef.current = sourceItems;
     sourceMetaRef.current = sourceMeta;
   });
-
-  const reviewSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const status = draftStatus(draft);
   const isApproved = status === 'approved';
@@ -450,8 +395,6 @@ function DraftEditorScreen({
   // than a status keeps the button honest without inventing a seventh value.
   // Whether a published STATUS should exist is open on bd startsim-wn2p.14.
   const isSent = draftStr(draft.data, 'sent_at').trim() !== '';
-  const verdict = draftJudgeVerdict(draft);
-  const judgeVerdict = draftJudgeVerdictObj(draft);
 
   // The full draft set backs the "Revision history" lineage and the review queue.
   const draftsQuery = useQuery({
@@ -505,22 +448,13 @@ function DraftEditorScreen({
     [parentBlog, thisBlog],
   );
 
-  // Recompute the deterministic guardrail checks over the CURRENT edited section
-  // values (not stale draft.data) on every edit, so the checklist tracks live.
-  // Sources live outside `sections` now (they're the Sources tool), so re-inject a
-  // synthetic sources section built from the tool's rows for the approved-sources
-  // check.
-  // THE APPROVED-SOURCE LIST IS TENANT DATA, not a constant (bd startsim-768w.18.14).
-  // A hardcoded list here had drifted from both n8n's search domains and the
-  // team-editable Approved Source table, and approval is HARD-GATED on it — so
-  // 59 of 59 drafts with sources were unapprovable. The tenant's records decide.
+  // THE APPROVED-SOURCE LIST IS TENANT DATA, not a constant (bd startsim-768w.18.14):
+  // the team-editable Approved Source records decide which hosts the Sources tab
+  // badges as approved. It no longer gates anything — the checks gate on Approve
+  // went with the Checks section and the decision (bd startsim-m7fdm.25).
   //
-  // And when that read comes back with nothing, THE CHECK DOES NOT RUN
-  // (bd startsim-4ipm). This used to fall back to the hardcoded list on an empty
-  // read, which quietly swapped the basis of an approval gate: measured on prod
-  // 2026-08-20, all 59 drafts-with-sources pass against the tenant's 53 active
-  // hosts and 27 of those same 59 fail against the old hardcoded 43. An empty
-  // read is an ABSENCE — say so, and refuse to compute against another list.
+  // An empty or failed read is an ABSENCE (bd startsim-4ipm): say so, and never
+  // badge against some other list.
   const sourceRecordsQuery = useQuery({
     queryKey: ['entities', SOURCE_TYPE],
     queryFn: () => listAllEntities(SOURCE_TYPE),
@@ -534,7 +468,7 @@ function DraftEditorScreen({
       }),
     [sourceRecordsQuery.data, sourceRecordsQuery.isPending, sourceRecordsQuery.isError],
   );
-  // Non-null exactly when the check cannot run — three states, three sentences.
+  // Non-null exactly when there is no list to badge against — three states, three sentences.
   const sourceGap = approvedSourceGap(basis);
   // Where "Approved Source" lives in the nav: board or table, depending on whether
   // the tenant declared an enum on it. Ask the same helper the sidebar asks, so the
@@ -542,77 +476,6 @@ function DraftEditorScreen({
   const sourceTypesQuery = useQuery({ queryKey: ['types'], queryFn: () => listTypes() });
   const sourceTypeDef = (sourceTypesQuery.data?.results ?? []).find((t) => t.key === SOURCE_TYPE);
   const sourceTypeRoute = sourceTypeDef ? typeRoute(sourceTypeDef) : `/t/${SOURCE_TYPE}`;
-
-  const checks = useMemo(() => {
-    const sourcesSection: DocSection = {
-      key: 'sources',
-      label: 'Sources',
-      kind: 'list',
-      value: sourceItems.map((s) => s.url).filter(Boolean),
-    };
-    const computed = runContentChecks(
-      contentFieldsFromSections([...sections, sourcesSection], draft.name),
-      {
-        // Standing policy first: which checks run and their bands, resolved for
-        // THIS draft's content_type and language (bd startsim-wncr6). A weekly
-        // brief and a long-form evergreen guide are no longer judged against one
-        // band, and a Chinese draft is no longer judged against English ones.
-        ...resolveCheckPolicy(OGMC_CHECK_POLICY, {
-          contentType,
-          language: draftLang(draft),
-        }),
-        // Then per-draft evidence, which is NOT policy — the tenant's live source
-        // records, resolved per render. Spread last so it wins.
-        // NOT `{ approvedHosts: [] }` — the checker runs the check whenever the key
-        // is present, so an empty array would fail every host. Absent = skipped.
-        ...approvedSourceCheckConfig(basis),
-      },
-    );
-    // Hold the approved-sources slot with a `warn` stand-in when it was skipped,
-    // so a check that could not run never reads as a check that passed.
-    const standIn = approvedSourceStandIn(basis);
-    return standIn ? [...computed, standIn] : computed;
-  }, [sections, sourceItems, draft, draft.name, contentType, basis]);
-
-  // --- Jump-to-issue (bd 768w.16.15.3) ---
-  // Every place a non-passing check can send the reviewer, rebuilt with the checks.
-  const stops = useMemo(() => issueStops(checks), [checks]);
-
-  // The active issue is held by IDENTITY, not by index: `stops` is rebuilt on every
-  // keystroke, so a stored index would quietly come to point at a different issue
-  // the moment one is fixed. Re-resolving means a fixed issue simply resolves to -1
-  // and its highlight clears itself.
-  const [activeKey, setActiveKey] = useState<StopKey | null>(null);
-  const activeStop = useMemo(() => findStopIndex(stops, activeKey), [stops, activeKey]);
-  const active = activeStop >= 0 ? stops[activeStop] : undefined;
-
-  const [legendOpen, setLegendOpen] = useState(false);
-  const contentPaneRef = useRef<HTMLDivElement | null>(null);
-
-  // Accept gate (locked decision #2 — the human overrides the judge). Two
-  // conditions, and the AI judge is NOT one of them (it's advisory / display-only):
-  //   1. the deterministic ValidationChecklist checks don't FAIL — unless the
-  //      reviewer records a reasoned override (unchanged); AND
-  //   2. the reviewer has signed off: a human `approve` verdict on the scorecard.
-  // A human `approve` unlocks Accept regardless of what the AI judge said.
-  const overriddenWithReason =
-    override.overridden && (override.reason ?? '').trim().length > 0;
-  const validationOk = overallStatus(checks) !== 'fail' || overriddenWithReason;
-  const reviewerSignedOff = review.verdict === 'approve';
-  const canAccept = validationOk && reviewerSignedOff;
-  const failingLabels = checks.filter((c) => c.status === 'fail').map((c) => c.label);
-
-  // The gating hint on the left of the decision bar: fix failing checks first,
-  // else prompt the reviewer to sign off. When Accept IS unlocked but the
-  // approved-source check could not run, the bar says so — an unchecked basis
-  // does not block the queue, but the reviewer must not read "Ready to accept"
-  // over a guardrail that never ran (bd startsim-4ipm).
-  const acceptGateHint =
-    !validationOk && failingLabels.length > 0
-      ? `Fix to accept: ${failingLabels.join(', ')}`
-      : validationOk && !reviewerSignedOff
-        ? 'Set your verdict to Approve to accept'
-        : (sourceGap?.gateHint ?? null);
 
   /** Edits made vs edits saved, so a restore flushes only real unsaved typing
    *  (lib/restore-guard.ts). A counter, not a flag: typing during a save in
@@ -625,8 +488,11 @@ function DraftEditorScreen({
   };
 
   // The single source of truth for a PATCH body: the full existing blob with the
-  // freshest sections + review + notes folded in, plus any explicit status/flag
-  // overrides. Every write below goes through this so nothing is ever dropped.
+  // freshest sections + sources folded in, plus any explicit status/flag
+  // overrides. Every write below goes through this so nothing is ever dropped —
+  // including the stored `review`, `notes`, `judge_verdict` and `override_reason`
+  // nothing on this page edits any more (bd startsim-m7fdm.25): they ride along
+  // in `draft.data` untouched.
   //
   // IT NO LONGER STAMPS AN EDIT LOG (bd startsim-j19hf). It used to fold
   // `data._edit_history` in here, and the choke point was the right shape for
@@ -643,8 +509,6 @@ function DraftEditorScreen({
     // the read shape so it overrides cleanly) carries the reviewer-only verified flags.
     sources: serializeSources(sourceItemsRef.current, sourcesContainer),
     sourceMeta: sourceMetaRef.current,
-    review: reviewRef.current,
-    notes: notesRef.current,
     ...overrides,
   });
 
@@ -742,9 +606,9 @@ function DraftEditorScreen({
 
   const restore = restoreHooks({
     gate,
-    cancelTimers: () => {
-      if (reviewSaveTimer.current) clearTimeout(reviewSaveTimer.current);
-    },
+    // Nothing on this page debounces outside the editors any more (the review
+    // scorecard autosave went with the decision, bd startsim-m7fdm.25).
+    cancelTimers: () => {},
     // What the editor holds NOW, straight through the conditional save (not the
     // gate it has just closed). A byte-identical re-send records nothing.
     hasUnsaved: () => editSeq.current > savedSeq.current,
@@ -824,7 +688,7 @@ function DraftEditorScreen({
   const openFieldHistory = (field: string) => {
     setHistoryField(field);
     setHistoryOpen(true);
-    setPane('quality');
+    revealHistory();
   };
   const attribution = (field: string, opts: { nameColumn?: boolean } = {}) => (
     <FieldAttribution
@@ -865,58 +729,17 @@ function DraftEditorScreen({
     await persist({}, 'Could not save the draft.');
   }
 
-  // Scorecard autosave is debounced so per-keystroke note edits don't churn.
-  function onReviewChange(next: ReviewScore) {
-    editSeq.current += 1;
-    setReview(next);
-    reviewRef.current = next;
-    if (reviewSaveTimer.current) clearTimeout(reviewSaveTimer.current);
-    reviewSaveTimer.current = setTimeout(() => {
-      // 800 ms, not 1,200 — the SHORTER of the two debounces on this page. It
-      // goes through `persist` like everything else; see `saveSections` for why
-      // there is no early `paused` return here either.
-      void persist({}, 'Could not save the review.');
-    }, 800);
-  }
-
-  // --- Jump-to-issue: the imperative half (bd 768w.16.15.3) ---
-  // Below `onReviewChange` because the a/r/x shortcuts drive it.
-  function goToStop(index: number) {
-    const stop = stops[index];
-    if (!stop) return; // nothing to jump to — never a dead click
-    setActiveKey({ checkId: stop.checkId, field: stop.field });
-    setChannel(stop.channel);
-    // Below `lg` the panes are exclusive: a jump fired from the rail must reveal the
-    // content it just switched to, or it lands on a hidden pane and looks broken.
-    setPane('content');
-    contentPaneRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }
-
-  // Mirror the shortcut actions so the key listener binds ONCE yet always calls the
-  // freshest handler — `stops`/`activeStop`/`review` all churn on every edit. Synced
-  // after each commit, like the persistence mirrors above.
-  const jumpByRef = useRef<(delta: 1 | -1) => void>(() => {});
-  const setVerdictRef = useRef<(v: NonNullable<ReviewScore['verdict']>) => void>(() => {});
+  // Mirror the queue step so the key listener binds ONCE yet always calls the
+  // freshest handler — the queue churns as drafts load. Synced after each commit,
+  // like the persistence mirrors above.
   const queueByRef = useRef<(delta: 1 | -1) => void>(() => {});
   useEffect(() => {
-    jumpByRef.current = (delta) =>
-      goToStop(
-        delta === 1
-          ? nextStopIndex(activeStop, stops.length)
-          : prevStopIndex(activeStop, stops.length),
-      );
-    // a / x decide, so they do nothing for someone who cannot edit this draft
-    // (bd startsim-whwxd.22) — the decision buttons are hidden from them too.
-    setVerdictRef.current = (v) => {
-      if (canEdit) onReviewChange({ ...reviewRef.current, verdict: v });
-    };
     queueByRef.current = (delta) => goToDraft(delta === 1 ? nextDraft : prevDraft);
   });
 
-  // j/k walk the issues; a/x set the Decision; ? toggles the legend. Bound to the
-  // document because the reviewer's focus is normally in the content pane, not the
-  // rail — and guarded so a letter typed into the feedback box or the blog editor
-  // can never flip the verdict (see shouldIgnoreShortcut).
+  // [ / ] step the queue. Bound to the document because the reviewer's focus is
+  // normally in the content pane — and guarded so a bracket typed into the blog
+  // editor never leaves the draft (see shouldIgnoreShortcut).
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if (
@@ -930,55 +753,14 @@ function DraftEditorScreen({
       ) {
         return;
       }
-      switch (e.key) {
-        case 'j':
-          jumpByRef.current(1);
-          break;
-        case 'k':
-          jumpByRef.current(-1);
-          break;
-        case 'a':
-        case 'x':
-          setVerdictRef.current(DRAFT_DECISION_KEYS[e.key]);
-          break;
-        case ']':
-          queueByRef.current(1); // next draft in the queue
-          break;
-        case '[':
-          queueByRef.current(-1); // previous draft in the queue
-          break;
-        case '?':
-          setLegendOpen((v) => !v);
-          break;
-        default:
-          return; // not ours — leave the event alone
-      }
+      const action = draftShortcut(e.key);
+      if (!action) return; // not ours — leave the event alone
+      queueByRef.current(action.delta);
       e.preventDefault();
     }
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
   }, []);
-
-  function addNote(body: string) {
-    const at = new Date().toISOString();
-    const note: ReviewNote = {
-      id: `${notesRef.current.length}-${at}`,
-      body,
-      section: noteSection,
-      at,
-    };
-    const next = [...notesRef.current, note];
-    setNotes(next);
-    notesRef.current = next;
-    void persist({}, 'Could not save the note.');
-  }
-
-  function resolveNote(id: string) {
-    const next = notesRef.current.map((n) => (n.id === id ? { ...n, resolved: true } : n));
-    setNotes(next);
-    notesRef.current = next;
-    void persist({}, 'Could not update the note.');
-  }
 
   // --- Sources tool mutations (persist immediately via the full-blob merge) ---
   function persistSources(nextItems: ParsedSource[], nextMeta: SourceMetaEntry[]) {
@@ -1019,73 +801,6 @@ function DraftEditorScreen({
     [sourceMeta],
   );
 
-  async function accept() {
-    if (!canAccept) return; // defensive — the button is disabled in this state
-    if (!topic) {
-      notify.error('Still loading the parent topic — try again in a moment.');
-      return;
-    }
-    setAccepting(true);
-    try {
-      // Two writes to two records, ordered and compensated in lib/accept-draft.ts
-      // (bd startsim-jkkn7.13): re-read the topic and stop with nothing written if
-      // its decision moved; approve the draft (pending edits + review ride along,
-      // and `persist` reports its own failure or opens the conflict dialog); then
-      // move the topic, merged onto the blob just re-read and asserting THAT
-      // version; on a refusal re-read and retry once only if the decision still
-      // has not moved; and if the topic still will not move, put the draft back.
-      //
-      // The values the draft goes BACK to are what it held before this press —
-      // read off the page's own record, which `persist` has not touched yet in
-      // this closure. `undefined` keys drop out of the JSON body, so a draft
-      // that had no `override_reason` gets none back.
-      const before = {
-        chosen: readData(draft.data, 'chosen'),
-        status: readData(draft.data, 'status'),
-        override_reason: readData(draft.data, 'override_reason'),
-      };
-      const outcome = await acceptDraft({
-        qc,
-        topic,
-        approveDraft: () =>
-          persist(
-            {
-              chosen: true,
-              status: 'approved',
-              ...(override.overridden ? { override_reason: override.reason } : {}),
-            },
-            'Could not accept.',
-          ),
-        restoreDraft: () => persist(before, 'Could not put the draft back.'),
-      });
-      if (outcome.status === 'draft-not-saved') return;
-      if (outcome.status === 'topic-moved') {
-        notify.error(
-          `This topic changed since you opened the draft (it is now “${outcome.topicStatus || 'unset'}”). Nothing was accepted — reload to see the change.`,
-        );
-        return;
-      }
-      if (outcome.status === 'topic-refused') {
-        notify.error(
-          outcome.draftRestored
-            ? `The topic could not be moved to written: ${outcome.detail}. The draft was put back as it was — nothing was accepted.`
-            : `The draft is approved, but its topic could not be moved to written (${outcome.detail}) and the draft could not be put back. Reload and accept again, or set the topic to written from the topics table.`,
-        );
-        return;
-      }
-      // No ['entity', draftId] invalidation: `persist` above just wrote the
-      // server's own answer into that entry, so invalidating it would only buy a
-      // round trip to fetch what is already there.
-      await qc.invalidateQueries({ queryKey: ['entities', CONTENT_TYPE_KEY, 'all'] });
-      notify.success('Accepted.');
-      goToDraft(nextDraft); // advance to the next draft in the queue
-    } catch (err) {
-      notify.error(err instanceof Error ? err.message : 'Could not accept.');
-    } finally {
-      setAccepting(false);
-    }
-  }
-
   async function markSent() {
     setSending(true);
     try {
@@ -1105,39 +820,6 @@ function DraftEditorScreen({
     }
   }
 
-  // Reject this candidate: record the reject verdict (already set on `review` via
-  // the Decision control) and mark the candidate not-chosen (`chosen: false`) — its
-  // sibling drafts stay available.
-  //
-  // The enum now DOES declare `rejected` (bd startsim-wn2p.2), but writing it here
-  // is deliberately not part of the vocabulary move: in the team's workflow a
-  // rejected piece leaves the tracker for a rejected-content repository, and that
-  // whole disposition — status plus removal — is bd startsim-wn2p.8. Stamping the
-  // status without the removal would half-implement it.
-  async function reject() {
-    setRejecting(true);
-    try {
-      if (!(await persist({ chosen: false }, 'Could not reject.'))) return;
-      await qc.invalidateQueries({ queryKey: ['entities', CONTENT_TYPE_KEY, 'all'] });
-      notify.success('Candidate rejected.');
-      goToDraft(nextDraft); // advance to the next draft in the queue
-    } catch (err) {
-      notify.error(err instanceof Error ? err.message : 'Could not reject.');
-    } finally {
-      setRejecting(false);
-    }
-  }
-
-  // Clear timers on unmount.
-  useEffect(
-    () => () => {
-      if (reviewSaveTimer.current) clearTimeout(reviewSaveTimer.current);
-    },
-    [],
-  );
-
-  const noteSections = ['general', 'blog', 'linkedin', 'seo', 'sources'];
-
   // Content is channel-tabbed (P2): Brief = the blog in its own TrackedSection (opens
   // in the editor, caret in the text — bd startsim-whwxd.17); LinkedIn + SEO render as single-section shared
   // DocumentEditors; Sources is the dedicated tool. Each channel edits the SAME
@@ -1147,14 +829,7 @@ function DraftEditorScreen({
   const seoSection = useMemo(() => sections.filter((s) => s.key === 'seo'), [sections]);
   const sourcesCoverage = coverageSummary(sourceItems, today);
 
-  // What the active jump wants marked, per channel. Only the blog (hype words) and
-  // the sources (unapproved URLs) can actually render a mark: LinkedIn + SEO are
-  // textareas/inputs with no text nodes to paint, and the headline lives in the page
-  // header, outside the channels. Those jumps still switch + scroll — see the bead.
-  const blogHighlight = active?.field === 'blog' ? active.matches : NO_MATCHES;
-  const flaggedSources = active?.field === 'sources' ? active.matches : NO_MATCHES;
-
-  // Header pills: AI-judge verdict, status, and candidate ordinal (# of N siblings
+  // Header pills: status and candidate ordinal (# of N siblings
   // sharing this draft's topic).
   const candidateIndex = draftCandidateIndex(draft);
   const siblingCount = useMemo(
@@ -1210,17 +885,6 @@ function DraftEditorScreen({
             </button>
           </div>
         ) : null}
-        {verdict ? (
-          <span
-            className={`rounded-full px-2.5 py-0.5 text-xs ${
-              verdict === 'accept'
-                ? 'bg-emerald-100 text-emerald-700'
-                : 'bg-amber-100 text-amber-700'
-            }`}
-          >
-            AI judge suggests: {verdict}
-          </span>
-        ) : null}
         {status ? (
           <span
             className={`rounded-full px-2.5 py-0.5 text-xs ${
@@ -1242,10 +906,8 @@ function DraftEditorScreen({
     </div>
   );
 
-  // A jump scrolls this container into view — the pane is the target the checks can
-  // always name, whether or not the finding has a span to mark inside it.
   const content = (
-    <div ref={contentPaneRef} className="space-y-4">
+    <div className="space-y-4">
       {/* A newer revision was generated from this draft — surface a jump link. */}
       {latestChild ? (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-800">
@@ -1256,8 +918,7 @@ function DraftEditorScreen({
         </div>
       ) : null}
 
-      {/* One focused channel at a time — Brief default. Controlled so the rail's
-          jump-to-issue can open the channel holding a failing check. */}
+      {/* One focused channel at a time — Brief default. */}
       <ContentChannels
         active={channel}
         onActiveChange={(id) => {
@@ -1285,7 +946,6 @@ function DraftEditorScreen({
                     currentActorSub={me.sub}
                     canEdit={canEdit}
                     runAccept={runAccept}
-                    highlight={blogHighlight}
                     autoFocus={channel === 'brief'}
                     onChange={(v) => onChange('blog', v)}
                     onSave={(v) => saveSections([{ key: 'blog', label: 'Blog post', kind: 'markdown', value: v }])}
@@ -1343,7 +1003,7 @@ function DraftEditorScreen({
             content: (
               <div className="space-y-3">
                 {attribution('sources')}
-                {/* The check's basis, when there isn't one. Loading is a not-yet
+                {/* The badges' basis, when there isn't one. Loading is a not-yet
                     (a quiet line); a genuine empty and a failed read are absences
                     with different fixes — so they are different cards, and neither
                     is a 0, a green tick or a verdict about this draft. */}
@@ -1357,7 +1017,7 @@ function DraftEditorScreen({
                       tier="card"
                       title={sourceGap.title}
                       description={sourceGap.description}
-                      why="Approvability is decided by the tenant’s own Approved Source records. When that list is unavailable the check is skipped, never re-run against a different list — so a draft’s approvability cannot change without someone editing the list."
+                      why="Which sources count as approved is decided by the tenant’s own Approved Source records. When that list is unavailable nothing is badged, rather than badged against a different list."
                       action={
                         sourceGap.retryable
                           ? {
@@ -1386,8 +1046,6 @@ function DraftEditorScreen({
                   // have not earned. The tool renders an absence instead.
                   approvedHosts={basis.state === 'ready' ? basis.hosts : null}
                   today={today}
-                  judgeVerdict={judgeVerdict}
-                  flagged={flaggedSources}
                   onAdd={addSource}
                   onRemove={removeSource}
                   onToggleVerify={toggleVerify}
@@ -1401,28 +1059,8 @@ function DraftEditorScreen({
   );
 
   const rail = (
-    <QualityRail
-      checks={checks}
-      stops={stops}
-      activeStop={activeStop}
-      onJumpToCheck={(checkId) => goToStop(stopIndexForCheck(stops, checkId, activeStop))}
-      legendOpen={legendOpen}
-      onToggleLegend={() => setLegendOpen((v) => !v)}
-      judgeVerdict={judgeVerdict}
-      judgeVerdictWord={verdict}
-      override={override}
-      onOverride={setOverride}
+    <HistoryRail
       canEdit={canEdit}
-      review={review}
-      onReviewChange={onReviewChange}
-      canAccept={canAccept}
-      acceptGateHint={acceptGateHint}
-      notes={notes}
-      onAddNote={addNote}
-      onResolveNote={resolveNote}
-      noteSection={noteSection}
-      onNoteSectionChange={setNoteSection}
-      noteSections={noteSections}
       revisions={revisions}
       historyOpen={historyOpen}
       onHistoryOpenChange={setHistoryOpen}
@@ -1453,60 +1091,21 @@ function DraftEditorScreen({
     />
   );
 
-  // The decision bar reflects the rail's "Decision" (lib/draft-decision-bar.ts).
-  // A legacy 'revise' verdict (the removed "Request changes", bd
-  // startsim-m7fdm.24) reads as undecided and is named raw, never rewritten.
-  const call = review.verdict;
-  const bar = draftDecisionBar({
-    call,
-    isApproved,
-    isSent,
-    acceptGateHint,
-    validationOk,
-    sourceGap: !!sourceGap,
-    accepting,
-    rejecting,
-    canAccept,
-  });
-  const { gateText, gateWarn, primaryLabel, primaryDisabled, primaryVariant } = bar;
-
-  const primaryAction = () => {
-    if (call === 'approve') return accept();
-    if (call === 'reject') return reject();
-  };
-
-  const decisionBar = (
+  // The bottom bar. The Approve draft / Reject draft decision that drove it was
+  // removed (bd startsim-m7fdm.25), so it now shows only what is left to do:
+  // "Mark sent" on a draft that is already approved (existing approvals, or one
+  // moved to Approved on the board), and the view-only note for a reader who
+  // cannot edit. Otherwise there is no bar.
+  const decisionBar = !canEdit ? (
+    <span className="text-xs text-neutral-500">You can view this draft: read, suggest and comment.</span>
+  ) : isApproved || isSent ? (
     <>
-      {gateText ? (
-        <span className={`mr-auto text-xs ${gateWarn ? 'text-amber-700' : 'text-neutral-500'}`}>
-          {gateText}
-        </span>
-      ) : (
-        <span className="mr-auto" />
-      )}
-      <Link href={backHref} className="text-sm text-neutral-500 hover:text-neutral-900">
-        Cancel
-      </Link>
-      {!canEdit ? (
-        <span className="text-xs text-neutral-500">
-          You can view this draft: read, suggest and comment.
-        </span>
-      ) : isApproved || isSent ? (
-        <Button variant="secondary" onClick={markSent} disabled={sending || isSent}>
-          {isSent ? 'Sent' : sending ? 'Marking…' : 'Mark sent'}
-        </Button>
-      ) : (
-        <Button
-          variant={primaryVariant}
-          onClick={primaryAction}
-          disabled={primaryDisabled}
-          title={primaryLabel === 'Choose a decision' ? 'Pick a decision on this draft in the rail' : undefined}
-        >
-          {primaryLabel}
-        </Button>
-      )}
+      <span className="mr-auto" />
+      <Button variant="secondary" onClick={markSent} disabled={sending || isSent}>
+        {isSent ? 'Sent' : sending ? 'Marking…' : 'Mark sent'}
+      </Button>
     </>
-  );
+  ) : null;
 
   return (
     <>
@@ -1515,13 +1114,11 @@ function DraftEditorScreen({
         content={content}
         rail={rail}
         decisionBar={decisionBar}
-        pane={pane}
-        onPaneChange={setPane}
+        railRef={railRef}
       />
       {/* "Someone changed this while you were editing", and your text is still on
-          screen behind it (bd startsim-jkkn7.3). Rendered OUTSIDE the layout
-          because the layout's panes are exclusive below `lg` and a modal that
-          lived inside one would be hidden on the pane the reviewer was not on.
+          screen behind it (bd startsim-jkkn7.3). Rendered OUTSIDE the layout,
+          a sibling of it rather than a child of either pane.
           It needs no QueryClientProvider — deliberately, see the shared module. */}
       <StaleSaveDialog
         conflict={save.conflict}
@@ -1549,7 +1146,7 @@ function DraftEditorScreen({
         // The safe default action: show the trail rather than decide anything.
         onReviewChange={() => {
           setHistoryOpen(true);
-          setPane('quality');
+          revealHistory();
           save.dismissConflict();
         }}
       />

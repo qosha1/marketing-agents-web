@@ -16,7 +16,7 @@
  * only while open and the panel fetches on mount, so a drawer stepped through
  * row by row costs no request for a trail nobody expanded.
  *
- * The draft page's Quality rail keeps its own mount: it is CONTROLLED there,
+ * The draft page's History rail keeps its own mount: it is CONTROLLED there,
  * because the stale-save dialog's "See what changed" opens it from outside.
  *
  * RESTORE (bd startsim-vehzd). Every surface that mounts this edits the record
