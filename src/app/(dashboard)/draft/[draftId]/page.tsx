@@ -315,10 +315,22 @@ function DraftEditorScreen({
   // from elsewhere (a field's "edited by" line, the stale-save dialog) has to
   // bring it into view or nothing visible happens. On `lg` it is already beside
   // the content, sticky, and scrolling would only yank the page.
+  //
+  // The rail is the LAST thing on the page, so when History opens the page is not
+  // yet tall enough to bring its header to the top: the trail mounts and loads
+  // after the click. So the scroll is repeated while the rail grows, for a short
+  // window, rather than fired once against a page that cannot scroll that far.
   const railRef = useRef<HTMLDivElement | null>(null);
   const revealHistory = () => {
-    if (typeof window !== 'undefined' && window.matchMedia?.('(min-width: 1024px)').matches) return;
-    requestAnimationFrame(() => railRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+    if (typeof window === 'undefined' || window.matchMedia?.('(min-width: 1024px)').matches) return;
+    const el = railRef.current;
+    if (!el) return;
+    const toTop = () => el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    requestAnimationFrame(toTop);
+    if (typeof ResizeObserver === 'undefined') return;
+    const grow = new ResizeObserver(toTop);
+    grow.observe(el);
+    window.setTimeout(() => grow.disconnect(), 2500);
   };
 
   // WHERE "BACK" GOES (bd startsim-z384k). The 2026-09-08 meeting asked for back
