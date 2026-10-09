@@ -8,9 +8,8 @@
  * host is on the tenant's approved-source list, else unverified — and an absence
  * when that list could not be read) · date with a staleness flag ·
  * Open · Verify (a reviewer-only flag) · the note. A coverage banner at the top
- * ties thin/stale sourcing to the AI judge's recency / source-reliability concern,
- * so a "revise" verdict becomes something to FIX (find a fresher / second source)
- * rather than a verdict to stare at. Add-a-source checks the pasted URL's host
+ * flags thin or stale sourcing as something to fix (find a fresher / second
+ * source). Add-a-source checks the pasted URL's host
  * against the allow-list and shows its tier immediately.
  *
  * Controlled + presentational: the page owns the parsed rows + the `verified` map +
@@ -22,7 +21,7 @@ import * as React from 'react';
 import { ExternalLink, Plus, ShieldCheck, ShieldQuestion, Check, Trash2, AlertTriangle } from 'lucide-react';
 
 import { cn } from '@startsimpli/ui/utils';
-import { Absence, type JudgeVerdict } from '@startsimpli/ui';
+import { Absence } from '@startsimpli/ui';
 
 import type { ParsedSource } from '@/lib/sources';
 import {
@@ -47,28 +46,9 @@ export interface SourcesToolProps {
    */
   approvedHosts: string[] | null;
   today: Date;
-  judgeVerdict?: JudgeVerdict;
-  /**
-   * Source URLs an active jump-to-issue is pointing at (bd 768w.16.15.3) — the
-   * approved-sources check's `matches`. Rows are a list, not prose, so the offending
-   * ones are marked outright instead of highlighting a substring of them.
-   */
-  flagged?: string[];
   onAdd(url: string): void;
   onRemove(id: string): void;
   onToggleVerify(id: string): void;
-}
-
-/** Stable identity for "nothing flagged". */
-const NO_FLAGS: string[] = [];
-
-/** The judge's guardrails that the Sources tool can act on (recency / sourcing). */
-function sourcingConcerns(judge?: JudgeVerdict): string[] {
-  const issues = judge?.issues ?? [];
-  return issues
-    .filter((i) => /recen|source|reliab|citation|fresh/i.test(`${i.guardrail ?? ''} ${i.problem ?? ''}`))
-    .map((i) => i.guardrail || i.problem || '')
-    .filter(Boolean);
 }
 
 export function SourcesTool({
@@ -76,15 +56,12 @@ export function SourcesTool({
   verified,
   approvedHosts,
   today,
-  judgeVerdict,
-  flagged = NO_FLAGS,
   onAdd,
   onRemove,
   onToggleVerify,
 }: SourcesToolProps) {
   const [draftUrl, setDraftUrl] = React.useState('');
   const cov = coverageSummary(items, today);
-  const concerns = sourcingConcerns(judgeVerdict);
 
   const draftHost = hostOf(draftUrl.trim());
   const draftTier =
@@ -108,7 +85,7 @@ export function SourcesTool({
         </span>
       </div>
 
-      {/* Coverage warning — tied to the judge's recency / sourcing concern. */}
+      {/* Coverage warning — thin or aging sourcing. */}
       {cov.concern ? (
         <div className="flex gap-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-amber-800">
           <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" aria-hidden="true" />
@@ -118,10 +95,7 @@ export function SourcesTool({
                 {cov.count <= 1 ? 'One source backs the whole brief' : `${cov.count} sources`}
                 {cov.oldestDays != null ? ` — oldest is ${ageLabel(cov.oldestDays)}` : ''}.
               </b>{' '}
-              {concerns.length > 0
-                ? `The AI judge's ${concerns.join(' + ')} concern points here — `
-                : 'This is what a "revise" wants fixed — '}
-              add a second or fresher source so the claims do not rest on a single, aging citation.
+              Add a second or fresher source so the claims do not rest on a single, aging citation.
             </p>
           </div>
         </div>
@@ -144,7 +118,6 @@ export function SourcesTool({
               // The check extracts URLs from the same rows we render, so an exact
               // match is the honest test: a row that doesn't match simply isn't
               // marked — the jump still opened this channel.
-              flagged={flagged.includes(s.url)}
               onToggleVerify={() => onToggleVerify(s.id)}
               onRemove={() => onRemove(s.id)}
             />
@@ -196,7 +169,6 @@ function SourceRow({
   tier,
   ageDays,
   verified,
-  flagged,
   onToggleVerify,
   onRemove,
 }: {
@@ -205,18 +177,12 @@ function SourceRow({
   tier: 'approved' | 'unverified' | null;
   ageDays: number | null;
   verified: boolean;
-  flagged: boolean;
   onToggleVerify: () => void;
   onRemove: () => void;
 }) {
   const stale = isStale(ageDays);
   return (
-    <li
-      className={cn(
-        'rounded-xl border border-border bg-card p-3',
-        flagged && 'border-amber-400 ring-2 ring-amber-300',
-      )}
-    >
+    <li className="rounded-xl border border-border bg-card p-3">
       <div className="flex items-start gap-3">
         <div
           className={cn(
@@ -292,15 +258,9 @@ function SourceRow({
               </span>
             )}
             {source.url ? (
-              flagged ? (
-                <mark className="truncate rounded-md bg-amber-200 px-1 text-[11px] font-medium text-amber-900">
-                  {hostOf(source.url) || source.url}
-                </mark>
-              ) : (
-                <span className="truncate rounded-md px-1 text-[11px] text-primary/80">
-                  {hostOf(source.url) || source.url}
-                </span>
-              )
+              <span className="truncate rounded-md px-1 text-[11px] text-primary/80">
+                {hostOf(source.url) || source.url}
+              </span>
             ) : null}
           </div>
         </div>

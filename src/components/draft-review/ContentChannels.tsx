@@ -12,8 +12,7 @@
  * in one channel isn't lost by switching to another mid-save.
  *
  * Optionally CONTROLLED (bd 768w.16.15.3): pass `active` and the caller drives the
- * tab — the Quality rail's jump-to-issue has to be able to open the channel that
- * holds a failing check, which internal-only state cannot express. Omit it and the
+ * tab (the draft page does, to focus the editor of the channel on screen). Omit it and the
  * uncontrolled behaviour above is unchanged; the `?channel=` write happens either
  * way, since a shareable URL is orthogonal to who owns the value.
  *

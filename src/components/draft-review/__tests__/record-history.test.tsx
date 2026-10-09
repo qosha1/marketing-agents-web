@@ -7,9 +7,9 @@
  * PATCH replaces wholesale. These tests pin what replaced it, and each one is a
  * thing a type-check cannot see:
  *
- *  1. THE PANEL IS MOUNTED AT ALL, and lazily. It fetches on mount, and the rail
- *     has eight panels, so an eagerly-mounted trail is a request per draft opened
- *     for a card nobody expanded.
+ *  1. THE PANEL IS MOUNTED AT ALL, and lazily. It fetches on mount, so an
+ *     eagerly-mounted trail is a request per draft opened for a card nobody
+ *     expanded.
  *  2. THE DECLARED FIELD NAMES SURVIVE. `metadata.changed` is keyed by the
  *     tenant's own attribute names, so a camelising reader would print
  *     `judgeVerdict` — a name this tenant never declared. This is the assertion
@@ -30,7 +30,9 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { RevisionPage } from '@startsimpli/ui/history';
 
-import { QualityRail, type QualityRailProps } from '../QualityRail';
+import type { EntityRecord } from '@/lib/foundry-api';
+
+import { HistoryRail, type HistoryRailProps } from '../HistoryRail';
 
 /** One sitting by a named person, over two of the tenant's declared attributes. */
 const PAGE: RevisionPage = {
@@ -58,27 +60,8 @@ const PAGE: RevisionPage = {
   ],
 };
 
-function railProps(overrides: Partial<QualityRailProps> = {}): QualityRailProps {
+function railProps(overrides: Partial<HistoryRailProps> = {}): HistoryRailProps {
   return {
-    checks: [],
-    stops: [],
-    activeStop: -1,
-    onJumpToCheck: vi.fn(),
-    legendOpen: false,
-    onToggleLegend: vi.fn(),
-    judgeVerdictWord: '',
-    override: { overridden: false },
-    onOverride: vi.fn(),
-    review: {} as QualityRailProps['review'],
-    onReviewChange: vi.fn(),
-    canAccept: false,
-    acceptGateHint: null,
-    notes: [],
-    onAddNote: vi.fn(),
-    onResolveNote: vi.fn(),
-    noteSection: 'general',
-    onNoteSectionChange: vi.fn(),
-    noteSections: ['general'],
     revisions: { list: vi.fn(async () => PAGE) },
     historyOpen: false,
     onHistoryOpenChange: vi.fn(),
@@ -95,11 +78,11 @@ function railProps(overrides: Partial<QualityRailProps> = {}): QualityRailProps 
   };
 }
 
-function renderRail(props: Partial<QualityRailProps> = {}) {
+function renderRail(props: Partial<HistoryRailProps> = {}) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const result = render(
     <QueryClientProvider client={qc}>
-      <QualityRail {...railProps(props)} />
+      <HistoryRail {...railProps(props)} />
     </QueryClientProvider>,
   );
   return result;
@@ -151,5 +134,14 @@ describe('the rail’s History panel', () => {
     await waitFor(() => expect(screen.getByTestId('record-history-panel')).toBeTruthy());
     expect(screen.queryByTestId('record-history-incomplete')).toBeNull();
     expect(screen.getByTestId('record-history-panel').textContent).not.toMatch(/bulk imports|scope moves/i);
+  });
+});
+
+describe('lineage from the removed AI rewrite', () => {
+  it('still shows the drafts an earlier AI revision created', () => {
+    const v1 = { id: 'd1', data: {} } as unknown as EntityRecord;
+    const v2 = { id: 'd2', data: { revised_from: 'd1' } } as unknown as EntityRecord;
+    renderRail({ chain: [v1, v2], currentId: 'd2', parentId: 'd1' });
+    expect(screen.getByText('Revision history')).toBeInTheDocument();
   });
 });

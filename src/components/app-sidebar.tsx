@@ -125,8 +125,8 @@ export function AppSidebar() {
         <SidebarBody />
       </aside>
 
-      {/* Phone/narrow top bar. Not sticky on purpose: the draft page pins its own
-          Content | Quality switch to top-0 and the two would stack over the text. */}
+      {/* Phone/narrow top bar. Not sticky, so it never stacks over a page's own
+          sticky chrome on a short screen. */}
       <header className="flex h-14 shrink-0 items-center gap-2 border-b border-gray-200 bg-white px-2 md:hidden">
         <NavDrawerButton open={drawerOpen} onOpenChange={setDrawerOpen} />
         <BrandMark brand={brand} />

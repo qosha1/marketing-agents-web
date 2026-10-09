@@ -6,7 +6,8 @@
  * the draft is "Can view". Two were left: the "+ AR / + ZH" translate buttons,
  * which create a new draft in the same space, and the Approve draft / Reject
  * draft decision, which rendered DISABLED with a tooltip. Quinn's rule is that a
- * control the person cannot use is hidden, not greyed out.
+ * control the person cannot use is hidden, not greyed out. The decision itself
+ * has since been removed for everyone (bd startsim-m7fdm.25).
  */
 import * as React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -32,96 +33,11 @@ vi.mock('@/lib/foundry-api', async (importOriginal) => ({
 }));
 
 import { LanguageSwitcher } from '../LanguageSwitcher';
-import { QualityRail, type QualityRailProps } from '../QualityRail';
-
-function railProps(overrides: Partial<QualityRailProps> = {}): QualityRailProps {
-  return {
-    checks: [],
-    stops: [],
-    activeStop: -1,
-    onJumpToCheck: vi.fn(),
-    legendOpen: false,
-    onToggleLegend: vi.fn(),
-    judgeVerdictWord: '',
-    override: { overridden: false },
-    onOverride: vi.fn(),
-    review: {},
-    onReviewChange: vi.fn(),
-    canAccept: false,
-    acceptGateHint: null,
-    notes: [],
-    onAddNote: vi.fn(),
-    onResolveNote: vi.fn(),
-    noteSection: 'general',
-    onNoteSectionChange: vi.fn(),
-    noteSections: ['general'],
-    revisions: { list: vi.fn() },
-    historyOpen: false,
-    onHistoryOpenChange: vi.fn(),
-    chain: [],
-    currentId: 'd2',
-    parentId: '',
-    showDiff: false,
-    onToggleDiff: vi.fn(),
-    blogDiff: '',
-    parentLoading: false,
-    parentError: false,
-    onRefreshParent: vi.fn(),
-    ...overrides,
-  };
-}
 
 function withQuery(node: React.ReactNode) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(<QueryClientProvider client={qc}>{node}</QueryClientProvider>);
 }
-
-const decisionButtons = () =>
-  screen.queryAllByRole('button').filter((b) => b.hasAttribute('aria-pressed'));
-
-describe('the draft decision for a view-only reader', () => {
-  it('is hidden, not disabled', () => {
-    withQuery(<QualityRail {...railProps({ canEdit: false })} />);
-    expect(decisionButtons()).toEqual([]);
-    expect(screen.queryByRole('button', { name: /Approve draft|Reject draft/ })).toBeNull();
-    expect(screen.queryByTitle(/not decide on it/)).toBeNull();
-  });
-
-  it('does not tell them to press a button they do not have', () => {
-    const { container } = withQuery(
-      <QualityRail {...railProps({ canEdit: false, review: { verdict: 'approve' } })} />,
-    );
-    const text = container.textContent ?? '';
-    expect(text).not.toMatch(/button below/i);
-    expect(text).not.toMatch(/Choose one below/i);
-    expect(text).not.toMatch(/Accept is unlocked|You’re signing off/);
-  });
-
-  it('keeps the earlier feedback on the record readable', () => {
-    withQuery(
-      <QualityRail
-        {...railProps({ canEdit: false, review: { verdict: 'revise', overallNote: 'Use a fresher source.' } })}
-      />,
-    );
-    expect(screen.getByText('Use a fresher source.')).toBeInTheDocument();
-  });
-
-  it('drops the a / x shortcuts from the legend', () => {
-    const checks = [{ id: 'c1', label: 'Word count', status: 'fail' }] as QualityRailProps['checks'];
-    const { container } = withQuery(
-      <QualityRail {...railProps({ canEdit: false, legendOpen: true, checks })} />,
-    );
-    const keys = Array.from(container.querySelectorAll('dl kbd')).map((k) => k.textContent);
-    expect(keys).toContain('j');
-    expect(keys).not.toContain('a');
-    expect(keys).not.toContain('x');
-  });
-
-  it('is still offered to someone who can edit', () => {
-    withQuery(<QualityRail {...railProps({ canEdit: true })} />);
-    expect(decisionButtons().map((b) => b.textContent)).toEqual(['Approve draft', 'Reject draft']);
-  });
-});
 
 const draft = { id: 'd1', name: 'A brief', data: { lang: 'en' } } as unknown as EntityRecord;
 

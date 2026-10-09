@@ -1,7 +1,7 @@
 /**
  * EVERY SURFACE THAT EDITS A RECORD SHOWS ITS HISTORY (bd startsim-jkkn7.16).
  *
- * Until this bead only the draft page's Quality rail mounted the shared
+ * Until this bead only the draft page's rail mounted the shared
  * `RecordHistoryPanel`. A reviewer could change a topic's title, angle, note,
  * status or verdict from four places — the topic header on /story and /draft,
  * the topic review drawer on /t/topic, and the generic record drawer on every

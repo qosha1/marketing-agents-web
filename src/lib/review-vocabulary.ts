@@ -9,9 +9,9 @@
  * THE MODEL the labels have to make obvious without explanation:
  *   • TOPIC decision — this subject is worth writing. Approving it unlocks the
  *     writer. It says nothing about any text.
- *   • DRAFT decision — this piece of content is publishable. It is the editorial
- *     disposition from the tracker workflow, and is about to become four-valued
- *     (Approved / Rejected / Not for publication now / For repurpose, wn2p).
+ *   • DRAFT decision — this piece of content is publishable. It was removed
+ *     from the draft page (bd startsim-m7fdm.25); a draft's status is still
+ *     the tracker's editorial disposition (wn2p).
  *
  * They are not two instances of one verb; they are different KINDS of decision.
  * So each label names its subject.
@@ -23,42 +23,9 @@
 
 import type { ReviewConfig } from '@startsimpli/ui/collection';
 
-export interface DecisionLabel {
-  /** Stable id — the verdict value persisted on the record. */
-  id: string;
-  label: string;
-}
-
-/**
- * The DRAFT decision (the quality rail + the decision bar on /draft/<id>).
- *
- * Two decisions, both of which dispose of the piece. "Request changes" was a
- * third until bd startsim-m7fdm.24 (Quinn, 2026-10-07): once #93 removed the AI
- * rewrite it fed, it only saved a verdict and a note. Drafts already carrying
- * its value ('revise') are left as they are; `isOfferedDraftDecision` is how the
- * read side tells such a stored value apart from a decision it can still offer,
- * and shows it raw rather than under a label the app no longer uses.
- */
-export const DRAFT_DECISIONS: DecisionLabel[] = [
-  { id: 'approve', label: 'Approve draft' },
-  { id: 'reject', label: 'Reject draft' },
-];
-
-/** The draft decision's label by verdict id ('' for a value no longer offered). */
-export function draftDecisionLabel(id: string): string {
-  return DRAFT_DECISIONS.find((d) => d.id === id)?.label ?? '';
-}
-
-/** Whether a stored verdict is one of the decisions the rail offers today. */
-export function isOfferedDraftDecision(id: string | undefined | null): boolean {
-  return !!id && DRAFT_DECISIONS.some((d) => d.id === id);
-}
-
-/** The single-key shortcuts on /draft/<id> that set the draft decision. */
-export const DRAFT_DECISION_KEYS: Readonly<Record<string, 'approve' | 'reject'>> = {
-  a: 'approve',
-  x: 'reject',
-};
+// The DRAFT decision (Approve draft / Reject draft, keys a / x) was removed
+// from /draft/<id> with the rest of its rail (bd startsim-m7fdm.25). Drafts keep
+// their stored `review.verdict`; nothing reads it any more.
 
 /**
  * The header over a table's inline decision cluster — the other half of the same

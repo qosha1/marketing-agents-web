@@ -1,34 +1,11 @@
 import { describe, it, expect } from 'vitest';
 
-import { readReview, readNotes, revisedFrom, revisionChain } from '../review';
+import { revisedFrom, revisionChain } from '../review';
 import type { EntityRecord } from '@/lib/foundry-api';
 
 function draft(id: number, data: Record<string, unknown>): EntityRecord {
   return { id, entityType: 'draft', externalId: null, name: `#${id}`, data, createdAt: '' };
 }
-
-describe('readReview / readNotes', () => {
-  it('reads a stored review object and defaults to empty', () => {
-    expect(readReview({ review: { verdict: 'approve' } })).toEqual({ verdict: 'approve' });
-    expect(readReview({})).toEqual({});
-    expect(readReview(undefined)).toEqual({});
-    expect(readReview({ review: 'nope' })).toEqual({});
-  });
-
-  // bd startsim-m7fdm.24: "Request changes" is no longer offered, but drafts that
-  // carry its stored value are read back exactly as stored, never coerced.
-  it('reads a legacy "revise" verdict back unchanged', () => {
-    const stored = { verdict: 'revise', overallNote: 'Use a fresher source.' };
-    expect(readReview({ review: stored })).toEqual(stored);
-  });
-
-  it('reads a stored notes array and defaults to empty', () => {
-    const notes = [{ id: '1', body: 'x' }];
-    expect(readNotes({ notes })).toEqual(notes);
-    expect(readNotes({})).toEqual([]);
-    expect(readNotes({ notes: 'nope' })).toEqual([]);
-  });
-});
 
 describe('revisedFrom + revisionChain', () => {
   it('reads revised_from (snake) and revisedFrom (camel) forms', () => {
