@@ -270,6 +270,19 @@ export async function POST(request: Request) {
   }
   const { gate, topic } = resolved;
 
+  // A MACHINE WRITES ON THIS PERSON'S BEHALF, so the person must be able to
+  // change the topic they are acting on (bd startsim-768w.71): someone with
+  // only "Can view" on the topic or its space may read and comment, and may not
+  // cause records to appear in that space. The tenant's own answer, read with
+  // the caller's token. A tenant that sends no permissions yet keeps the old
+  // behaviour.
+  if (topic.permissions && topic.permissions.canEdit !== true) {
+    return NextResponse.json(
+      { error: 'You can view this topic but not change it, so you cannot generate drafts for it.', reason: 'view_only' },
+      { status: 403 },
+    );
+  }
+
   if (!gate.allowed) {
     // The reason travels with the refusal: the drawer already renders one, and a
     // 403 with no explanation is the same confusion in a different shape.

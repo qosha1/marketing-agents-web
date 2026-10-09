@@ -9,7 +9,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/infrastructure/auth', () => ({ getRegisteredToken: async () => 'tok' }));
 
-import { canEditRecords, foldAccepted, trackChangesClient, trackedText, withTrackedText } from '../track-changes';
+import { canEditRecord, canEditRecords, foldAccepted, trackChangesClient, trackedText, withTrackedText } from '../track-changes';
 
 describe('foldAccepted + withTrackedText', () => {
   const sections = [
@@ -65,5 +65,18 @@ describe('trackChangesClient', () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+});
+
+
+describe('canEditRecord (bd startsim-768w.71)', () => {
+  it("follows the record's own answer over the role", () => {
+    expect(canEditRecord({ permissions: { canEdit: true } }, 'viewer')).toBe(true);
+    expect(canEditRecord({ permissions: { canEdit: false } }, 'admin')).toBe(false);
+  });
+
+  it('falls back to the role for a tenant that sends no permissions', () => {
+    expect(canEditRecord({}, 'member')).toBe(true);
+    expect(canEditRecord({ permissions: null }, 'viewer')).toBe(false);
   });
 });

@@ -62,7 +62,23 @@ export function withTrackedText<S extends { key: string; value: unknown }>(
   return sections.map((s) => (s.key in text ? { ...s, value: text[s.key as TrackedFieldKey] } : s));
 }
 
-/** Viewer-role members suggest and comment but do not edit (Quinn). */
+/** Viewer-role members suggest and comment but do not edit (Quinn). The
+ *  fallback for a tenant that sends no `permissions` object yet. */
 export function canEditRecords(role: string | null | undefined): boolean {
   return !!role && role !== 'viewer';
+}
+
+/**
+ * May the caller edit THIS record? The record's own `permissions` object
+ * answers (bd startsim-768w.71): a Viewer with a "Can edit" share edits it, a
+ * Member with "Can view" does not. Only a tenant that has not rolled the
+ * permission model falls back to the role.
+ */
+export function canEditRecord(
+  record: { permissions?: { canEdit?: boolean } | null } | null | undefined,
+  role: string | null | undefined,
+): boolean {
+  const p = record?.permissions;
+  if (p && typeof p === 'object' && typeof p.canEdit === 'boolean') return p.canEdit;
+  return canEditRecords(role);
 }

@@ -15,6 +15,7 @@
  * write used to RENAME the declared attribute. `updateEntity`/`createEntity` now
  * repair that on the way out; nothing else in the app has to think about it.
  */
+import type { RecordPermissions } from '@startsimpli/ui/foundry';
 import { readScopeAccess, type ScopeAccess } from '@startsimpli/ui';
 import type { CollectionClient } from '@startsimpli/ui/collection';
 import {
@@ -87,6 +88,9 @@ export interface EntityTypeDef {
 
 export interface EntityRecord {
   id: number;
+  /** What the caller may do to this record, from the tenant (bd startsim-768w.71;
+   *  `can()` in `@startsimpli/ui/foundry`). Absent on a tenant that has not rolled. */
+  permissions?: RecordPermissions | null;
   entityType: string;
   externalId: string | null;
   name: string;

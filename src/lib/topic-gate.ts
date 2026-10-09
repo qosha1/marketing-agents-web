@@ -127,10 +127,33 @@ export function entityTypeFromWire(raw: unknown): EntityTypeDef {
 }
 
 /** Django's raw entity JSON -> the camelCase `EntityRecord`. */
+/** The record's `permissions` object off the wire, snake_case or camelCase
+ *  (bd startsim-768w.71), or `null` when the tenant sent none. */
+export function permissionsFromWire(raw: unknown): EntityRecord['permissions'] {
+  if (!raw || typeof raw !== 'object') return null;
+  const p = raw as Wire;
+  const flag = (snake: string, camel: string) => wire(p, snake, camel) === true;
+  const level = String(p.level ?? 'view');
+  return {
+    level: level === 'full' || level === 'edit' ? level : 'view',
+    canComment: flag('can_comment', 'canComment'),
+    canSuggest: flag('can_suggest', 'canSuggest'),
+    canEdit: flag('can_edit', 'canEdit'),
+    canAccept: flag('can_accept', 'canAccept'),
+    canRestore: flag('can_restore', 'canRestore'),
+    canTag: flag('can_tag', 'canTag'),
+    canLink: flag('can_link', 'canLink'),
+    canShare: flag('can_share', 'canShare'),
+    canDelete: flag('can_delete', 'canDelete'),
+    canTransfer: flag('can_transfer', 'canTransfer'),
+  };
+}
+
 export function entityFromWire(raw: unknown): EntityRecord {
   const e = (raw ?? {}) as Wire;
   return {
     id: e.id as EntityRecord['id'],
+    permissions: permissionsFromWire(e.permissions),
     entityType: String(wire(e, 'entity_type', 'entityType') ?? ''),
     externalId: (wire(e, 'external_id', 'externalId') ?? null) as string | null,
     name: String(e.name ?? ''),

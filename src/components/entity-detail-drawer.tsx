@@ -8,6 +8,7 @@
  * (AttributeField widgets) + Save. Preserves non-declared data keys and canonicalizes to
  * the client's camelCase blob so a PATCH (which REPLACES data) never drops fields.
  */
+import { can } from '@startsimpli/ui/foundry';
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -88,6 +89,12 @@ const UNASSIGNED_VALUE = '__unassigned__';
  * record's own tag client-side.
  */
 export function GoodExampleToggle({ record }: { record: EntityRecord }) {
+  // Tagging is editing the record (bd startsim-768w.71).
+  if (!can(record, 'canTag', true)) return null;
+  return <GoodExampleToggleButton record={record} />;
+}
+
+function GoodExampleToggleButton({ record }: { record: EntityRecord }) {
   const qc = useQueryClient();
   const tagsQuery = useQuery({ queryKey: ['tags', 'all'], queryFn: () => listAllTags() });
   const [pending, setPending] = useState(false);
@@ -409,12 +416,14 @@ function DrawerInner({
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <GoodExampleToggle record={record} />
-            <button
-              onClick={() => setMode((m) => (m === 'read' ? 'edit' : 'read'))}
-              className="rounded border px-2.5 py-1 text-xs hover:bg-neutral-50"
-            >
-              {mode === 'read' ? 'Edit' : 'View'}
-            </button>
+            {can(record, 'canEdit', true) ? (
+              <button
+                onClick={() => setMode((m) => (m === 'read' ? 'edit' : 'read'))}
+                className="rounded border px-2.5 py-1 text-xs hover:bg-neutral-50"
+              >
+                {mode === 'read' ? 'Edit' : 'View'}
+              </button>
+            ) : null}
             <button
               onClick={onClose}
               className="rounded p-1 text-neutral-500 hover:bg-neutral-100"
@@ -746,7 +755,7 @@ export function TopicDrafts({
           >
             Refresh
           </button>
-          {!draftCountKnown ? null : gate.allowed ? (
+          {!draftCountKnown || !can(topic, 'canEdit', true) ? null : gate.allowed ? (
             <Button onClick={generate} disabled={generating} className="text-xs">
               {generating ? 'Generating… (~2 min)' : 'Generate drafts'}
             </Button>
