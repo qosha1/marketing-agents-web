@@ -39,7 +39,7 @@ import { revisionClient } from '@/lib/revisions';
 
 export interface RecordHistorySectionProps {
   /** The record as the host shows it. Its `version` keys the trail — see `revisionsKey`. */
-  record: { id: number | string };
+  record: { id: number | string; permissions?: { canRestore?: boolean } | null };
   /** Card title. Name the record when another record's history may sit nearby. */
   title?: string;
   className?: string;
@@ -81,6 +81,8 @@ export function RecordHistorySection({
         queryKey={revisionsKey(recordId, version)}
         recordLabel={recordLabel}
         {...(narrowed ? { field: narrowed } : {})}
+        // Restoring is editing the record (bd startsim-768w.71).
+        canRestore={record.permissions?.canRestore !== false}
         onClearField={() => setNarrowed(null)}
         onNarrowToField={(f) => setNarrowed(f)}
         currentVersion={() => {

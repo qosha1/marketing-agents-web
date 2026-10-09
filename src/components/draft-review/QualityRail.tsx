@@ -93,6 +93,11 @@ export interface QualityRailProps {
   override: ValidationOverride;
   onOverride: (next: ValidationOverride) => void;
 
+  /** May the caller change this draft (its `permissions.canEdit`, bd
+   *  startsim-768w.71)? False hides the decision, score and restore controls;
+   *  reading, notes and history stay. Defaults to true. */
+  canEdit?: boolean;
+
   // Decision + scores
   review: ReviewScore;
   onReviewChange: (next: ReviewScore) => void;
@@ -248,7 +253,10 @@ export function QualityRail(props: QualityRailProps) {
   const currentVersion = Math.max(1, chain.findIndex((d) => String(d.id) === currentId) + 1);
   const hasHistory = chain.length > 1 || !!parentId;
 
-  const setCall = (next: Call) => onReviewChange({ ...review, verdict: next });
+  const mayEdit = props.canEdit !== false;
+  const setCall = (next: Call) => {
+    if (mayEdit) onReviewChange({ ...review, verdict: next });
+  };
   // A stored verdict the rail no longer offers (the removed "Request changes"
   // wrote 'revise'). Shown raw, never coerced: opening the draft must not
   // rewrite what is on the record.
@@ -300,6 +308,8 @@ export function QualityRail(props: QualityRailProps) {
               key={c.id}
               type="button"
               aria-pressed={call === c.id}
+              disabled={!mayEdit}
+              title={mayEdit ? undefined : 'You can view this draft but not decide on it'}
               onClick={() => setCall(c.id)}
               className={cn(
                 'flex-1 rounded-lg border px-1 py-2 text-sm font-semibold transition-colors',
@@ -342,7 +352,9 @@ export function QualityRail(props: QualityRailProps) {
       </div>
 
       {/* Scores react to the AI — collapsed */}
-      <ScoreAdjust review={review} onReviewChange={onReviewChange} judgeVerdict={judgeVerdict} />
+      {mayEdit ? (
+        <ScoreAdjust review={review} onReviewChange={onReviewChange} judgeVerdict={judgeVerdict} />
+      ) : null}
 
       {/* Validation — deterministic checks + AI-judge reasoning + reasoned override. */}
       <CollapsiblePanel
@@ -358,7 +370,7 @@ export function QualityRail(props: QualityRailProps) {
           checks={checks}
           judgeVerdict={judgeVerdict}
           override={override}
-          onOverride={onOverride}
+          onOverride={mayEdit ? onOverride : () => undefined}
           title=""
           className={FLATTEN_CARD}
         />
@@ -422,6 +434,7 @@ export function QualityRail(props: QualityRailProps) {
             {...(heldVersion !== undefined ? { currentVersion: heldVersion } : {})}
             {...(beforeRestore ? { beforeRestore } : {})}
             {...(onRestored ? { onRestored } : {})}
+            canRestore={mayEdit}
             // The rail's own card and heading supply the chrome, so the panel's
             // title is hidden rather than repeated. Its DESCRIPTION stays: it is
             // what tells the reader this trail is per-field, not per-save.

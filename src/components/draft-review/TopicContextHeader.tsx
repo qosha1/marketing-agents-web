@@ -63,6 +63,7 @@
  * `@startsimpli/ui/collection` are the shared package's own wire-safety rules,
  * not a second copy of them. What is left here is this tenant's arrangement.
  */
+import { can, type EntityRecordShape } from '@startsimpli/ui/foundry';
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { ChevronDown, Pencil } from 'lucide-react';
@@ -172,7 +173,11 @@ export function TopicContextHeader({
   // and "she left it alone" — see `topicEditChanges`.
   const [baseline, setBaseline] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
-  const canEdit = !!topic && !!type && fields.length > 0;
+  // ...and the caller may edit this topic (bd startsim-768w.71).
+  const canEdit = !!topic && !!type && fields.length > 0 &&
+    // The collection package's record type predates `permissions`; the field is
+    // on the wire all the same.
+    can(topic as unknown as Pick<EntityRecordShape, 'permissions'>, 'canEdit', true);
   const changes = topicEditChanges(fields, values, baseline);
 
   function startEditing() {

@@ -32,6 +32,7 @@
  * survives that cleanup because it is the only way to reach a lane the ✕/✓/✎
  * cluster does not cover — it just stopped displaying the lane it is already in.
  */
+import { can } from '@startsimpli/ui/foundry';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
@@ -281,7 +282,13 @@ export function EntityBoard({
   function handleMove(move: KanbanMove) {
     if (move.toColumnId === UNSET_COLUMN.id) return; // dragging into "Unset" is a no-op
     const record = (lanes[move.fromColumnId]?.records ?? []).find((r) => String(r.id) === move.cardId);
-    if (record) void applyStatus(record, move.toColumnId);
+    if (!record) return;
+    // Moving a card changes the record (bd startsim-768w.71).
+    if (!can(record, 'canEdit', true)) {
+      notify.error('You can view this record but not change it.');
+      return;
+    }
+    void applyStatus(record, move.toColumnId);
   }
 
   return (

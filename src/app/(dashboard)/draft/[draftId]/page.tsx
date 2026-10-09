@@ -171,7 +171,7 @@ import {
   type EntityRecord,
 } from '@/lib/foundry-api';
 import {
-  canEditRecords,
+  canEditRecord,
   foldAccepted,
   trackChangesClient,
   trackedText,
@@ -910,7 +910,10 @@ function DraftEditorScreen({
    */
   const meQuery = useQuery({ queryKey: ['whoami'], queryFn: () => whoami(), staleTime: 5 * 60_000 });
   const me = meQuery.data;
-  const canEdit = canEditRecords(me?.role);
+  // THE RECORD'S OWN ANSWER (bd startsim-768w.71): a share on this draft or its
+  // space decides, not the workspace role alone. The role is only the fallback
+  // for a tenant that sends no permissions yet.
+  const canEdit = canEditRecord(draft, me?.role);
   const tcClient = useMemo(() => trackChangesClient(draft.id), [draft.id]);
   // Until the role is known the editor is not mounted; a failed read says so
   // and offers a retry, rather than "Loading" for ever.
@@ -1548,6 +1551,7 @@ function DraftEditorScreen({
       judgeVerdictWord={verdict}
       override={override}
       onOverride={setOverride}
+      canEdit={canEdit}
       review={review}
       onReviewChange={onReviewChange}
       canAccept={canAccept}
@@ -1622,7 +1626,11 @@ function DraftEditorScreen({
       <Link href={backHref} className="text-sm text-neutral-500 hover:text-neutral-900">
         Cancel
       </Link>
-      {isApproved || isSent ? (
+      {!canEdit ? (
+        <span className="text-xs text-neutral-500">
+          You can view this draft: read, suggest and comment.
+        </span>
+      ) : isApproved || isSent ? (
         <Button variant="secondary" onClick={markSent} disabled={sending || isSent}>
           {isSent ? 'Sent' : sending ? 'Marking…' : 'Mark sent'}
         </Button>
