@@ -119,7 +119,7 @@ function count(filters: EntityFilters): number {
  */
 function boardFor(type: EntityTypeDef, params: Record<string, string>) {
   const facets = boardAttrFilters(type, params);
-  const base: EntityFilters = { ...(facetFilters(facets.applied, null) ?? {}) };
+  const base: EntityFilters = { ...facetFilters(facets.applied, null) };
   const statusAttr = pickStatusAttr(type);
   const requests = lanePageRequests(boardColumns(statusAttr), statusAttr?.name ?? '', {}, base);
   return { facets, base, requests, chips: facets.applied.map((f) => f.name) };
