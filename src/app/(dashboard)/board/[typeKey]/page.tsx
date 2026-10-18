@@ -175,11 +175,9 @@ export default function BoardPage() {
   const columns = useMemo(() => boardColumns(statusAttr), [statusAttr]);
 
   const baseFilters = useMemo(() => {
-    const facets = facetFilters(filters, assigneeFilter);
-    // A BLANK assignee facet ("unassigned") has no backend predicate — see
-    // facetFilters. Rather than quietly drop it and show everyone's work, the
-    // page keeps the board unfiltered and says so in the header chip.
-    return { ...recencyQuery, ...(facets ?? {}) };
+    // A BLANK assignee facet ("unassigned") is a real backend predicate —
+    // `__isblank` — so the lanes hold only unassigned work (bd startsim-hlpq0).
+    return { ...recencyQuery, ...facetFilters(filters, assigneeFilter) };
   }, [recencyQuery, filters, assigneeFilter]);
 
   /** How many pages each lane has asked for. Scrolling one lane bumps one entry. */

@@ -589,22 +589,21 @@ export function recencyFilters(
  * any more: {@link boardAttrFilters} refuses it upstream. Passing one in by hand
  * would reintroduce exactly that defect.
  *
- * Returns null — meaning "do not claim a number" — for the {@link BLANK}
- * sentinel, which asks for records where an attribute is ABSENT. The backend's
- * `__isnull` answers "is there an Attribute row", not "is the value empty", and
- * those differ: all 4,116 live news_items have a `published_at` row and 167 of
- * them are blank. Rather than report a count that quietly means something else,
- * report none.
+ * The {@link BLANK} sentinel ("unassigned") is sent as `__isblank=true`: no
+ * Attribute row OR an empty one (bd startsim-hlpq0). It used to return null and
+ * leave the board unfiltered under an "assignee: unassigned" chip, because the
+ * only predicate on offer was `__isnull`, which asks whether the ROW exists —
+ * and clearing an assignee writes "", which keeps the row.
  */
 export function facetFilters(
   filters: AttrFilter[],
   textFilter: AttrTextFilter | null,
-): Record<string, string> | null {
+): Record<string, string> {
   const out: Record<string, string> = {};
   for (const f of filters) out[`attr.${f.name}`] = f.value;
   if (textFilter) {
-    if (textFilter.value === BLANK) return null;
-    out[`attr.${textFilter.name}`] = textFilter.value;
+    if (textFilter.value === BLANK) out[`attr.${textFilter.name}__isblank`] = 'true';
+    else out[`attr.${textFilter.name}`] = textFilter.value;
   }
   return out;
 }

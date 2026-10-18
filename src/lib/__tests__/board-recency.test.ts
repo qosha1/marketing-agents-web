@@ -245,8 +245,12 @@ describe('facetFilters — so the "not shown" count counts the right slice', () 
     });
   });
 
-  it('declines to answer for the BLANK sentinel rather than answering a different question', () => {
-    expect(facetFilters([], { name: 'assignee_sub', value: BLANK })).toBeNull();
+  it('sends the BLANK sentinel as the backend "no value" predicate (bd startsim-hlpq0)', () => {
+    // Unassigned = no row OR an empty one. `__isnull` asks only whether the row
+    // exists, and clearing an assignee writes "", so it would miss those.
+    expect(facetFilters([], { name: 'assignee_sub', value: BLANK })).toEqual({
+      'attr.assignee_sub__isblank': 'true',
+    });
   });
 
   it('is empty — not null — when no facet is active', () => {
