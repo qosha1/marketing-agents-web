@@ -13,8 +13,8 @@ import type { EntityRecord, EntityTypeDef } from '@/lib/foundry-api';
 vi.mock('@startsimpli/ui', async () => {
   const React = await import('react');
   return {
-    UnifiedTable: (props: { search?: { placeholder?: string } }) =>
-      React.createElement('div', { 'data-testid': 'table', 'data-placeholder': props.search?.placeholder }),
+    UnifiedTable: (props: { search?: { placeholder?: string }; emptyState?: ReactNode }) =>
+      React.createElement('div', { 'data-testid': 'table', 'data-placeholder': props.search?.placeholder }, props.emptyState),
     Button: ({ children, onClick }: { children?: ReactNode; onClick?: () => void }) =>
       React.createElement('button', { onClick }, children),
     ABSENCE_DASH: '—',
@@ -95,5 +95,10 @@ describe('/t/scope?open=<id>', () => {
   it('names the field a title-less type is searched by', async () => {
     mount();
     expect((await screen.findByTestId('table')).dataset.placeholder).toBe('Search by name…');
+  });
+
+  it('says once that the type is empty', async () => {
+    mount();
+    expect((await screen.findByTestId('records-empty')).textContent).toBe('No scope records yet.');
   });
 });
