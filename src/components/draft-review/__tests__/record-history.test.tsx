@@ -121,10 +121,10 @@ describe('the rail’s History panel', () => {
 
     const panel = await waitFor(() => {
       const found = screen.getByTestId('record-history-panel');
-      expect(found.textContent).toContain('Judge');
+      expect(found.textContent).toContain('AI judge');
       return found;
     });
-    expect(panel.textContent).toContain('Candidate #');
+    expect(panel.textContent).toContain('Candidate');
     expect(panel.textContent).not.toContain('judgeVerdict');
     expect(panel.textContent).not.toContain('judge_verdict');
   });

@@ -45,13 +45,9 @@ const HEADER_LABELS: Record<string, string> = {
 
 /**
  * A field's name in a sentence or a form label — history rows, the stale-save
- * dialog, the create and edit forms. The column headers' vocabulary, except
- * where a header is cut short for width.
+ * dialog, the create and edit forms. Same vocabulary as the column headers.
  */
-export function attrLabel(name: string): string {
-  if (name === 'candidate_index') return 'Candidate #';
-  return humanizeHeader(name);
-}
+export const attrLabel = humanizeHeader;
 
 /**
  * System bookkeeping keys (`_run_id`, `_origin`, `_copied_from`): written by
