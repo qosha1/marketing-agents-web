@@ -92,6 +92,17 @@ export function topicPipeline(
   return { stages };
 }
 
+/**
+ * Where a Content pipeline stage opens: the Topics table on that state
+ * (bd startsim-m7fdm.35). The stage label IS the declared choice (boardColumns
+ * labels each lane with its value), so it goes straight into `?status=`. The
+ * Unset lane names no value, so it has nowhere to go and returns null.
+ */
+export function topicStageHref(label: string): string | null {
+  if (!label || label === UNSET_COLUMN.label) return null;
+  return `/t/${CONTENT_TYPE_KEY}?status=${encodeURIComponent(label)}`;
+}
+
 // ---- (2) The queue: predicates over fields, not status equality (startsim-f3ed) ----
 
 /**
@@ -234,8 +245,9 @@ const QUEUE_ROWS: QueueDef[] = [
     noun: 'topic',
     needsIntake: true,
     match: isJudgedNotFiled,
-    meta: (matched, intake) =>
-      `A team_verdict is recorded (${verdictBreakdown(matched)}) but status is still “${intake}”. Advance each to the stage its verdict implies.`,
+    // Plain words, no field names (bd startsim-258ey): the reader is an editor,
+    // not someone who knows the attribute is called `team_verdict`.
+    meta: (matched, intake) => `Verdict given (${verdictBreakdown(matched)}), still in “${intake}”`,
     href: topicQueueHref,
   },
   {
@@ -245,7 +257,7 @@ const QUEUE_ROWS: QueueDef[] = [
     noun: 'topic',
     needsIntake: false,
     match: (topic) => isUnjudged(topic),
-    meta: () => 'No team_verdict and no team_notes — nobody has looked at these yet.',
+    meta: () => 'No verdict or notes yet',
     href: topicQueueHref,
   },
   {
@@ -259,9 +271,11 @@ const QUEUE_ROWS: QueueDef[] = [
     needsIntake: true,
     match: (draft, declared) => awaitsDraftDecision(draft, declared.split(',')),
     meta: (matched, _declared, now) =>
+      // No sentence about the Drafts tab's 7-day window any more (bd
+      // startsim-258ey): the row's link already clears it, so the caveat
+      // described a trap the reader can no longer fall into from here.
       `Written, nobody has approved, rejected or shelved them (${statusBreakdown(matched)}). ` +
-      `The oldest has been waiting ${oldestWaitingDays(matched, now)}. ` +
-      'The Drafts tab opens on the last 7 days, so these drop out of it rather than into view.',
+      `The oldest has been waiting ${oldestWaitingDays(matched, now)}.`,
     href: draftQueueHref,
   },
 ];

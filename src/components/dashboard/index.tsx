@@ -17,7 +17,7 @@
  *   - per-widget `width` — the queue takes the whole band, so no single card in a
  *     2-up strip can dictate another's height in the first place.
  */
-import { DashboardGrid, DashboardSection } from '@startsimpli/ui';
+import { DashboardGrid, FootnoteScope } from '@startsimpli/ui';
 
 import {
   DEFAULT_WIDGET_WIDTH,
@@ -44,7 +44,15 @@ function renderWidget(widget: DashboardWidget) {
 
 export function DashboardHome({ config = dashboardConfig }: { config?: DashboardConfig }) {
   return (
-    <DashboardSection title={config.title} description={config.description}>
+    // The page's own h1, at the size every other page uses (bd startsim-cl61n).
+    // DashboardSection draws a SECTION heading (20px h2), which made the home
+    // the one page whose title was smaller than the rest. FootnoteScope is the
+    // half of DashboardSection this page still needs: the cards' caveats
+    // collect into it.
+    <div className="space-y-4">
+      <h1 className="text-2xl font-bold text-gray-900">{config.title}</h1>
+      {config.description ? <p className="text-sm text-gray-500">{config.description}</p> : null}
+      <FootnoteScope>
       <DashboardGrid columns={2} gap="md" className="items-start">
         {config.widgets.map((widget, i) => {
           const width = widget.width ?? DEFAULT_WIDGET_WIDTH[widget.kind];
@@ -55,6 +63,7 @@ export function DashboardHome({ config = dashboardConfig }: { config?: Dashboard
           );
         })}
       </DashboardGrid>
-    </DashboardSection>
+      </FootnoteScope>
+    </div>
   );
 }

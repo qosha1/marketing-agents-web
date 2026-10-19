@@ -16,6 +16,8 @@
  * breath; a signal that cannot be observed renders an `Absence`, never a zero.
  */
 import { useQuery } from '@tanstack/react-query';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import {
   Absence,
   Caveat,
@@ -33,7 +35,9 @@ import {
   queueTotal,
   topicPipeline,
   topicQueue,
+  topicStageHref,
 } from '@/lib/health-data';
+import { typeRoute } from '@/lib/board';
 import {
   listAllEntities,
   listEntities,
@@ -121,6 +125,7 @@ function ErrorCard({ title }: { title: string }) {
  * where it is stated as a predicate the reader can check.
  */
 export function PipelineHealthWidget({ title = 'Content pipeline' }: { title?: string }) {
+  const router = useRouter();
   const typesQuery = useQuery({ queryKey: ['schema-types'], queryFn: () => listTypes() });
   const topicsQuery = useQuery({ queryKey: TOPIC_KEY, queryFn: () => listAllEntities('topic') });
 
@@ -130,7 +135,21 @@ export function PipelineHealthWidget({ title = 'Content pipeline' }: { title?: s
   const topicType = typesQuery.data?.results.find((t) => t.key === 'topic');
   const { stages } = topicPipeline(topicType, topicsQuery.data ?? []);
 
-  return <PipelineHealth title={title} stages={stages} emptyMessage="No topics yet." />;
+  // Each stage opens the Topics table on that state (bd startsim-m7fdm.35):
+  // the stages were drawn as buttons and rendered disabled, so they looked
+  // clickable and did nothing. The Unset lane has no state to filter on, so it
+  // stays inert rather than opening an unfiltered table.
+  return (
+    <PipelineHealth
+      title={title}
+      stages={stages}
+      emptyMessage="No topics yet."
+      onStageClick={(label) => {
+        const href = topicStageHref(label);
+        if (href) router.push(href);
+      }}
+    />
+  );
 }
 
 /**
@@ -146,6 +165,9 @@ export function PipelineHealthWidget({ title = 'Content pipeline' }: { title?: s
  * of dressing a 200-item sample up as an all-time claim.
  */
 export function IngestionWidget({ title = 'Ingestion' }: { title?: string }) {
+  // Same key as the nav, so the links below go where the sidebar's Data items
+  // go (board or table, per type) without a second request.
+  const typesQuery = useQuery({ queryKey: ['schema-types'], queryFn: () => listTypes() });
   const sourcesQuery = useQuery({
     queryKey: SOURCE_KEY,
     queryFn: () => listAllEntities('source'),
@@ -180,6 +202,12 @@ export function IngestionWidget({ title = 'Ingestion' }: { title?: string }) {
   // The freshness verdict is judged against WHEN THE DATA WAS FETCHED, not against
   // a Date.now() read during render (impure, and it drifts from the data it judges).
   const overdue = ingestionOverdue(summary, newsQuery.dataUpdatedAt);
+  // Onward links on the figures themselves (bd startsim-prolm), not a new
+  // button: the article count opens the articles, the sources line the sources.
+  const routeOf = (key: string) => {
+    const t = typesQuery.data?.results.find((x) => x.key === key);
+    return t ? typeRoute(t) : `/t/${key}`;
+  };
 
   return (
     <HealthCard
@@ -205,7 +233,9 @@ export function IngestionWidget({ title = 'Ingestion' }: { title?: string }) {
         )}
         {' · '}
         {summary.totalArticles != null ? (
-          <>{summary.totalArticles.toLocaleString()} articles all-time</>
+          <Link href={routeOf('news_item')} className="underline-offset-2 hover:underline">
+            {summary.totalArticles.toLocaleString()} articles all-time
+          </Link>
         ) : (
           <>
             all-time total{' '}
@@ -219,8 +249,10 @@ export function IngestionWidget({ title = 'Ingestion' }: { title?: string }) {
       </p>
 
       <p className="text-xs text-gray-500">
-        {summary.sourcesInSample} of {summary.sourcesDeclared} approved sources appear in the{' '}
-        {summary.sampleSize} most recent articles
+        <Link href={routeOf('source')} className="underline-offset-2 hover:underline">
+          {summary.sourcesInSample} of {summary.sourcesDeclared} approved sources
+        </Link>{' '}
+        appear in the {summary.sampleSize} most recent articles
         <Caveat subject="approved sources reached" placement="inline">
           This counts the {summary.sampleSize} most recently ingested articles, not all{' '}
           {summary.totalArticles?.toLocaleString() ?? 'the'} of them — a low-volume source that
@@ -281,6 +313,22 @@ export function AttentionWidget({ title = 'What needs a human' }: { title?: stri
     ...draftQueue(draftType, draftsQuery.data ?? [], subs, draftsQuery.dataUpdatedAt),
   ];
   const waiting = queueTotal(rows);
+  // NOTHING HAS COME THROUGH YET is not ALL CLEAR (bd startsim-zueba). A green
+  // verdict over a tenant with no topics and no drafts says the work is done
+  // when there has never been any; it gets the neutral tone the other two
+  // cards use for the same state.
+  const nothingYet = rows.length === 0 && (topicsQuery.data ?? []).length === 0 && (draftsQuery.data ?? []).length === 0;
+  if (nothingYet) {
+    return (
+      <HealthCard
+        title={title}
+        status="neutral"
+        icon={Inbox}
+        isEmpty
+        emptyMessage="Nothing has come through yet."
+      />
+    );
+  }
 
   return (
     <HealthCard

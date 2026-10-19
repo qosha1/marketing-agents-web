@@ -12,9 +12,9 @@
 import type { DashboardConfig } from '@/components/dashboard/config';
 
 export const dashboardConfig: DashboardConfig = {
-  title: 'System health',
-  description:
-    'What needs a human right now, the shape of the content pipeline, and whether ingestion is still running.',
+  // Named what the sidebar calls it, and no caption: the three card titles
+  // already say what the page is for (bd startsim-cl61n, startsim-flt8u).
+  title: 'Dashboard',
   widgets: [
     { kind: 'attention', title: 'What needs a human' },
     { kind: 'pipeline-health' },
