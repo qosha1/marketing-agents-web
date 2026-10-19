@@ -100,6 +100,28 @@ describe('board card decision cluster', () => {
     expect(screen.getByRole('button', { name: 'Reject topic' })).toBeInTheDocument();
   });
 
+  it('a reader who cannot change the topic sees its state, not decisions (bd startsim-m7fdm.32)', () => {
+    const readOnly = { ...topic(1, 'A topic worth writing', 'suggested'), permissions: { canEdit: false } };
+    renderBoard({ lanes: { suggested: lane([readOnly as EntityRecord]) } });
+
+    expect(screen.queryByRole('button', { name: 'Approve topic' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Reject topic' })).toBeNull();
+    expect(screen.getAllByText('suggested').length).toBeGreaterThan(0);
+  });
+
+  it('lane headers read as words, not stored keys (review bead startsim-2w572)', () => {
+    const type = {
+      ...TOPIC_TYPE,
+      attributes: [
+        { id: 10, name: 'status', dataType: 'enum', config: { choices: ['ready_for_review', 'approved'] } },
+      ],
+    } as unknown as EntityTypeDef;
+    renderBoard({ type, review: undefined, lanes: { ready_for_review: lane([]) } });
+
+    expect(screen.getByText('Ready for review')).toBeInTheDocument();
+    expect(screen.queryByText('ready_for_review')).toBeNull();
+  });
+
   it('renders no cluster when the caller supplies no review config', () => {
     renderBoard({ review: undefined });
 

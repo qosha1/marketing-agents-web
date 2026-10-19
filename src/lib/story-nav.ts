@@ -33,7 +33,7 @@
  * falls back to the content-kind table. An unvalidated `from` is an open redirect.
  */
 
-import { CONTENT_TYPE_KEY, contentCategoryLabel, contentTabHref } from './content';
+import { CONTENT_TYPE_ATTR, CONTENT_TYPE_KEY, contentCategoryLabel, contentTabHref } from './content';
 
 /** The query param carrying "where I came from". */
 export const FROM_PARAM = 'from';
@@ -114,10 +114,17 @@ export interface ReturnTarget {
 export function returnTarget(from: string | null | undefined, contentType: string): ReturnTarget {
   const safe = safeReturnPath(from);
   if (safe) {
-    const path = safe.split(/[?#]/)[0];
+    const [path, query = ''] = safe.split('#')[0].split('?');
+    // A table narrowed to one kind is that kind's page ("Evergreen"), so it is
+    // named for it rather than as "topics" (review bead startsim-t1ckb).
+    const kind = new URLSearchParams(query).get(CONTENT_TYPE_ATTR);
     return {
       href: safe,
-      label: path.startsWith('/board/') ? 'Back to the board' : 'Back to topics',
+      label: path.startsWith('/board/')
+        ? 'Back to the board'
+        : kind
+          ? `Back to ${contentCategoryLabel(kind)}`
+          : 'Back to topics',
     };
   }
   return {

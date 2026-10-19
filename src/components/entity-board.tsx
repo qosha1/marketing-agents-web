@@ -375,7 +375,8 @@ export function EntityBoard({
             >
               <button
                 type="button"
-                className="block w-full text-left text-sm font-medium leading-snug hover:underline"
+                className="line-clamp-2 block w-full text-left text-sm font-medium leading-snug hover:underline"
+                title={body.heading}
                 onClick={() => onCardClick(record)}
               >
                 {body.heading}
@@ -443,6 +444,8 @@ export function EntityBoard({
                     type={type}
                     record={record}
                     config={review}
+                    // The same answer the drag above gets (bd startsim-m7fdm.32).
+                    canEdit={can(record, 'canEdit', true)}
                     onSaved={() => onDecided?.(record)}
                   />
                 ) : null}

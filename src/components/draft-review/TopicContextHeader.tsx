@@ -71,7 +71,7 @@ import { resolveReviewConfig } from '@startsimpli/ui/collection';
 import type { EntityRecord, EntityTypeDef } from '@startsimpli/ui/collection';
 import { useQueryClient } from '@tanstack/react-query';
 import { Button, Input, Label, Textarea, notify } from '@startsimpli/ui';
-import { FieldAttribution, useFieldAuthors, versionFromRecord } from '@startsimpli/ui/history';
+import { FieldAttribution, fieldAuthorOf, useFieldAuthors, versionFromRecord } from '@startsimpli/ui/history';
 
 import { RecordHistorySection } from '@/components/record-history-section';
 import { actorEditsHref, renderNextLink } from '@/lib/activity-links';
@@ -146,7 +146,29 @@ export function TopicContextHeader({
   });
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyField, setHistoryField] = useState<string | null>(null);
-  const attribution = (field: string) => (
+  // ONE LINE PER DISTINCT AUTHORSHIP (review bead startsim-ckcbs). The fields
+  // below often share one author and day, and the same "Edited by ... · 9 days
+  // ago" under four of them is noise. In render order, a field gets its line
+  // only when no field above it already said the same thing; Topic history
+  // still has every field.
+  const attributed = new Set<string>();
+  const seen = new Set<string>();
+  for (const [field, present] of [
+    [cfg.statusName, !!status],
+    [cfg.titleAttr, true],
+    [SUBTITLE_ATTR, !!subtitle],
+    [cfg.summaryAttr, !!summary && summary !== subtitle],
+    [cfg.verdictAttr, !!verdict],
+    [cfg.noteAttr, !!notes],
+  ] as const) {
+    if (!present) continue;
+    const a = fieldAuthorOf(authors.data, field);
+    const said = a ? `${a.restoredFrom ?? ''}|${a.actorSub}|${String(a.at).slice(0, 10)}` : 'unedited';
+    if (seen.has(said)) continue;
+    seen.add(said);
+    attributed.add(field);
+  }
+  const attribution = (field: string) => (attributed.has(field) || !authors.data) && (
     <FieldAttribution
       authors={authors.data}
       field={field}

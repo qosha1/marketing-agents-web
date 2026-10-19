@@ -172,6 +172,16 @@ describe('topic header — who last wrote each field', () => {
     expect(links.map((a) => a.getAttribute('href'))).toContain('/activity?actor=u-jurga');
   });
 
+  it('says an attribution once, not again under every field that shares it (review bead startsim-ckcbs)', async () => {
+    mount(<TopicContextHeader topic={topic(5)} type={TOPIC_TYPE} />);
+    // status and angle both read "Not edited since ..."; only the first is drawn.
+    expect(await screen.findByTestId('field-attribution-status')).toHaveTextContent(/not edited since/i);
+    expect(screen.queryByTestId('field-attribution-angle')).not.toBeInTheDocument();
+    // Different authors still get their own line.
+    expect(screen.getByTestId('field-attribution-title')).toHaveTextContent('jurga@ogmc.example');
+    expect(screen.getByTestId('field-attribution-team_verdict')).toBeInTheDocument();
+  });
+
   it('clicking opens the topic history narrowed to that field', async () => {
     mount(<TopicContextHeader topic={topic(5)} type={TOPIC_TYPE} />);
     fireEvent.click(await screen.findByRole('button', { name: /history of team_verdict/i }));

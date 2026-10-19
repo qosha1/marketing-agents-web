@@ -223,6 +223,7 @@ export default function TypeRecordsPage() {
 
   const anyFilter = Object.keys(filterState).length > 0;
   const isContent = typeKey === CONTENT_TYPE_KEY;
+  const activeKind = filterState[CONTENT_TYPE_ATTR];
 
   // ---- approving a topic goes to its story (bd startsim-z384k) ----
   //
@@ -539,20 +540,26 @@ export default function TypeRecordsPage() {
   // The content spine (topic) shows a stacked Title + subtitle (the split-off
   // `subtitle`, else `angle`) as its primary column and folds the now-redundant
   // title/subtitle/angle columns into it — killing the old Name==Title dup.
-  const columns = useMemo(() => {
-    const attrs = type?.attributes ?? [];
-    const invalidate = () => void qc.invalidateQueries({ queryKey: ['entities', typeKey] });
-    // Remember WHICH row was acted on and WHERE it sat, so the refetch cannot
-    // move it. `onSaved` takes no arguments, so the row is closed over here.
-    const remember = (row: EntityRecord) => {
+  // Remember WHICH row was acted on and WHERE it sat, so the refetch cannot
+  // move it. `onSaved` takes no arguments, so the row is closed over by the cell.
+  const remember = useCallback(
+    (row: EntityRecord) => {
       const index = Math.max(rowOrderRef.current.indexOf(row.id), 0);
       setActed((prev) => noteActed(prev, { id: row.id, index, decision: 'decided' }));
-      invalidate();
-    };
+      void qc.invalidateQueries({ queryKey: ['entities', typeKey] });
+    },
+    [qc, typeKey],
+  );
+
+  const myRole = meQuery.data?.role;
+  const columns = useMemo(() => {
+    const attrs = type?.attributes ?? [];
     if (isContent) {
       return buildRecordColumns(attrs, {
         subtitleAttrs: ['subtitle', 'angle'],
-        hide: CONTENT_TITLE_ATTRS,
+        // On a kind page (Weekly Briefs, Evergreen, General) every row is that
+        // kind and the heading says so; a Kind column would repeat it per row.
+        hide: activeKind ? [...CONTENT_TITLE_ATTRS, CONTENT_TYPE_ATTR] : CONTENT_TITLE_ATTRS,
         // Per-row fast triage: ✕ reject · ✓ good · ✎ edit, act-in-place (no drawer).
         // The header names WHAT is being decided — approving a topic and
         // approving a draft are different kinds of decision (startsim-b313v).
@@ -566,6 +573,10 @@ export default function TypeRecordsPage() {
                   type={type}
                   record={row}
                   config={TOPIC_REVIEW_CONFIG}
+                  // A reader who cannot change this topic sees its state, not
+                  // decisions that end in "Could not save." (bd startsim-m7fdm.32).
+                  // Per record, the same answer the drawer's canEdit gets.
+                  canEdit={canEditRecord(row, myRole)}
                   // Remember the row EITHER WAY. Approving navigates away, but
                   // the reviewer comes back — and finding the row held where
                   // they left it is the whole point of startsim-azyag.
@@ -609,7 +620,7 @@ export default function TypeRecordsPage() {
       return [...buildRecordColumns(attrs), originColumn()];
     }
     return buildRecordColumns(attrs);
-  }, [type, isContent, isNews, isDraft, typeKey, qc, acted, approveWatch, approveNav]);
+  }, [type, isContent, isNews, isDraft, acted, approveWatch, approveNav, activeKind, myRole, remember]);
 
   const hasStatusBoard = !!statusAttr;
 
@@ -692,7 +703,13 @@ export default function TypeRecordsPage() {
         id: 'kind',
         type: 'chips',
         filters: [
-          { id: CONTENT_TYPE_ATTR, label: 'Kind', options: CONTENT_CATEGORIES.map((c) => c.key) },
+          {
+            id: CONTENT_TYPE_ATTR,
+            label: 'Kind',
+            options: CONTENT_CATEGORIES.map((c) => c.key),
+            // The sidebar's words, not the stored keys; the key stays the value.
+            optionLabels: Object.fromEntries(CONTENT_CATEGORIES.map((c) => [c.key, c.label])),
+          },
         ],
       });
     }
@@ -762,7 +779,6 @@ export default function TypeRecordsPage() {
     return kept;
   }, [needAll, filteredRecords, allQuery.data, pagedQuery.data, isContent, anySort, acted]);
   const recordsLoading = needAll ? allQuery.isLoading : pagedQuery.isLoading;
-  const activeKind = filterState[CONTENT_TYPE_ATTR];
 
   // Collapse rejected out of the main list so they stop cluttering the active
   // review — kept, not deleted, and expandable below (startsim-ay9l). Skipped
@@ -1060,6 +1076,18 @@ export default function TypeRecordsPage() {
               )
             }
             columnVisibility={columnVisibility}
+            // One line, in place of "No results found." over a "No items" footer.
+            emptyState={
+              isContent ? (
+                <p className="py-8 text-center text-sm text-gray-500">
+                  {search.trim() || filterState[STATUS_ATTR]
+                    ? 'No topics match.'
+                    : activeKind
+                      ? `No ${contentCategoryLabel(activeKind)} topics yet.`
+                      : 'No topics yet.'}
+                </p>
+              ) : undefined
+            }
             sorting={{
               // Client-side sort over whatever set is loaded; picking a sort flips
               // `needAll` on (above), so it always sorts the FULL bounded set, not
@@ -1188,6 +1216,7 @@ export default function TypeRecordsPage() {
 
       <BaseDialog open={addOpen} onOpenChange={setAddOpen} size="lg">
         <RecordForm
+          key={activeKind ?? ''}
           type={type}
           // Opened from a per-kind list, the new record is of that kind
           // (bd startsim-hibhn).

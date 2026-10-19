@@ -64,6 +64,12 @@ describe('buildNav', () => {
     expect(content.items.every((i) => i.href.startsWith('/t/'))).toBe(true);
   });
 
+  it('gives each kind its own icon, so the collapsed rail tells them apart (review bead startsim-uaayw)', () => {
+    const content = group(items, 'Content') as unknown as { items: { label: string; icon?: { type: unknown } }[] };
+    const kinds = content.items.filter((i) => ['Weekly Briefs', 'Evergreen', 'General'].includes(i.label));
+    expect(new Set(kinds.map((i) => i.icon?.type)).size).toBe(3);
+  });
+
   it('reads the kinds from the DECLARED enum, so a new one appears by itself', () => {
     // The whole point of deriving instead of hardcoding: OGMC adding a content
     // type in the schema must not require a code change to be navigable.

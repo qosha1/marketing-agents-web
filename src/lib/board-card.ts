@@ -41,6 +41,7 @@
  * renders what it returns.
  */
 import { humanizeChoice, readData, type AttrFilter } from '@/lib/board';
+import { CONTENT_TYPE_ATTR, contentCategoryLabel } from '@/lib/content';
 import type { AttributeDef, EntityRecord, EntityTypeDef } from '@/lib/foundry-api';
 
 /** Attribute-name convention for the assignee chip (startsim-71z6) — any type
@@ -109,6 +110,8 @@ export function cardHeading(record: EntityRecord): string {
 
 function format(value: unknown, attr: AttributeDef): string {
   if (attr.dataType === 'boolean') return value ? 'Yes' : 'No';
+  // The kind reads as the sidebar names it ("Evergreen"), not as its stored key.
+  if (attr.name === CONTENT_TYPE_ATTR) return contentCategoryLabel(String(value));
   if (attr.dataType === 'enum') return humanizeChoice(String(value));
   return String(value);
 }

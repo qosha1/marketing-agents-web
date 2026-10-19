@@ -168,7 +168,7 @@ describe('(c) an attribute the active facet has pinned to one value', () => {
 
   it('comes BACK on the unscoped board, where it is the only thing telling the kinds apart', () => {
     const body = cardBody(TOPIC, topic(LIVE), { statusName: 'status', pinned: [] });
-    expect(labels(body)).toContain('content type: Lead magnet');
+    expect(labels(body)).toContain('content type: Evergreen');
   });
 
   it('is derived from the filter, not from the name "content_type"', () => {
@@ -228,7 +228,7 @@ describe('what a card body leaves out for its own sake', () => {
 
   it('reads the camelCased key the data blob actually uses', () => {
     const body = cardBody(TOPIC, topic(LIVE), { statusName: 'status', pinned: [] });
-    expect(labels(body)).toContain('content type: Lead magnet');
+    expect(labels(body)).toContain('content type: Evergreen');
   });
 
   it('renders a boolean as Yes / No', () => {
