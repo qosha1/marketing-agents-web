@@ -29,6 +29,8 @@ import {
 import { resolveReviewConfig } from '@startsimpli/ui/collection';
 
 import { AttributeField } from './attribute-field';
+import { hasTitleAttr, isSystemAttr, TITLE_ATTR } from './record-columns';
+import { draftStatusLabel } from '@/lib/draft-status';
 import { RecordHistorySection } from './record-history-section';
 import { getRegisteredToken } from '@/infrastructure/auth';
 import { formatBearer } from '@/lib/bearer';
@@ -59,7 +61,6 @@ import {
   buildStoryFromTopic,
   canGenerateDrafts,
   draftCandidateIndex,
-  draftJudgeVerdict,
   draftStatus,
   draftTitle,
   fetchTopicDrafts,
@@ -84,7 +85,7 @@ import { rememberVersion } from '@/lib/record-version';
 
 /** Name convention (any type, not just topic/draft) that upgrades the two plain
  *  text fields into one roster picker (startsim-71z6). */
-const ASSIGNEE_SUB_ATTR = 'assignee_sub';
+export const ASSIGNEE_SUB_ATTR = 'assignee_sub';
 const ASSIGNEE_NAME_ATTR = 'assignee_name';
 const UNASSIGNED_VALUE = '__unassigned__';
 
@@ -146,7 +147,7 @@ function GoodExampleToggleButton({ record }: { record: EntityRecord }) {
  * startsim-q79l): a non-admin caller gets a 403, so this degrades to a plain
  * text input on ANY roster-fetch error rather than losing the field entirely.
  */
-function AssigneePicker({
+export function AssigneePicker({
   value,
   onChange,
 }: {
@@ -277,6 +278,13 @@ export function RecordEditFields({
   const container = useMemo(() => scopeContainerAttrs(type), [type]);
   const isMoveOnly = (attrName: string) =>
     !!container && (attrName === container.path || attrName === container.parent);
+  // A title that already differs from the name is someone's text, so it keeps
+  // its own field rather than being overwritten by the name.
+  const titleIsCopy = useMemo(() => {
+    if (!hasTitleAttr(type)) return false;
+    const t = String(readData(base.data, TITLE_ATTR) ?? '').trim();
+    return !t || t === (base.name || '').trim();
+  }, [type, base]);
 
   async function save() {
     const nextData: Record<string, unknown> = { ...base.data };
@@ -305,6 +313,14 @@ export function RecordEditFields({
         nextData[camel] = val;
         if (camel !== attr.name) delete nextData[attr.name];
       }
+    }
+    // ONE TITLE FIELD (bd startsim-pmwfj). Where `title` is a copy of the record
+    // name (the table folds it into Title, the drawer heading reads it first),
+    // the form shows Name only and writes it to both, so they cannot drift.
+    if (titleIsCopy) {
+      const t = name.trim() || base.name;
+      nextData[toCamelKey(TITLE_ATTR)] = t;
+      if (toCamelKey(TITLE_ATTR) !== TITLE_ATTR) delete nextData[TITLE_ATTR];
     }
     // WHO TOUCHED THIS, AND WHEN (bd startsim-m7fdm.3, then bd startsim-j19hf).
     // This used to fold `data._edit_history` in here, through the same helper the
@@ -370,6 +386,7 @@ export function RecordEditFields({
         return type.attributes
           .filter((attr) => !(hasAssigneePair && attr.name === ASSIGNEE_NAME_ATTR))
           .filter((attr) => !isMoveOnly(attr.name))
+          .filter((attr) => !(titleIsCopy && attr.name === TITLE_ATTR) && !isSystemAttr(attr.name))
           .map((attr) =>
             hasAssigneePair && attr.name === ASSIGNEE_SUB_ATTR ? (
               <div key={String(attr.id)} className="space-y-1.5">
@@ -386,14 +403,14 @@ export function RecordEditFields({
                 />
               </div>
             ) : (
-              <div key={String(attr.id)} className="space-y-1.5">
-                <Label className="capitalize">{attr.name.replace(/_/g, ' ')}</Label>
-                <AttributeField
-                  attr={attr}
-                  value={values[attr.name]}
-                  onChange={(val) => setValues((prev) => ({ ...prev, [attr.name]: val }))}
-                />
-              </div>
+              // AttributeField draws its own label; a second one here printed every
+              // name twice (bd startsim-m7fdm.33).
+              <AttributeField
+                key={String(attr.id)}
+                attr={attr}
+                value={values[attr.name]}
+                onChange={(val) => setValues((prev) => ({ ...prev, [attr.name]: val }))}
+              />
             ),
           );
       })()}
@@ -875,7 +892,6 @@ export function TopicDrafts({
         <ul className="mt-2 space-y-1.5">
           {drafts.map((d) => {
             const idx = draftCandidateIndex(d);
-            const verdict = draftJudgeVerdict(d);
             return (
               <li key={d.id}>
                 <Link
@@ -891,20 +907,10 @@ export function TopicDrafts({
                     <span className="min-w-0 truncate">{draftTitle(d)}</span>
                   </span>
                   <span className="flex shrink-0 items-center gap-1.5">
-                    {verdict ? (
-                      <span
-                        className={`rounded-full px-2 py-0.5 text-xs ${
-                          verdict === 'accept'
-                            ? 'bg-emerald-100 text-emerald-700'
-                            : 'bg-amber-100 text-amber-700'
-                        }`}
-                      >
-                        judge: {verdict}
-                      </span>
-                    ) : null}
+                    {/* The status in words; no AI-judge pill (bd startsim-ba990). */}
                     {draftStatus(d) ? (
-                      <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs capitalize text-neutral-600">
-                        {draftStatus(d)}
+                      <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs text-neutral-600">
+                        {draftStatusLabel(draftStatus(d))}
                       </span>
                     ) : null}
                   </span>

@@ -12,6 +12,13 @@ import {
   SelectItem,
 } from '@startsimpli/ui';
 import type { AttributeDef } from '@/lib/foundry-api';
+import { attrLabel } from './record-columns';
+
+/** "ready_for_review" → "Ready for review": an enum value in words. */
+function choiceLabel(value: string): string {
+  const spaced = value.replace(/_+/g, ' ').trim();
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
 
 interface AttributeFieldProps {
   attr: AttributeDef;
@@ -28,7 +35,7 @@ export function AttributeField({ attr, value, onChange }: AttributeFieldProps) {
   const id = `field-${attr.name}`;
   const label = (
     <Label htmlFor={id}>
-      {attr.name}
+      {attrLabel(attr.name)}
       {attr.required && <span className="ml-1 text-error-600">*</span>}
     </Label>
   );
@@ -63,7 +70,7 @@ export function AttributeField({ attr, value, onChange }: AttributeFieldProps) {
           <SelectContent>
             {choices.map((c) => (
               <SelectItem key={c} value={c}>
-                {c}
+                {choiceLabel(c)}
               </SelectItem>
             ))}
           </SelectContent>

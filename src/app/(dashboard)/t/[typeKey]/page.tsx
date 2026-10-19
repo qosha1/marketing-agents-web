@@ -901,10 +901,14 @@ export default function TypeRecordsPage() {
               </Button>
             </Link>
           ) : null}
-          <Button size="sm" onClick={() => setAddOpen(true)}>
-            <Plus className="mr-1.5 h-4 w-4" />
-            Add {type.label.toLowerCase()}
-          </Button>
+          {/* A view-only seat is refused on every create, so it is not handed a
+              form to fill and lose (bd startsim-hqmsx). */}
+          {meQuery.data?.role !== 'viewer' ? (
+            <Button size="sm" onClick={() => setAddOpen(true)}>
+              <Plus className="mr-1.5 h-4 w-4" />
+              Add {type.label.toLowerCase()}
+            </Button>
+          ) : null}
         </div>
       </div>
 
@@ -1141,6 +1145,11 @@ export default function TypeRecordsPage() {
       <BaseDialog open={addOpen} onOpenChange={setAddOpen} size="lg">
         <RecordForm
           type={type}
+          // Opened from a per-kind list, the new record is of that kind
+          // (bd startsim-hibhn).
+          defaults={
+            filterState[CONTENT_TYPE_ATTR] ? { [CONTENT_TYPE_ATTR]: filterState[CONTENT_TYPE_ATTR] } : undefined
+          }
           onSuccess={() => setAddOpen(false)}
           onCancel={() => setAddOpen(false)}
         />

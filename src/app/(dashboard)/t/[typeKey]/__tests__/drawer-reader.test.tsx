@@ -78,6 +78,8 @@ function otherWriter(changes: Record<string, unknown>) {
 
 const page = <T,>(results: T[]) => ({ count: results.length, next: null, previous: null, results });
 
+const me = vi.hoisted(() => ({ role: 'member' }));
+
 vi.mock('@/lib/api', () => ({
   APP_SLUG: 'marketing-agents',
   resolveAppSlug: () => 'marketing-agents',
@@ -86,7 +88,7 @@ vi.mock('@/lib/api', () => ({
     client: {
       get: vi.fn(async (path: string) => {
         if (path === 'api/v1/schema/types') return page([TOPIC_TYPE]);
-        if (path === 'api/v1/whoami') return { sub: 'u1', role: 'member' };
+        if (path === 'api/v1/whoami') return { sub: 'u1', role: me.role };
         if (path === 'api/v1/entities/topic-1') return served();
         if (path.startsWith('api/v1/entities')) return page([served()]);
         return page([]);
@@ -207,6 +209,7 @@ async function openDrawer() {
 }
 
 beforeEach(() => {
+  me.role = 'member';
   resetHeldVersions();
   resetDeclaredAliasIndex();
   patches.length = 0;
@@ -239,5 +242,22 @@ describe('the topic drawer and the reader\'s share', () => {
     expect(within(drawer).getByRole('combobox')).toBeInTheDocument();
     expect(within(drawer).getByRole('button', { name: /approve/i })).toBeInTheDocument();
     expect(within(drawer).getByRole('button', { name: /add note/i })).toBeInTheDocument();
+  });
+});
+
+describe('Add for a view-only seat (bd startsim-hqmsx)', () => {
+  it('a viewer is not offered Add, which every create would refuse', async () => {
+    me.role = 'viewer';
+    share.canEdit = false;
+    renderPage();
+    await screen.findByTestId('row-topic-1');
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.queryByRole('button', { name: /add topic/i })).toBeNull();
+  });
+
+  it('a member still is', async () => {
+    share.canEdit = true;
+    renderPage();
+    expect(await screen.findByRole('button', { name: /add topic/i })).toBeInTheDocument();
   });
 });

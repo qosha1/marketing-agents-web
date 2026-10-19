@@ -4,6 +4,9 @@ import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Button, Input, Label, notify } from '@startsimpli/ui';
 import { AttributeField } from './attribute-field';
+import { AssigneePicker, ASSIGNEE_SUB_ATTR } from './entity-detail-drawer';
+import { hasTitleAttr, isSystemAttr, TITLE_ATTR } from './record-columns';
+import { ASSIGNEE_NAME_ATTR } from '@/lib/board-card';
 import { createEntity, type EntityTypeDef } from '@/lib/foundry-api';
 
 interface RecordFormProps {
@@ -12,6 +15,9 @@ interface RecordFormProps {
   onSuccess?: () => void;
   /** Called when the user cancels (renders a Cancel button when provided). */
   onCancel?: () => void;
+  /** Values the form opens with — e.g. the Kind of the list it was opened
+   *  from, so a topic added on Weekly Briefs lands in Weekly Briefs. */
+  defaults?: Record<string, unknown>;
 }
 
 /**
@@ -20,11 +26,23 @@ interface RecordFormProps {
  * cleanly into a dialog; the tall body scrolls so a many-field type never
  * overflows the viewport.
  */
-export function RecordForm({ type, onSuccess, onCancel }: RecordFormProps) {
+export function RecordForm({ type, onSuccess, onCancel, defaults }: RecordFormProps) {
   const queryClient = useQueryClient();
   const [name, setName] = useState('');
-  const [values, setValues] = useState<Record<string, unknown>>({});
+  const [nameMissing, setNameMissing] = useState(false);
+  const [values, setValues] = useState<Record<string, unknown>>(() => ({ ...defaults }));
   const [saving, setSaving] = useState(false);
+  const hasAssigneePair =
+    type.attributes.some((a) => a.name === ASSIGNEE_SUB_ATTR) &&
+    type.attributes.some((a) => a.name === ASSIGNEE_NAME_ATTR);
+  // Name is the title (`title` copies it), the assignee pair is one roster
+  // picker, and `_`-keys are the pipeline's own (bd startsim-umlou, startsim-m27hp).
+  const shown = type.attributes.filter(
+    (a) =>
+      a.name !== TITLE_ATTR &&
+      !isSystemAttr(a.name) &&
+      !(hasAssigneePair && a.name === ASSIGNEE_NAME_ATTR),
+  );
 
   function setValue(key: string, value: unknown) {
     setValues((prev) => ({ ...prev, [key]: value }));
@@ -33,7 +51,8 @@ export function RecordForm({ type, onSuccess, onCancel }: RecordFormProps) {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim()) {
-      notify.error('Give this record a name.');
+      // Said at the field, not in a toast across the screen (bd startsim-44uah).
+      setNameMissing(true);
       return;
     }
 
@@ -41,6 +60,7 @@ export function RecordForm({ type, onSuccess, onCancel }: RecordFormProps) {
     const data: Record<string, unknown> = {};
     for (const attr of type.attributes) {
       const raw = values[attr.name];
+      if (attr.name === TITLE_ATTR) continue;
       if (raw === undefined || raw === '') continue;
       if (attr.dataType === 'json') {
         try {
@@ -54,13 +74,15 @@ export function RecordForm({ type, onSuccess, onCancel }: RecordFormProps) {
       }
     }
 
+    if (hasTitleAttr(type)) data[TITLE_ATTR] = name.trim();
+
     setSaving(true);
     try {
       await createEntity({ entityType: type.key, name: name.trim(), data });
       await queryClient.invalidateQueries({ queryKey: ['entities', type.key] });
       notify.success('Record added.');
       setName('');
-      setValues({});
+      setValues({ ...defaults });
       onSuccess?.();
     } catch (err) {
       notify.error(err instanceof Error ? err.message : 'Could not add the record.');
@@ -81,19 +103,41 @@ export function RecordForm({ type, onSuccess, onCancel }: RecordFormProps) {
           <Input
             id="record-name"
             value={name}
-            onChange={(e) => setName(e.target.value)}
+            onChange={(e) => {
+              setName(e.target.value);
+              if (e.target.value.trim()) setNameMissing(false);
+            }}
             placeholder={`New ${type.label.toLowerCase()}`}
+            aria-invalid={nameMissing || undefined}
+            aria-describedby={nameMissing ? 'record-name-error' : undefined}
           />
+          {nameMissing ? (
+            <p id="record-name-error" className="text-xs text-error-600">
+              Name is required.
+            </p>
+          ) : null}
         </div>
 
-        {type.attributes.map((attr) => (
-          <AttributeField
-            key={attr.id}
-            attr={attr}
-            value={values[attr.name]}
-            onChange={(v) => setValue(attr.name, v)}
-          />
-        ))}
+        {shown.map((attr) =>
+          hasAssigneePair && attr.name === ASSIGNEE_SUB_ATTR ? (
+            <div key={attr.id} className="space-y-1.5">
+              <Label>Assignee</Label>
+              <AssigneePicker
+                value={String(values[ASSIGNEE_SUB_ATTR] ?? '')}
+                onChange={(sub, assigneeName) =>
+                  setValues((prev) => ({ ...prev, [ASSIGNEE_SUB_ATTR]: sub, [ASSIGNEE_NAME_ATTR]: assigneeName }))
+                }
+              />
+            </div>
+          ) : (
+            <AttributeField
+              key={attr.id}
+              attr={attr}
+              value={values[attr.name]}
+              onChange={(v) => setValue(attr.name, v)}
+            />
+          ),
+        )}
       </div>
 
       <div className="flex justify-end gap-2 border-t border-gray-100 pt-4">

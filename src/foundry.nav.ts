@@ -26,7 +26,23 @@
  * `.ts` module and the pure `buildNav` logic is unit-testable without a DOM.
  */
 import { createElement } from 'react';
-import { History, LayoutDashboard, FileText, Lightbulb, LayoutGrid, Layers, Table } from 'lucide-react';
+import {
+  Building2,
+  CalendarDays,
+  FileText,
+  FolderTree,
+  History,
+  Layers,
+  LayoutDashboard,
+  LayoutGrid,
+  Leaf,
+  Lightbulb,
+  Newspaper,
+  ShieldCheck,
+  Shapes,
+  Table,
+  type LucideIcon,
+} from 'lucide-react';
 import type { GroupedNavEntry } from '@startsimpli/ui';
 
 import { CONTENT_TYPE_KEY, contentTabHref, declaredContentTypes } from '@/lib/content';
@@ -57,6 +73,22 @@ export function listTitle(type: Pick<EntityTypeDef, 'key' | 'label'>): string {
 }
 
 /**
+ * Neighbours in the sidebar get different icons (bd startsim-xs1a0). Keyed by
+ * declared key; anything not listed keeps the generic icon for its group.
+ */
+const KIND_ICONS: Record<string, LucideIcon> = {
+  weekly_brief: CalendarDays,
+  lead_magnet: Leaf,
+  general: Shapes,
+};
+const TYPE_ICONS: Record<string, LucideIcon> = {
+  client: Building2,
+  news_item: Newspaper,
+  scope: FolderTree,
+  source: ShieldCheck,
+};
+
+/**
  * Build the <GroupedNav/> `items` tree from the declared entity types.
  * `types` is the EntityTypeDef[] from the `schema-types` query (may be empty
  * before the schema loads — the Content group and static links still render).
@@ -82,7 +114,7 @@ export function buildNav(types: EntityTypeDef[]): GroupedNavEntry[] {
         ...declaredContentTypes(types.find((t) => t.key === CONTENT_TYPE_KEY)).map((c) => ({
           href: contentTabHref(c.key),
           label: c.label,
-          icon: createElement(Layers),
+          icon: createElement(KIND_ICONS[c.key] ?? Layers),
         })),
         { href: `/t/${DRAFT_TYPE_KEY}`, label: CONTENT_NAV_LABELS[DRAFT_TYPE_KEY], icon: createElement(FileText) },
       ],
@@ -95,7 +127,7 @@ export function buildNav(types: EntityTypeDef[]): GroupedNavEntry[] {
       items: dataTypes.map((t) => ({
         href: typeRoute(t),
         label: t.label,
-        icon: createElement(isBoardType(t) ? LayoutGrid : Table),
+        icon: createElement(TYPE_ICONS[t.key] ?? (isBoardType(t) ? LayoutGrid : Table)),
       })),
     });
   }

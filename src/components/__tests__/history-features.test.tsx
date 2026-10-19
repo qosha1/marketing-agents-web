@@ -178,7 +178,7 @@ describe('topic header — who last wrote each field', () => {
     await waitFor(() =>
       expect(calls.some((c) => c.url.includes('/revisions?') && c.url.includes('field=team_verdict'))).toBe(true),
     );
-    expect(await screen.findByTestId('record-history-narrowed')).toHaveTextContent('team_verdict');
+    expect(await screen.findByTestId('record-history-narrowed')).toHaveTextContent('Team verdict');
   });
 });
 
@@ -190,7 +190,7 @@ describe('topic history — restore', () => {
     fireEvent.click(await screen.findByRole('button', { name: /topic history/i }));
     // v4 is Jurga's "good", overwritten by the machine at v5.
     const v4 = (await screen.findByText('v4')).closest('[data-activity-id]') as HTMLElement;
-    fireEvent.click(within(v4).getByRole('button', { name: /team_verdict/ }));
+    fireEvent.click(within(v4).getByRole('button', { name: /Team verdict/ }));
     fireEvent.click(within(v4).getByRole('button', { name: /restore this value/i }));
     expect(await screen.findByTestId('restore-preview-team_verdict')).toHaveTextContent(/good/);
     fireEvent.click(screen.getByTestId('restore-confirm'));
@@ -205,7 +205,7 @@ describe('topic history — restore', () => {
     const spy = vi.spyOn(qc, 'invalidateQueries');
     fireEvent.click(await screen.findByRole('button', { name: /topic history/i }));
     const v4 = (await screen.findByText('v4')).closest('[data-activity-id]') as HTMLElement;
-    fireEvent.click(within(v4).getByRole('button', { name: /team_verdict/ }));
+    fireEvent.click(within(v4).getByRole('button', { name: /Team verdict/ }));
     fireEvent.click(within(v4).getByRole('button', { name: /restore this value/i }));
     fireEvent.click(await screen.findByTestId('restore-confirm'));
     await waitFor(() =>
