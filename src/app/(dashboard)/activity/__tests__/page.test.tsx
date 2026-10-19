@@ -37,8 +37,12 @@ vi.mock('@/lib/foundry-api', () => ({
     results: [
       { id: 1, key: 'topic', label: 'Topic', attributes: [] },
       { id: 2, key: 'draft', label: 'Draft', attributes: [] },
+      { id: 3, key: 'scope', label: 'Scope', attributes: [] },
     ],
   })),
+  orgMembers: vi.fn(async () => [
+    { id: 1, org: 'o', role: 'member', user: { sub: 'u-malin', email: 'malin@ogmc.example' } },
+  ]),
 }));
 
 const ROWS = {
@@ -70,6 +74,19 @@ const ROWS = {
       actor_kind_source: 'claim',
       metadata: { changed: { blog: { before: 'a', after: 'b' } } },
       entity: { id: 'draft-9', type: 'draft', name: 'Gulf brief' },
+    },
+    {
+      id: 'r0',
+      version: 2,
+      action: 'updated',
+      source: 'patch',
+      created_at: '2026-10-07T07:00:00Z',
+      actor_sub: 'u-jurga',
+      actor_label: 'jurga@ogmc.example',
+      actor_kind: 'person',
+      actor_kind_source: 'claim',
+      metadata: { changed: { brand_voice: { before: 'a', after: 'b' } } },
+      entity: { id: 'scope-3', type: 'scope', name: 'OGMC' },
     },
   ],
 };
@@ -131,6 +148,31 @@ describe('/activity', () => {
     mount();
     expect((await screen.findByRole('link', { name: 'Qatar logistics' })).getAttribute('href')).toMatch(/^\/story\/topic-1/);
     expect(screen.getByRole('link', { name: 'Gulf brief' })).toHaveAttribute('href', '/draft/draft-9');
+  });
+
+  it('opens any other type ON the record, not on its whole table (m7fdm.36)', async () => {
+    mount();
+    expect(await screen.findByRole('link', { name: 'OGMC' })).toHaveAttribute('href', '/t/scope?open=scope-3');
+  });
+
+  it('names fields the way the forms do, not by storage key', async () => {
+    mount();
+    expect(await screen.findByText('Edited Brand voice')).toBeTruthy();
+    expect(screen.queryByText('Edited brand_voice')).toBeNull();
+  });
+
+  it('offers every team member in Person from the first load', async () => {
+    mount();
+    const select = (await screen.findByRole('combobox', { name: 'Person' })) as HTMLSelectElement;
+    await waitFor(() =>
+      expect([...select.querySelectorAll('option')].map((o) => o.textContent)).toContain('malin@ogmc.example'),
+    );
+  });
+
+  it('prints no help paragraph under the title', async () => {
+    mount();
+    await screen.findByText('Gulf brief');
+    expect(screen.queryByText(/newest first — people and machines/)).toBeNull();
   });
 
   it('marks the machine row', async () => {

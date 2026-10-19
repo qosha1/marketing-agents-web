@@ -55,6 +55,7 @@ import {
   RECENCY_ALL,
   RECENCY_PARAM,
   RECENCY_WINDOWS,
+  recordCountLabel,
   defaultRecencyDays,
   facetFilters,
   recencyFilters,
@@ -382,13 +383,12 @@ export default function BoardPage() {
           main's overflow-x clip cut them off where nobody could reach them. */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="text-lg font-semibold">
-            {activeContentType ? contentCategoryLabel(activeContentType) : `${type?.label ?? typeKey} — Board`}
+          <h1 className="text-2xl font-bold text-gray-900">
+            {activeContentType ? contentCategoryLabel(activeContentType) : (type?.label ?? typeKey)}
           </h1>
           <p className="flex flex-wrap items-center gap-2 text-sm text-neutral-500">
-            <span>
-              {loadedCount.toLocaleString()}
-              {matching != null && matching !== loadedCount ? ` of ${matching.toLocaleString()}` : ''} records
+            <span data-testid="record-count">
+              {recordCountLabel(loadedCount, { matching, windowDays: recency.days })}
             </span>
             {filters.map((f) => (
               <span key={f.name} className="rounded-full bg-primary-50 px-2 py-0.5 text-xs text-primary-700">

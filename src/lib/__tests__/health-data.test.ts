@@ -51,10 +51,10 @@ describe('topicPipeline', () => {
       topic(4, { status: 'written' }),
     ];
     expect(topicPipeline(topicType, records).stages).toEqual([
-      { label: 'suggested', count: 2 },
-      { label: 'ready', count: 1 },
-      { label: 'rejected', count: 0 },
-      { label: 'written', count: 1 },
+      { label: 'Suggested', count: 2 },
+      { label: 'Ready', count: 1 },
+      { label: 'Rejected', count: 0 },
+      { label: 'Written', count: 1 },
     ]);
   });
 

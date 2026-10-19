@@ -161,7 +161,7 @@ describe('/t/draft for a scope-gated member', () => {
     // "Topic approved" chip standing over the explanation would keep saying the
     // list is empty for the reasons it is not.
     expect(screen.queryByTestId('table-records-draft')).toBeNull();
-    expect(screen.getByTestId('record-count').textContent).toBe('— total');
+    expect(screen.getByTestId('record-count').textContent).toBe('— records');
     expect(screen.queryByText('Showing:')).toBeNull();
   });
 
