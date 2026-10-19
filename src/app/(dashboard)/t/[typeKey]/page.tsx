@@ -38,7 +38,7 @@ import {
 } from '@/lib/foundry-api';
 import { normalizeMembers, operatorSubs } from '@/lib/roster';
 import { RecordForm } from '@/components/record-form';
-import { buildRecordColumns, defaultVisibleColumns } from '@/components/record-columns';
+import { buildRecordColumns, defaultVisibleColumns, humanizeHeader } from '@/components/record-columns';
 import { originColumn, ORIGIN_COLUMN_ID } from '@/components/origin-column';
 import {
   EntityDetailDrawer,
@@ -163,6 +163,16 @@ export default function TypeRecordsPage() {
     () => (type?.attributes ?? []).some((a) => a.name === CONTENT_TYPE_ATTR),
     [type?.attributes],
   );
+  // The attribute the State chip row filters on, and the URL key it travels
+  // under. pickStatusAttr falls back to the type's FIRST enum when none is named
+  // `status` — `source_type` on Approved Source — so a hardcoded 'status' here
+  // offered source types as chips and then filtered on a field no source record
+  // has, emptying a populated table (bd startsim-lkcpn). null when the type has
+  // no such enum, or when that enum is content_type (the Kind row owns it).
+  const stateKey = useMemo(() => {
+    const name = choicesOf(statusAttr).length ? statusAttr?.name : undefined;
+    return name && name !== CONTENT_TYPE_ATTR ? name : null;
+  }, [statusAttr]);
 
   // Facet filters (Kind = content_type, State = status), seeded from and mirrored
   // to the URL: a deep link like /t/topic?content_type=lead_magnet lands
@@ -171,11 +181,11 @@ export default function TypeRecordsPage() {
   const filterState = useMemo<Record<string, string>>(() => {
     const fs: Record<string, string> = {};
     const kind = searchParams.get(CONTENT_TYPE_ATTR);
-    const state = searchParams.get(STATUS_ATTR);
+    const state = stateKey ? searchParams.get(stateKey) : null;
     if (kind && hasContentTypeAttr) fs[CONTENT_TYPE_ATTR] = kind;
-    if (state && statusAttr) fs[STATUS_ATTR] = state;
+    if (state && stateKey) fs[stateKey] = state;
     return fs;
-  }, [searchParams, hasContentTypeAttr, statusAttr]);
+  }, [searchParams, hasContentTypeAttr, stateKey]);
 
   const anyFilter = Object.keys(filterState).length > 0;
   const isContent = typeKey === CONTENT_TYPE_KEY;
@@ -380,7 +390,7 @@ export default function TypeRecordsPage() {
       sp.set(k, v);
     }
     sp.delete(CONTENT_TYPE_ATTR);
-    sp.delete(STATUS_ATTR);
+    if (stateKey) sp.delete(stateKey);
     setSearch('');
     setPage(1);
     const qs = sp.toString();
@@ -389,7 +399,7 @@ export default function TypeRecordsPage() {
 
   function applyFilters(next: Record<string, unknown>) {
     const sp = new URLSearchParams(searchParams.toString());
-    for (const key of [CONTENT_TYPE_ATTR, STATUS_ATTR]) {
+    for (const key of stateKey ? [CONTENT_TYPE_ATTR, stateKey] : [CONTENT_TYPE_ATTR]) {
       const v = next[key];
       if (v) sp.set(key, String(v));
       else sp.delete(key);
@@ -576,10 +586,7 @@ export default function TypeRecordsPage() {
   // it are actually rendered. Hardcoding 'status' here would let the two drift:
   // pickStatusAttr falls back to the FIRST enum with choices when no attribute
   // is named `status`, and then the dropped column would not be the charted one.
-  const stateChipAttr = useMemo(
-    () => (choicesOf(statusAttr).length ? statusAttr?.name ?? null : null),
-    [statusAttr],
-  );
+  const stateChipAttr = stateKey;
 
   // Which columns the table OPENS with — owned by record-columns.ts so every
   // view built on buildRecordColumns gets the same defaults (and the same
@@ -652,12 +659,14 @@ export default function TypeRecordsPage() {
         ],
       });
     }
-    const stateChoices = choicesOf(statusAttr);
-    if (stateChoices.length) {
+    if (stateKey) {
       sections.push({
         id: 'state',
         type: 'chips',
-        filters: [{ id: STATUS_ATTR, label: 'State', options: stateChoices }],
+        // Named after the attribute it filters, through the same helper as that
+        // attribute's column header: `status` still reads "State", and
+        // `source_type` reads "Source type".
+        filters: [{ id: stateKey, label: humanizeHeader(stateKey), options: choicesOf(statusAttr) }],
       });
     }
     if (sections.length === 0) return undefined;
@@ -673,7 +682,7 @@ export default function TypeRecordsPage() {
     };
     // applyFilters closes over the current searchParams/pathname, refreshed each render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasContentTypeAttr, statusAttr, filterState]);
+  }, [hasContentTypeAttr, statusAttr, stateKey, filterState]);
 
   function handleRowClick(row: EntityRecord) {
     if (typeKey === DRAFT_TYPE_KEY) router.push(`/draft/${row.id}`);
