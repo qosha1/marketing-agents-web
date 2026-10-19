@@ -73,6 +73,13 @@ import {
   type EntityTypeDef,
 } from '@/lib/foundry-api';
 import { saveEntity } from '@/lib/entity-cache';
+import {
+  currentScopePath,
+  describeScopeMove,
+  moveScope,
+  scopeContainerAttrs,
+  type ScopeContainerAttrs,
+} from '@/lib/scope-move';
 import { rememberVersion } from '@/lib/record-version';
 
 /** Name convention (any type, not just topic/draft) that upgrades the two plain
@@ -264,10 +271,17 @@ export function RecordEditFields({
   const [name, setName] = useState(base.name || '');
   const [values, setValues] = useState<Record<string, unknown>>(() => initialValues(type, base));
   const [saving, setSaving] = useState(false);
+  // A scope container's path and parent move only through move-scope, which
+  // carries the whole subtree with them (bd startsim-kprfu). Save leaves both
+  // exactly as stored; the Move section below is the one way to change them.
+  const container = useMemo(() => scopeContainerAttrs(type), [type]);
+  const isMoveOnly = (attrName: string) =>
+    !!container && (attrName === container.path || attrName === container.parent);
 
   async function save() {
     const nextData: Record<string, unknown> = { ...base.data };
     for (const attr of type.attributes) {
+      if (isMoveOnly(attr.name)) continue;
       const camel = toCamelKey(attr.name);
       let val = values[attr.name];
       if (attr.dataType === 'json') {
@@ -337,6 +351,15 @@ export function RecordEditFields({
         <Label>Name</Label>
         <Input value={name} onChange={(e) => setName(e.target.value)} />
       </div>
+      {container ? (
+        <ScopeMoveSection
+          type={type}
+          record={base}
+          attrs={container}
+          disabled={saving}
+          onMoved={onSaved}
+        />
+      ) : null}
       {(() => {
         // Assignee name-convention (any type, not just topic/draft): both
         // halves declared -> ONE roster picker writes them together instead
@@ -346,6 +369,7 @@ export function RecordEditFields({
           type.attributes.some((a) => a.name === ASSIGNEE_NAME_ATTR);
         return type.attributes
           .filter((attr) => !(hasAssigneePair && attr.name === ASSIGNEE_NAME_ATTR))
+          .filter((attr) => !isMoveOnly(attr.name))
           .map((attr) =>
             hasAssigneePair && attr.name === ASSIGNEE_SUB_ATTR ? (
               <div key={String(attr.id)} className="space-y-1.5">
@@ -384,6 +408,80 @@ export function RecordEditFields({
         >
           Cancel
         </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Path and parent of a scope, read-only, with the Move action that changes them
+ * (bd startsim-kprfu). A rename and a reparent are the same move: the tenant
+ * takes the full new path either way.
+ */
+function ScopeMoveSection({
+  type,
+  record,
+  attrs,
+  disabled,
+  onMoved,
+}: {
+  type: EntityTypeDef;
+  record: EntityRecord;
+  attrs: ScopeContainerAttrs;
+  disabled: boolean;
+  onMoved: (moved: EntityRecord) => void;
+}) {
+  const qc = useQueryClient();
+  const current = currentScopePath(record, attrs);
+  const parentValue = readData(record.data, attrs.parent);
+  const [to, setTo] = useState(current);
+  const [moving, setMoving] = useState(false);
+  const target = to.trim();
+  const unchanged = !target || target === current;
+
+  async function move() {
+    setMoving(true);
+    try {
+      const result = await moveScope(record.id, target);
+      // The move rewrote records of every scoped type, not just this one.
+      await qc.invalidateQueries({ queryKey: ['entities'] });
+      notify.success(describeScopeMove(result.moved));
+      onMoved(result.entity);
+    } catch (err) {
+      notify.error(err instanceof Error ? err.message : 'Could not move this scope.');
+    } finally {
+      setMoving(false);
+    }
+  }
+
+  return (
+    <div className="space-y-3 rounded border bg-neutral-50 p-3">
+      <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
+        <span className="capitalize text-neutral-500">{attrs.path.replace(/_/g, ' ')}</span>
+        <span data-testid="scope-current-path" className="font-mono">{current || '\u2014'}</span>
+        <span className="capitalize text-neutral-500">{attrs.parent.replace(/_/g, ' ')}</span>
+        <span data-testid="scope-current-parent" className="font-mono">
+          {parentValue == null || parentValue === '' ? '\u2014' : String(parentValue)}
+        </span>
+      </div>
+      <div className="space-y-1.5">
+        <Label htmlFor={`scope-move-${record.id}`}>Move or rename</Label>
+        <p className="text-xs text-neutral-500">
+          Moves this {type.label.toLowerCase()} and everything under it — child scopes and the
+          records filed in them — to the new path.
+        </p>
+        <div className="flex gap-2">
+          <Input
+            id={`scope-move-${record.id}`}
+            data-testid="scope-move-to"
+            value={to}
+            onChange={(e) => setTo(e.target.value)}
+            className="font-mono"
+          />
+          <Button onClick={move} disabled={disabled || moving || unchanged}>
+            {moving ? 'Moving…' : 'Move scope'}
+          </Button>
+        </div>
       </div>
     </div>
   );

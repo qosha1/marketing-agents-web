@@ -201,11 +201,15 @@ describe('recencyFilters — the SERVER-SIDE half', () => {
     expect(recencyFilters('published_at', { days: null }, NOW)).toEqual({});
   });
 
-  it('is empty when the type declares no recency attribute', () => {
-    // There is no server-side filter on created_at, so a type without a declared
-    // date attribute cannot be narrowed remotely — the window falls back to the
-    // client-side pass over createdAt.
-    expect(recencyFilters(null, { days: 7 }, NOW)).toEqual({});
+  it('bounds the row created_at when the type declares no recency attribute', () => {
+    // bd startsim-ruoh6: this used to be {} — and the board has no client-side
+    // pass, so "7 days" on Scope did nothing at all. The tenant filters the
+    // row's own created_at under `created_after`.
+    expect(recencyFilters(null, { days: 7 }, NOW)).toEqual({ created_after: '2026-08-17' });
+  });
+
+  it('is empty for ALL on a type with no recency attribute too', () => {
+    expect(recencyFilters(null, { days: null }, NOW)).toEqual({});
   });
 
   it('uses the same cutoff instant the client-side pass uses', () => {

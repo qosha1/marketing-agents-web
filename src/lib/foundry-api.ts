@@ -83,6 +83,8 @@ export interface EntityTypeDef {
   id: SchemaId;
   key: string;
   label: string;
+  /** The type's declared config (`access`, `scope`, ...). Keys arrive camelCased. */
+  config?: Record<string, unknown>;
   attributes: AttributeDef[];
 }
 

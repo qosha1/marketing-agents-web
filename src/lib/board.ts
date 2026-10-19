@@ -402,6 +402,9 @@ export function rollupByParent(
 /** URL param carrying the window, e.g. `?since=30` or `?since=all`. */
 export const RECENCY_PARAM = 'since';
 
+/** The tenant's lower bound on a row's own `created_at` (bd startsim-ruoh6). */
+export const CREATED_AFTER_PARAM = 'created_after';
+
 /** The param value meaning "no window" — every record, as before. */
 export const RECENCY_ALL = 'all';
 
@@ -550,10 +553,12 @@ export function applyRecencyWindow(
  * `listAllEntities` walks the window instead of walking 20 pages and truncating
  * at 1,000 — see its docstring for the measurement.
  *
- * `{}` for ALL (no window) and for a type with no declared recency attribute:
- * the backend has no filter on `created_at`, so that case is narrowed by
- * {@link applyRecencyWindow} on the client instead. The two agree on the cutoff
- * because both take it from {@link recencyCutoff}.
+ * `{}` for ALL (no window). A type with no declared recency attribute is
+ * bounded on the row's own `created_at`, through the tenant's `created_after`
+ * (bd startsim-ruoh6). That case used to return `{}` on the belief that the
+ * board narrowed it on the client — it never did, so "7 days" on Scope or
+ * Source changed nothing. The client pass ({@link applyRecencyWindow}) agrees
+ * on the cutoff because both take it from {@link recencyCutoff}.
  *
  * ONE ASYMMETRY, deliberate and worth knowing: a record whose declared date is
  * BLANK survives the client-side pass (it falls back to `createdAt`) but not
@@ -565,8 +570,9 @@ export function recencyFilters(
   window: RecencyWindow,
   now: Date = new Date(),
 ): Record<string, string> {
-  if (window.days == null || !attrName) return {};
-  return { [`attr.${attrName}__gte`]: recencyCutoff(window.days, now).toISOString().slice(0, 10) };
+  if (window.days == null) return {};
+  const cutoff = recencyCutoff(window.days, now).toISOString().slice(0, 10);
+  return attrName ? { [`attr.${attrName}__gte`]: cutoff } : { [CREATED_AFTER_PARAM]: cutoff };
 }
 
 /**

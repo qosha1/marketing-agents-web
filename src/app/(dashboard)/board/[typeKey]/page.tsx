@@ -118,9 +118,9 @@ export default function BoardPage() {
   const type = typesQuery.data?.results.find((t) => t.key === typeKey);
 
   // The recency window (startsim-wn2p.24). `recencyAttr` is null for a type that
-  // declares no "when this happened" date; the window then measures by each
-  // record's own createdAt, client-side — so this is on for every board, not
-  // just news. It is computed BEFORE the fetch because it narrows the fetch.
+  // declares no "when this happened" date; the window then bounds each row's
+  // own created_at on the server (`created_after`, bd startsim-ruoh6) — so this
+  // is on for every board, not just news. It is computed BEFORE the fetch because it narrows the fetch.
   const recencyAttr = useMemo(() => pickRecencyAttr(type), [type]);
   const recency = useMemo(
     () => pickRecencyWindow(Object.fromEntries(searchParams.entries()), defaultRecencyDays(recencyAttr)),
