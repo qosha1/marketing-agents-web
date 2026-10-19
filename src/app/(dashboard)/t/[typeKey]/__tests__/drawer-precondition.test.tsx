@@ -91,6 +91,9 @@ vi.mock('@/lib/api', () => ({
     client: {
       get: vi.fn(async (path: string) => {
         if (path === 'api/v1/schema/types') return page([TOPIC_TYPE]);
+        // A member who may edit: the drawer draws its write controls only for
+        // someone who can change the topic (bd startsim-m7fdm.32).
+        if (path === 'api/v1/whoami') return { sub: 'u1', role: 'member' };
         if (path === 'api/v1/entities/topic-1') return served();
         if (path.startsWith('api/v1/entities')) return page([served()]);
         return page([]);

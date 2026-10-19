@@ -33,6 +33,7 @@ import {
   fetchScopeAccess,
   orgMembers,
   collectionClient,
+  whoami,
   type EntityFilters,
   type EntityRecord,
 } from '@/lib/foundry-api';
@@ -92,6 +93,7 @@ import { dispatchDraftForApproval } from '@/lib/approve-dispatch';
 import { createApproveWatch } from '@/lib/approve-watch';
 import { currentReturnPath, storyHref } from '@/lib/story-nav';
 import { primeEntity } from '@/lib/entity-cache';
+import { canEditRecord } from '@/lib/track-changes';
 import {
   NEWS_ACTIONS_HEADER,
   NEWS_REVIEW_CONFIG,
@@ -157,6 +159,10 @@ export default function TypeRecordsPage() {
     queryFn: () => listTypes(),
   });
   const type = typesQuery.data?.results.find((t) => t.key === typeKey);
+  // Who is reading, for the drawer's write controls (bd startsim-m7fdm.32). The
+  // record's own permissions decide; the role is the fallback for a tenant that
+  // sends none. Same ['whoami'] key as the draft page, so one request.
+  const meQuery = useQuery({ queryKey: ['whoami'], queryFn: () => whoami(), staleTime: 5 * 60_000 });
 
   const statusAttr = useMemo(() => pickStatusAttr(type), [type]);
   const hasContentTypeAttr = useMemo(
@@ -1086,6 +1092,10 @@ export default function TypeRecordsPage() {
             />
           )}
           renderExtra={(r) => <TopicReviewExtra record={r} type={type} />}
+          // A reader who cannot change this topic is not offered the State
+          // select, Edit fields, the decisions or Add note (bd startsim-m7fdm.32).
+          // Per record, so j/k onto a topic shared "Can view" hides them.
+          canEdit={canEditRecord(selected, meQuery.data?.role)}
         />
       ) : (
         <EntityDetailDrawer
