@@ -40,7 +40,7 @@
  * Pure and framework-free so it is unit-tested as one function; <EntityBoard/>
  * renders what it returns.
  */
-import { readData, type AttrFilter } from '@/lib/board';
+import { humanizeChoice, readData, type AttrFilter } from '@/lib/board';
 import type { AttributeDef, EntityRecord, EntityTypeDef } from '@/lib/foundry-api';
 
 /** Attribute-name convention for the assignee chip (startsim-71z6) — any type
@@ -109,7 +109,20 @@ export function cardHeading(record: EntityRecord): string {
 
 function format(value: unknown, attr: AttributeDef): string {
   if (attr.dataType === 'boolean') return value ? 'Yes' : 'No';
+  if (attr.dataType === 'enum') return humanizeChoice(String(value));
   return String(value);
+}
+
+/**
+ * True when the record declares itself retired: an `active` boolean set to
+ * false. The card is dimmed rather than given another row or chip, so a retired
+ * scope or source stops looking exactly like a live one (bd startsim-glxgd)
+ * without the card getting any taller. A record with no `active` value is live.
+ */
+export function isInactive(type: EntityTypeDef, record: EntityRecord): boolean {
+  const attr = type.attributes.find((a) => a.name === 'active');
+  if (!attr || attr.dataType !== 'boolean') return false;
+  return readData(record.data, 'active') === false;
 }
 
 export function cardBody(

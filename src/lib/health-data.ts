@@ -87,7 +87,9 @@ export function topicPipeline(
 
   const stages: PipelineStage[] = columns
     .filter((c) => c.id !== UNSET_COLUMN.id || grouped[c.id].length > 0)
-    .map((c) => ({ label: c.label, count: grouped[c.id].length }));
+    // The stage label stays the raw choice: topicStageHref puts it straight
+    // into ?status=, so a humanized board-lane label would filter on nothing.
+    .map((c) => ({ label: c.id === UNSET_COLUMN.id ? c.label : c.id, count: grouped[c.id].length }));
 
   return { stages };
 }

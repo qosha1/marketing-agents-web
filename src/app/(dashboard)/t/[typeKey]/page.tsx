@@ -31,6 +31,7 @@ import {
   listEntities,
   listAllEntities,
   fetchScopeAccess,
+  getEntity,
   orgMembers,
   collectionClient,
   whoami,
@@ -54,6 +55,7 @@ import {
   noteActed,
   pickStatusAttr,
   pickTitleAttr,
+  recordCountLabel,
   readData,
   readmitActed,
   searchFilters,
@@ -94,6 +96,7 @@ import { createApproveWatch } from '@/lib/approve-watch';
 import { currentReturnPath, storyHref } from '@/lib/story-nav';
 import { listTitle } from '@/foundry.nav';
 import { draftStateChipOptions, draftStatusLabel } from '@/lib/draft-status';
+import { OPEN_RECORD_PARAM } from '@/lib/activity-links';
 import { primeEntity } from '@/lib/entity-cache';
 import { canEditRecord } from '@/lib/track-changes';
 import {
@@ -143,6 +146,29 @@ export default function TypeRecordsPage() {
   const [page, setPage] = useState(1);
   const [addOpen, setAddOpen] = useState(false);
   const [selected, setSelected] = useState<EntityRecord | null>(null);
+  // ?open=<id> lands on one record: its drawer opens over the table, and the
+  // param is dropped so closing the drawer leaves a plain table URL
+  // (bd startsim-m7fdm.36 — Activity's links to a scope or a source).
+  const openId = searchParams.get(OPEN_RECORD_PARAM);
+  useEffect(() => {
+    if (!openId) return;
+    let live = true;
+    getEntity(openId)
+      .then((rec) => {
+        if (live && rec) setSelected(rec);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!live) return;
+        const rest = new URLSearchParams(searchParams.toString());
+        rest.delete(OPEN_RECORD_PARAM);
+        const qs = rest.toString();
+        router.replace(qs ? `${pathname}?${qs}` : pathname);
+      });
+    return () => {
+      live = false;
+    };
+  }, [openId, searchParams, router, pathname]);
   // Rows this session has acted on, and where they sat when it happened. The
   // reviewer's own click must never move the row out from under them
   // (startsim-azyag); the logic lives in lib/board.ts.
@@ -643,13 +669,16 @@ export default function TypeRecordsPage() {
       // layout at the price of a version number that means something different
       // per table. The defaults are what a reviewer sees either way.
       //
+      // v8 was: an attribute named `name` (scope, client) and any longtext
+      // attribute stop being default columns (bd startsim-m7fdm.40,
+      // startsim-dshrd).
       // v6 was: the News Item table stops opening on Url / Title / Snippet —
       // three wide columns in its default six, one of them a duplicate of the
       // Name column — and does not backfill their slots (bd startsim-8hgmq.1).
       // v5 was: Created moves up next to the title, ai_rank / scope_path /
       // team_verdict stop being default columns (bd startsim-b008b), and the
       // draft table gains "Created by" (bd startsim-4gw21).
-      persistKey: `records-${typeKey}-v7`,
+      persistKey: `records-${typeKey}-v8`,
     };
   }, [type?.attributes, typeKey, isContent, isNews, isDraft, stateChipAttr]);
 
@@ -858,7 +887,7 @@ export default function TypeRecordsPage() {
               // Not "0 total". A zero standing beside the explanation of why it
               // is a zero is the same unexplained number the explanation is
               // there to retire.
-              `${ABSENCE_DASH} total`
+              recordCountLabel(ABSENCE_DASH)
             ) : rejectedRecords.length > 0 ? (
               <>
                 {displayCount} shown{' · '}
@@ -888,7 +917,7 @@ export default function TypeRecordsPage() {
                 </button>
               </>
             ) : (
-              `${displayCount} total`
+              recordCountLabel(displayCount)
             )}
           </span>
           {hasStatusBoard ? (
@@ -1005,7 +1034,11 @@ export default function TypeRecordsPage() {
               // box on a declared attribute left /t/draft — the surface startsim-f4lac
               // names — with no search at all.
               enabled: true,
-              placeholder: `Search ${type.label.toLowerCase()} titles…`,
+              // Names the field actually searched: a type with no title
+              // attribute is searched by its name (bd startsim-ieq8p).
+              placeholder: titleAttr
+                ? `Search ${type.label.toLowerCase()} titles…`
+                : 'Search by name…',
               value: search,
               onChange: (v) => {
                 setSearch(v);

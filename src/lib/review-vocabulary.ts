@@ -99,7 +99,15 @@ export const TOPIC_REVIEW_CONFIG: ReviewConfig = {
  * declares no `team_verdict`, and only `acceptable` news is fed to the n8n
  * topic strategist.
  */
+export const NEWS_DECISION_LABELS: Record<string, string> = {
+  // "Accept", not "Approve": it fills the Acceptable lane, and "Approve" already
+  // means approving a topic and an approved source (bd startsim-i9j2g).
+  approve: 'Accept article',
+  reject: 'Reject article',
+};
+
 export const NEWS_REVIEW_CONFIG: ReviewConfig = {
+  decisionLabels: NEWS_DECISION_LABELS,
   approveStatus: 'acceptable',
   rejectStatus: 'rejected',
   verdicts: [],

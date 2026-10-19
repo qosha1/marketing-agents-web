@@ -34,7 +34,7 @@ import { draftStatusLabel } from '@/lib/draft-status';
 import { RecordHistorySection } from './record-history-section';
 import { getRegisteredToken } from '@/infrastructure/auth';
 import { formatBearer } from '@/lib/bearer';
-import { readData, toCamelKey } from '@/lib/board';
+import { humanizeChoice, readData, toCamelKey } from '@/lib/board';
 import { CONTENT_TYPE_KEY } from '@/lib/content';
 import { relayedTopicVersion } from '@/lib/dispatch-stamp';
 import { draftHref } from '@/lib/story-nav';
@@ -223,8 +223,15 @@ function initialValues(type: EntityTypeDef, record: EntityRecord): Record<string
   return v;
 }
 
-function readFields(type: EntityTypeDef, record: EntityRecord): RecordField[] {
-  return type.attributes.map((attr) => {
+export function readFields(type: EntityTypeDef, record: EntityRecord): RecordField[] {
+  // A declared `name` attribute that only repeats the record's own name (the
+  // header above already says it) is not shown twice (bd startsim-0hivf). One
+  // that DIFFERS is real information and stays.
+  const ownName = String(record.name ?? '').trim();
+  const attributes = type.attributes.filter(
+    (attr) => !(attr.name === 'name' && String(readData(record.data, 'name') ?? '').trim() === ownName),
+  );
+  return attributes.map((attr) => {
     const raw = readData(record.data, attr.name);
     const kind: RecordField['kind'] =
       attr.dataType === 'longtext' ? 'longtext' : attr.dataType === 'json' ? 'json' : 'text';
@@ -232,6 +239,7 @@ function readFields(type: EntityTypeDef, record: EntityRecord): RecordField[] {
     if (raw == null) value = '';
     else if (attr.dataType === 'boolean') value = raw ? 'Yes' : 'No';
     else if (attr.dataType === 'json') value = typeof raw === 'string' ? raw : JSON.stringify(raw, null, 2);
+    else if (attr.dataType === 'enum') value = humanizeChoice(String(raw));
     else value = String(raw);
     return { label: attr.name.replace(/_/g, ' '), value, kind };
   });
@@ -530,7 +538,11 @@ function DrawerInner({
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <GoodExampleToggle record={record} />
+            {/* Only a topic is read as a good example — the Topic Strategist
+                fetches every good_example tag as a topic to emulate, so a
+                starred scope or source would be fed to it as one
+                (bd startsim-wn2fp). */}
+            {type.key === CONTENT_TYPE_KEY ? <GoodExampleToggle record={record} /> : null}
             {can(record, 'canEdit', true) ? (
               <button
                 onClick={() => setMode((m) => (m === 'read' ? 'edit' : 'read'))}
@@ -556,9 +568,6 @@ function DrawerInner({
             {/* Who changed this record (bd startsim-jkkn7.16) — the board and every
                 non-topic table edit through this drawer. */}
             <RecordHistorySection record={record} className="mt-4" />
-            {record.externalId ? (
-              <p className="pt-4 text-xs text-neutral-400">external_id: {record.externalId}</p>
-            ) : null}
           </div>
         ) : (
           <div className="flex-1 overflow-y-auto px-4 py-4">

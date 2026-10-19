@@ -84,22 +84,43 @@ export function pickStatusAttr(type: EntityTypeDef | undefined | null): Attribut
  * lane (so a board still renders for a type with no status attr).
  */
 export function boardColumns(statusAttr: AttributeDef | null): BoardColumn[] {
-  return [...choicesOf(statusAttr).map((c) => ({ id: c, label: c })), UNSET_COLUMN];
+  return [...choicesOf(statusAttr).map((c) => ({ id: c, label: humanizeChoice(c) })), UNSET_COLUMN];
 }
 
 /**
- * The primary app route for a type: a status board when it has a status enum
- * (the natural "workflow" view), else its records table. Drives both the nav and
- * the home so a content type opens as a board, a config type as a table.
+ * A stored enum value as a reader sees it: underscores become spaces and the
+ * first letter is capitalised, so `preview_only` reads "Preview only" and
+ * `client` reads "Client". The ONE spelling every surface uses for a choice —
+ * board lane, table cell and drawer row — so the same value never looks like
+ * two (bd startsim-kwv5q, startsim-8bvze, startsim-unj2l). Display only: the
+ * stored value and every filter keep the raw choice.
+ */
+export function humanizeChoice(value: string): string {
+  const spaced = String(value).replace(/_+/g, ' ').trim();
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
+/**
+ * The primary app route for a type: a status board when it declares a `status`
+ * enum (the natural "workflow" view), else its records table. Drives both the
+ * nav and the home so a content type opens as a board, a config type as a table.
  */
 export function typeRoute(type: EntityTypeDef): string {
   const key = encodeURIComponent(type.key);
-  return pickStatusAttr(type) ? `/board/${key}` : `/t/${key}`;
+  return isBoardType(type) ? `/board/${key}` : `/t/${key}`;
 }
 
-/** True when a type should render board-first (has a status enum). */
+/**
+ * True when a type should render board-first: it declares an enum NAMED
+ * `status`. Any other enum is a category, not a workflow — scope's `kind` and
+ * source's `source_type` laned an allow-list like a pipeline, and a stray drag
+ * silently rewrote what a client or an outlet was (bd startsim-4z1of,
+ * startsim-ylws4). Such a type opens as its table; its board is still one
+ * click away, because {@link pickStatusAttr} still lanes on the first enum.
+ */
 export function isBoardType(type: EntityTypeDef): boolean {
-  return pickStatusAttr(type) !== null;
+  const status = pickStatusAttr(type);
+  return status !== null && status.name === 'status';
 }
 
 /**
@@ -421,6 +442,28 @@ export const RECENCY_WINDOWS: { days: number | null; label: string }[] = [
   { days: 90, label: '90 days' },
   { days: null, label: 'All' },
 ];
+
+/**
+ * The count line for a records view: "12 records", "1 record", "40 of 1,135
+ * records", and — when a recency window is narrowing the set — "0 records in
+ * the last 14 days". The board and the table say it in the same words (bd
+ * startsim-mxz4o, startsim-qf65a, startsim-1hc1k), and a windowed zero names
+ * its window, so a quiet fortnight does not read as an empty type and the
+ * jump to the table's unwindowed count is explained before it happens (bd
+ * startsim-hawo9, startsim-0ziq8).
+ */
+export function recordCountLabel(
+  shown: number | string,
+  opts: { matching?: number | null; windowDays?: number | null } = {},
+): string {
+  const n = typeof shown === 'number' ? shown : null;
+  const total = opts.matching != null && opts.matching !== n ? opts.matching : null;
+  const word = (total ?? n) === 1 ? 'record' : 'records';
+  const head = typeof shown === 'number' ? shown.toLocaleString() : shown;
+  const of = total != null ? ` of ${total.toLocaleString()}` : '';
+  const windowed = opts.windowDays ? ` in the last ${opts.windowDays} days` : '';
+  return `${head}${of} ${word}${windowed}`;
+}
 
 /**
  * The window a board opens in WHEN IT OPENS ON ONE. 14 days, measured: it is the

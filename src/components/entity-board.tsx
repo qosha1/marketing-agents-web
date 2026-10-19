@@ -57,7 +57,7 @@ import {
   type AttrFilter,
   type RollupCounts,
 } from '@/lib/board';
-import { ASSIGNEE_NAME_ATTR, cardBody } from '@/lib/board-card';
+import { ASSIGNEE_NAME_ATTR, cardBody, isInactive } from '@/lib/board-card';
 import { nearestScrollParent, type LaneState } from '@/lib/lanes';
 import { initialsOf } from '@/lib/roster';
 import {
@@ -310,7 +310,7 @@ export function EntityBoard({
         const loaded = isUnset ? 0 : (lane?.records.length ?? 0);
         return (
           <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
-            <span className="truncate text-sm font-medium capitalize">
+            <span className="truncate text-sm font-medium">
               {isUnset ? 'Unset' : col.label}
             </span>
             <span
@@ -365,9 +365,14 @@ export function EntityBoard({
         // the pure rule for what is not (bd startsim-8hgmq.5). Selection only —
         // it writes nothing, so a lane move is untouched by it.
         const body = cardBody(type, record, { statusName, pinned });
+        const inactive = isInactive(type, record);
         return (
           <>
-            <div className="m-2 cursor-grab rounded-md border bg-white p-3 shadow-sm active:cursor-grabbing">
+            <div
+              className={`m-2 cursor-grab rounded-md border bg-white p-3 shadow-sm active:cursor-grabbing ${inactive ? 'opacity-60' : ''}`}
+              title={inactive ? 'Inactive' : undefined}
+              data-inactive={inactive ? 'true' : undefined}
+            >
               <button
                 type="button"
                 className="block w-full text-left text-sm font-medium leading-snug hover:underline"

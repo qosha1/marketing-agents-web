@@ -16,6 +16,17 @@ export function actorEditsHref(actorSub: string): string {
   return `${ACTIVITY_PATH}?${new URLSearchParams({ actor: actorSub })}`;
 }
 
+/**
+ * The query param that opens one record's drawer on its table, so a link can
+ * land ON a record of a type that has no page of its own (scope, source,
+ * client, news item) instead of on the whole table (bd startsim-m7fdm.36).
+ */
+export const OPEN_RECORD_PARAM = 'open';
+
+export function tableRecordHref(typeKey: string, id: string | number): string {
+  return `/t/${encodeURIComponent(typeKey)}?${new URLSearchParams({ [OPEN_RECORD_PARAM]: String(id) })}`;
+}
+
 /** Soft navigation for links rendered inside @startsimpli/ui components. */
 export function renderNextLink({
   href,

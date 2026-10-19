@@ -2,6 +2,7 @@ import { createElement, type ReactNode } from 'react';
 import type { ColumnConfig } from '@startsimpli/ui';
 import type { AttributeDef, EntityRecord } from '@/lib/foundry-api';
 import { initialsOf } from '@/lib/roster';
+import { humanizeChoice } from '@/lib/board';
 
 /** Attribute-name convention for the assignee chip (startsim-71z6) — any type
  *  that declares this attr gets the compact initials cell, not just topic/draft. */
@@ -127,11 +128,15 @@ const WIDE_FIELDS: readonly string[] = [
  * The content spine reaches the same end differently: it FOLDS title/subtitle/
  * angle into a stacked Title cell via `hide`, so on topic there is no `title`
  * column to drop. This list is for the types that do not fold.
+ *
+ * `name` is the same story on scope and client: both declare a `name`
+ * attribute that mirrors `record.name`, so their tables opened with two
+ * columns both headed "Name" (bd startsim-m7fdm.40).
  */
 /** The data attribute that copies the record name (bd startsim-pmwfj). */
 export const TITLE_ATTR = 'title';
 
-const NAME_DUPLICATE_ATTRS: readonly string[] = [TITLE_ATTR];
+const NAME_DUPLICATE_ATTRS: readonly string[] = [TITLE_ATTR, 'name'];
 
 /** Does this type declare the name-copy `title`? Forms then show Name alone and
  *  write it to both, so the two never disagree. */
@@ -256,9 +261,14 @@ export function defaultVisibleColumns(
     ...(opts.sparse ?? []),
     ...(opts.shownAsFilter ?? []),
   ]);
+  // Paragraph fields go by DATA TYPE, not only by the WIDE_FIELDS name list: a
+  // longtext cell is a clamped 90-character snippet nobody can scan, and four of
+  // them (scope's brand_voice / priority_framework / guardrails / services)
+  // pushed Active off the screen (bd startsim-dshrd).
+  const longText = new Set(attributes.filter((a) => a.dataType === 'longtext').map((a) => a.name));
   const visibleAttrs = [...preferred, ...rest]
     .slice(0, DEFAULT_ATTR_CAP)
-    .filter((n) => !droppedAfterCap.has(n));
+    .filter((n) => !droppedAfterCap.has(n) && !longText.has(n));
   return [
     'name',
     'createdAt',
@@ -267,6 +277,9 @@ export function defaultVisibleColumns(
     ...(opts.withActions ? ['__actions'] : []),
   ];
 }
+
+/** Ids the leading Name and Created columns already own. */
+const FIXED_COLUMN_IDS = new Set(['name', 'createdAt']);
 
 export interface RecordColumnsOptions {
   /**
@@ -327,7 +340,11 @@ export function buildRecordColumns(
 ): ColumnConfig<EntityRecord>[] {
   const hidden = new Set(opts.hide ?? []);
   const attrColumns: ColumnConfig<EntityRecord>[] = attributes
-    .filter((attr) => !hidden.has(attr.name))
+    // An attribute literally called `name` (scope, client) would share the
+    // fixed Name column's id: both rendered, both pinned by `alwaysVisible`, and
+    // React warned on the duplicate key (bd startsim-m7fdm.40). The record name
+    // already fills that column, so the attribute gets none.
+    .filter((attr) => !hidden.has(attr.name) && !FIXED_COLUMN_IDS.has(attr.name))
     .map((attr) => ({
     id: attr.name,
     header: humanizeHeader(attr.name),
@@ -440,6 +457,7 @@ function clamp(s: string): string {
 function formatCell(value: unknown, attr: AttributeDef): string {
   if (value == null || value === '') return '—';
   if (attr.dataType === 'boolean') return value ? 'Yes' : 'No';
+  if (attr.dataType === 'enum' && typeof value === 'string') return humanizeChoice(value);
   if (attr.dataType === 'date') {
     const d = new Date(String(value));
     return Number.isNaN(d.getTime()) ? String(value) : d.toLocaleDateString();

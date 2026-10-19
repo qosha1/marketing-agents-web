@@ -26,10 +26,12 @@ import {
   type RevisionFeedFilters,
 } from '@startsimpli/ui/history';
 
-import { listTypes } from '@/lib/foundry-api';
+import { listTypes, orgMembers } from '@/lib/foundry-api';
 import { revisionFeedClient } from '@/lib/revisions';
-import { renderNextLink } from '@/lib/activity-links';
+import { renderNextLink, tableRecordHref } from '@/lib/activity-links';
+import { memberEmail, memberSub, normalizeMembers } from '@/lib/roster';
 import { storyHref } from '@/lib/story-nav';
+import { humanizeHeader } from '@/components/record-columns';
 
 const TOPIC_TYPE = 'topic';
 const DRAFT_TYPE = 'draft';
@@ -54,6 +56,29 @@ export default function ActivityPage() {
     [types],
   );
 
+  // Field rows read as the record forms and table headers do — "Kind", "Scope
+  // path" — not as storage keys (bd startsim-9jpub).
+  const fieldLabel = useCallback((field: string) => humanizeHeader(field), []);
+
+  // Everyone on the team can be picked from the first load, not only people
+  // whose edits happen to be on the loaded page (bd startsim-tfr9a). The roster
+  // needs an admin bearer; for anyone else it is refused and the picker falls
+  // back to the people seen in the feed, as before.
+  const membersQuery = useQuery({
+    queryKey: ['org-members'],
+    queryFn: () => orgMembers(),
+    retry: false,
+  });
+  const actorOptions = useMemo(
+    () =>
+      membersQuery.data
+        ? normalizeMembers(membersQuery.data)
+            .map((m) => ({ value: memberSub(m), label: memberEmail(m) || memberSub(m) }))
+            .filter((o) => o.value)
+        : [],
+    [membersQuery.data],
+  );
+
   const here = useMemo(() => {
     const qs = new URLSearchParams(revisionFeedParams(filters) as Record<string, string>).toString();
     return qs ? `${pathname}?${qs}` : pathname;
@@ -74,7 +99,9 @@ export default function ActivityPage() {
       if (!entity?.id) return undefined;
       if (entity.type === TOPIC_TYPE) return storyHref(entity.id, here);
       if (entity.type === DRAFT_TYPE) return `/draft/${encodeURIComponent(String(entity.id))}`;
-      return entity.type ? `/t/${encodeURIComponent(entity.type)}` : undefined;
+      // Every other type opens ON the record: its table with that record's
+      // drawer open, not the whole table (bd startsim-m7fdm.36).
+      return entity.type ? tableRecordHref(entity.type, entity.id) : undefined;
     },
     [here],
   );
@@ -87,10 +114,15 @@ export default function ActivityPage() {
         onFiltersChange={onFiltersChange}
         typeOptions={typeOptions}
         typeLabel={typeLabel}
+        fieldLabel={fieldLabel}
+        actorOptions={actorOptions}
         recordHref={recordHref}
         renderLink={renderNextLink}
         queryKey={['revision-feed']}
         title="Activity"
+        // The filters say what the page does; a paragraph restating them is
+        // noise (bd startsim-3j1p8).
+        description={null}
       />
     </div>
   );
