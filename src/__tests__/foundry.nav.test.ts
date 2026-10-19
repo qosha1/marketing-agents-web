@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildNav } from '@/foundry.nav';
+import { buildNav, listTitle } from '@/foundry.nav';
 import type { AttributeDef, EntityTypeDef } from '@/lib/foundry-api';
 
 const statusAttr: AttributeDef = {
@@ -117,5 +117,15 @@ describe('buildNav', () => {
     expect(items3[0]).toMatchObject({ href: '/', label: 'Dashboard' });
     // With no schema there are no declared kinds — Topics + Drafts still render.
     expect(group(items3, 'Content').items.map((i) => i.label)).toEqual(['Topics', 'Drafts']);
+  });
+});
+
+describe('listTitle — a records table is titled what its nav item says (startsim-g7x59)', () => {
+  it('names Topics and Drafts in the plural, as the sidebar does', () => {
+    expect(listTitle({ key: 'topic', label: 'Topic' })).toBe('Topics');
+    expect(listTitle({ key: 'draft', label: 'Draft' })).toBe('Drafts');
+  });
+  it('leaves every other type on its own label, which is also its nav label', () => {
+    expect(listTitle({ key: 'source', label: 'Approved Source' })).toBe('Approved Source');
   });
 });

@@ -16,6 +16,7 @@ import {
   TOPIC_QUEUE_PARAM,
   topicPipeline,
   topicQueue,
+  topicStageHref,
   topicQueueChips,
 } from '../health-data';
 import type { AttributeDef, EntityRecord, EntityTypeDef } from '@/lib/foundry-api';
@@ -134,6 +135,22 @@ describe('topicQueue', () => {
     expect(row.meta).toContain('good 11');
     expect(row.meta).toContain('bad 8');
     expect(row.meta).toContain('suggested');
+  });
+
+  it('states each topic row in plain words, never a field name (bd startsim-258ey)', () => {
+    const rows = topicQueue(topicType, [
+      topic(1, { status: 'suggested' }),
+      topic(2, { status: 'suggested', team_verdict: 'good' }),
+    ]);
+    for (const row of rows) {
+      expect(row.meta).not.toMatch(/team_verdict|team_notes/);
+    }
+    expect(rows.find((r) => r.id === 'unjudged')?.meta).toBe('No verdict or notes yet');
+  });
+
+  it('a pipeline stage opens the Topics table on that state; Unset opens nothing (bd startsim-m7fdm.35)', () => {
+    expect(topicStageHref('written')).toBe('/t/topic?status=written');
+    expect(topicStageHref('Unset')).toBeNull();
   });
 
   it('never claims topics are "awaiting a verdict" when every one of them has one', () => {

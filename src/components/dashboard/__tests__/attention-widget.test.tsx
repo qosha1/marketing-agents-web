@@ -84,10 +84,12 @@ const MEMBERS: MemberRow[] = [
 let ROSTER_REFUSED = true;
 /** Flipped per test — the "nothing waiting anywhere" case. */
 let DRAFT_ROWS: EntityRecord[] = DRAFTS;
+/** Flipped per test — the brand-new tenant with nothing ingested. */
+let TOPIC_ROWS: EntityRecord[] = TOPICS;
 
 vi.mock('@/lib/foundry-api', () => ({
   listTypes: vi.fn(async () => ({ results: [TOPIC_TYPE, DRAFT_TYPE] })),
-  listAllEntities: vi.fn(async (typeKey: string) => (typeKey === 'topic' ? TOPICS : DRAFT_ROWS)),
+  listAllEntities: vi.fn(async (typeKey: string) => (typeKey === 'topic' ? TOPIC_ROWS : DRAFT_ROWS)),
   listEntities: vi.fn(async () => ({ count: 0, results: [], next: null })),
   orgMembers: vi.fn(async () => {
     if (ROSTER_REFUSED) throw new Error('Request failed with status 403');
@@ -100,6 +102,7 @@ import { AttentionWidget } from '@/components/dashboard/widgets';
 beforeEach(() => {
   ROSTER_REFUSED = true;
   DRAFT_ROWS = DRAFTS;
+  TOPIC_ROWS = TOPICS;
 });
 
 function renderWidget() {
@@ -128,11 +131,14 @@ describe('the "what needs a human" card counts drafts', () => {
     expect(await screen.findByText('Awaiting a review decision — 3 drafts')).toBeInTheDocument();
   });
 
-  it('says how long the oldest has waited, and why it is not on the Drafts tab', async () => {
+  it('says how long the oldest has waited, without the stale Drafts-tab caveat', async () => {
     renderWidget();
     await screen.findByText(/Awaiting a review decision/i);
     expect(screen.getByText(/ready for review 2/i)).toBeInTheDocument();
-    expect(screen.getByText(/last 7 days/i)).toBeInTheDocument();
+    expect(screen.getByText(/oldest has been waiting/i)).toBeInTheDocument();
+    // The link clears the 7-day window, so the row no longer explains it
+    // (bd startsim-258ey).
+    expect(screen.queryByText(/last 7 days/i)).toBeNull();
   });
 
   it('links to the drafts table with the gates that would hide them cleared', async () => {
@@ -161,6 +167,17 @@ describe('the "what needs a human" card counts drafts', () => {
     DRAFT_ROWS = [DRAFTS[4]];
     renderWidget();
     expect(await screen.findByText(/All clear — nothing is waiting on a person/i)).toBeInTheDocument();
+  });
+
+  it('a tenant with no topics and no drafts reads "No data", not a green All clear', async () => {
+    // bd startsim-zueba: nothing has ever come through, so there is no work to
+    // be clear of.
+    TOPIC_ROWS = [];
+    DRAFT_ROWS = [];
+    renderWidget();
+    expect(await screen.findByText('Nothing has come through yet.')).toBeInTheDocument();
+    expect(screen.getByText('No data')).toBeInTheDocument();
+    expect(screen.queryByText(/All clear/i)).toBeNull();
   });
 
   it('renders the queue even though the roster read was refused', async () => {

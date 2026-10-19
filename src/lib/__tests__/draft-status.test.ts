@@ -20,6 +20,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  draftStateChipOptions,
   DraftStatusNotImplementedError,
   declaredDraftStatuses,
   draftStatusLabel,
@@ -148,5 +149,25 @@ describe('membership comes from the live schema', () => {
     // i.e. a human approved it. Treating the shared word as a match would
     // silently un-approve finished work during the migration.
     expect(missingRequiredStatuses(typeDef(['ready', 'approved']))).toContain('ready_for_review');
+  });
+});
+
+describe('draftStateChipOptions (startsim-krfe4)', () => {
+  const declared = [
+    'ready_for_review', 'under_review', 'approved', 'published', 'rejected',
+    'not_for_publication', 'for_repurpose', 'drafting', 'ready', 'needs_revision', 'sent',
+  ];
+  it('offers the team states in pipeline order and drops retired values no row carries', () => {
+    expect(draftStateChipOptions(declared, ['approved', 'ready_for_review'])).toEqual([
+      'ready_for_review', 'under_review', 'approved', 'published', 'rejected',
+      'not_for_publication', 'for_repurpose',
+    ]);
+  });
+  it('keeps a retired value while a row still carries it, so that row stays filterable', () => {
+    expect(draftStateChipOptions(declared, ['ready'])).toContain('ready');
+    expect(draftStateChipOptions(declared, ['ready'])).not.toContain('sent');
+  });
+  it('never offers a team state the tenant does not declare', () => {
+    expect(draftStateChipOptions(['approved'], [])).toEqual(['approved']);
   });
 });

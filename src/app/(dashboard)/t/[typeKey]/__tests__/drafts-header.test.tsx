@@ -32,7 +32,10 @@ interface TableStubProps {
   tableId?: string;
   data?: unknown[];
   loading?: boolean;
-  pagination?: { totalCount?: number };
+  pagination?: { totalCount?: number; enabled?: boolean };
+  filters?: {
+    config?: { sections?: { filters: { id: string; options: string[]; optionLabels?: Record<string, string> }[] }[] };
+  };
 }
 
 vi.mock('@startsimpli/ui', async () => {
@@ -44,6 +47,13 @@ vi.mock('@startsimpli/ui', async () => {
         'data-rows': String(props.data?.length ?? 0),
         'data-total': String(props.pagination?.totalCount ?? ''),
         'data-loading': String(props.loading ?? false),
+        'data-paginated': String(props.pagination?.enabled ?? ''),
+        'data-state-chips': JSON.stringify(
+          (props.filters?.config?.sections ?? [])
+            .flatMap((sec) => sec.filters)
+            .filter((f) => f.id === 'status')
+            .flatMap((f) => f.options.map((o) => f.optionLabels?.[o] ?? o)),
+        ),
       }),
     Button: ({ children, onClick }: { children?: ReactNode; onClick?: () => void }) =>
       React.createElement('button', { onClick }, children),
@@ -106,9 +116,18 @@ const DRAFT_TYPE = {
       name: 'status',
       label: 'Status',
       dataType: 'enum',
-      config: { choices: ['ready_for_review', 'approved'] },
+      // `ready` is a RETIRED value the live type still declares; no row here
+      // carries it, so it must not be offered as a chip (bd startsim-krfe4).
+      config: { choices: ['approved', 'ready_for_review', 'ready'] },
     },
     { id: 22, name: 'topic_ref', label: 'Topic', dataType: 'string', config: {} },
+    {
+      id: 23,
+      name: 'content_type',
+      label: 'Content type',
+      dataType: 'enum',
+      config: { choices: ['weekly_brief', 'lead_magnet', 'general'] },
+    },
   ],
 } as unknown as EntityTypeDef;
 
@@ -247,5 +266,45 @@ describe('the hidden count under an active facet', () => {
     expect(url).toContain('since=all');
     expect(url).toContain('made=all');
     expect(url).not.toContain('status=approved');
+  });
+});
+
+describe('the Drafts page title and empty footer (wireframe review, startsim-c37d4)', () => {
+  it('is titled "Drafts", the sidebar word, not the singular type label', async () => {
+    renderPage();
+    await loadedTable();
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(/^Drafts$/);
+  });
+
+  it('keeps the "Drafts" title under a Kind filter; the Kind is a filter here, not a page', async () => {
+    SEARCH = 'content_type=weekly_brief';
+    renderPage();
+    await loadedTable();
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(/^Drafts$/);
+  });
+
+  it('drops the pagination footer when the view is empty, and keeps it when it has rows', async () => {
+    renderPage();
+    const table = await loadedTable();
+    await waitFor(() => expect(table.dataset.rows).toBe('2'));
+    expect(table.dataset.paginated).toBe('true');
+  });
+
+  it('an empty view has no pagination footer ("No items" under "No results found.")', async () => {
+    SEARCH = 'content_type=general';
+    renderPage();
+    const table = await loadedTable();
+    await waitFor(() => expect(table.dataset.rows).toBe('0'));
+    expect(table.dataset.paginated).toBe('false');
+  });
+});
+
+describe('the Drafts State chips (startsim-krfe4)', () => {
+  it('read in the team words, in pipeline order, without a retired value no row carries', async () => {
+    renderPage();
+    const table = await loadedTable();
+    await waitFor(() =>
+      expect(JSON.parse(table.dataset.stateChips ?? '[]')).toEqual(['Ready for review', 'Approved']),
+    );
   });
 });

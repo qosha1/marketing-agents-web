@@ -92,6 +92,8 @@ import { boardViewHref } from '@/lib/view-toggle';
 import { dispatchDraftForApproval } from '@/lib/approve-dispatch';
 import { createApproveWatch } from '@/lib/approve-watch';
 import { currentReturnPath, storyHref } from '@/lib/story-nav';
+import { listTitle } from '@/foundry.nav';
+import { draftStateChipOptions, draftStatusLabel } from '@/lib/draft-status';
 import { primeEntity } from '@/lib/entity-cache';
 import { canEditRecord } from '@/lib/track-changes';
 import {
@@ -666,13 +668,34 @@ export default function TypeRecordsPage() {
       });
     }
     if (stateKey) {
+      // Drafts read in the team's own words, in pipeline order, without the
+      // retired values no row carries (bd startsim-krfe4). Other types keep the
+      // declared choices as they are.
+      const declared = choicesOf(statusAttr);
+      const stateOptions =
+        isDraft && stateKey === STATUS_ATTR
+          ? draftStateChipOptions(
+              declared,
+              (allQuery.data ?? []).map((r) => String(readData(r.data, STATUS_ATTR) ?? '')),
+            )
+          : declared;
       sections.push({
         id: 'state',
         type: 'chips',
         // Named after the attribute it filters, through the same helper as that
         // attribute's column header: `status` still reads "State", and
         // `source_type` reads "Source type".
-        filters: [{ id: stateKey, label: humanizeHeader(stateKey), options: choicesOf(statusAttr) }],
+        filters: [
+          {
+            id: stateKey,
+            label: humanizeHeader(stateKey),
+            options: stateOptions,
+            optionLabels:
+              isDraft && stateKey === STATUS_ATTR
+                ? Object.fromEntries(stateOptions.map((o) => [o, draftStatusLabel(o)]))
+                : undefined,
+          },
+        ],
       });
     }
     if (sections.length === 0) return undefined;
@@ -688,7 +711,7 @@ export default function TypeRecordsPage() {
     };
     // applyFilters closes over the current searchParams/pathname, refreshed each render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasContentTypeAttr, statusAttr, stateKey, filterState]);
+  }, [hasContentTypeAttr, statusAttr, stateKey, filterState, isDraft, allQuery.data]);
 
   function handleRowClick(row: EntityRecord) {
     if (typeKey === DRAFT_TYPE_KEY) router.push(`/draft/${row.id}`);
@@ -823,7 +846,11 @@ export default function TypeRecordsPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-4">
         <h1 className="text-2xl font-bold text-gray-900">
-          {activeKind ? contentCategoryLabel(activeKind) : type.label}
+          {/* A Kind on Topics IS a sidebar destination (Weekly Briefs…), so the
+              title follows it. On Drafts it is only a filter — the Kind chip
+              already says it — and a draft list titled "Weekly Briefs" read as
+              the topics page (bd startsim-rbkvp). */}
+          {isContent && activeKind ? contentCategoryLabel(activeKind) : listTitle(type)}
         </h1>
         <div className="flex items-center gap-3">
           <span data-testid="record-count" className="text-sm text-gray-500">
@@ -1000,7 +1027,10 @@ export default function TypeRecordsPage() {
             pagination={{
               // A sorted/filtered view holds the whole (bounded) set, so it paginates
               // client-side; the default view stays server-paginated.
-              enabled: true,
+              // Off for an empty table: the body already says "No results
+              // found." and the header carries the count, so a third "No items"
+              // under them only repeated it (bd startsim-0zree).
+              enabled: displayCount > 0,
               serverSide: !needAll,
               pageSize: PAGE_SIZE,
               totalCount: displayCount,

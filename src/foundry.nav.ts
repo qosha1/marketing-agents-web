@@ -40,6 +40,22 @@ import type { EntityTypeDef } from '@/lib/foundry-api';
  */
 const DRAFT_TYPE_KEY = 'draft';
 
+/** The sidebar's own words for the two content tables. */
+const CONTENT_NAV_LABELS: Record<string, string> = {
+  [CONTENT_TYPE_KEY]: 'Topics',
+  [DRAFT_TYPE_KEY]: 'Drafts',
+};
+
+/**
+ * What a records table is titled: the label of the nav item it highlights
+ * (bd startsim-g7x59, startsim-x32vw). Topics and Drafts are named in the
+ * plural in the sidebar while the schema's type label is singular; every other
+ * type's nav item IS its type label, so it falls through unchanged.
+ */
+export function listTitle(type: Pick<EntityTypeDef, 'key' | 'label'>): string {
+  return CONTENT_NAV_LABELS[type.key] ?? type.label;
+}
+
 /**
  * Build the <GroupedNav/> `items` tree from the declared entity types.
  * `types` is the EntityTypeDef[] from the `schema-types` query (may be empty
@@ -62,13 +78,13 @@ export function buildNav(types: EntityTypeDef[]): GroupedNavEntry[] {
         // bodies. The kinds used to be reachable only as a "Kind:" filter chip
         // inside the Topics table; a weekly brief and a lead magnet are
         // different jobs, so they get their own places to stand.
-        { href: `/t/${CONTENT_TYPE_KEY}`, label: 'Topics', icon: createElement(Lightbulb) },
+        { href: `/t/${CONTENT_TYPE_KEY}`, label: CONTENT_NAV_LABELS[CONTENT_TYPE_KEY], icon: createElement(Lightbulb) },
         ...declaredContentTypes(types.find((t) => t.key === CONTENT_TYPE_KEY)).map((c) => ({
           href: contentTabHref(c.key),
           label: c.label,
           icon: createElement(Layers),
         })),
-        { href: `/t/${DRAFT_TYPE_KEY}`, label: 'Drafts', icon: createElement(FileText) },
+        { href: `/t/${DRAFT_TYPE_KEY}`, label: CONTENT_NAV_LABELS[DRAFT_TYPE_KEY], icon: createElement(FileText) },
       ],
     },
   ];
