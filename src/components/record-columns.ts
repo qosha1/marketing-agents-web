@@ -29,9 +29,12 @@ const DEFAULT_ATTR_WIDTH = 140;
 const HEADER_LABELS: Record<string, string> = {
   content_type: 'Kind',
   status: 'State',
-  judge_verdict: 'Judge',
+  // "AI judge", not "Judge" (bd startsim-qrnnx, startsim-a0735): beside State,
+  // a bare "Judge: reject" read as a person's decision.
+  judge_verdict: 'AI judge',
   story_title: 'Title',
-  candidate_index: '#',
+  // Which candidate of the writer run this draft is; "#" said nothing.
+  candidate_index: 'Candidate',
   [ASSIGNEE_NAME_ATTR]: 'Assignee',
 };
 

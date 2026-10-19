@@ -295,7 +295,7 @@ describe('the Drafts table drops columns nothing has filled in (startsim-8hgmq.1
     ]);
   });
 
-  it('renders that as the header row Name | Created | Kind | # | Judge | State | Created by', () => {
+  it('renders that as the header row Name | Created | Kind | Candidate | AI judge | State | Created by', () => {
     const visible = new Set(defaultVisibleColumns(DRAFT_ATTRS, {
       afterCreated: ['__origin'],
       sparse: DRAFT_SPARSE,
@@ -305,7 +305,7 @@ describe('the Drafts table drops columns nothing has filled in (startsim-8hgmq.1
       .map((c) => c.header);
     // __origin is appended by the page, not by buildRecordColumns, so it is not
     // in this row — the six declared ones are.
-    expect(headerRow).toEqual(['Name', 'Created', 'Kind', '#', 'Judge', 'State']);
+    expect(headerRow).toEqual(['Name', 'Created', 'Kind', 'Candidate', 'AI judge', 'State']);
   });
 
   it('drops Sent at and Assignee without backfilling', () => {

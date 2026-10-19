@@ -92,6 +92,7 @@ import { boardViewHref } from '@/lib/view-toggle';
 import { dispatchDraftForApproval } from '@/lib/approve-dispatch';
 import { createApproveWatch } from '@/lib/approve-watch';
 import { currentReturnPath, storyHref } from '@/lib/story-nav';
+import { listTitle } from '@/foundry.nav';
 import { primeEntity } from '@/lib/entity-cache';
 import { canEditRecord } from '@/lib/track-changes';
 import {
@@ -823,7 +824,11 @@ export default function TypeRecordsPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-4">
         <h1 className="text-2xl font-bold text-gray-900">
-          {activeKind ? contentCategoryLabel(activeKind) : type.label}
+          {/* A Kind on Topics IS a sidebar destination (Weekly Briefs…), so the
+              title follows it. On Drafts it is only a filter — the Kind chip
+              already says it — and a draft list titled "Weekly Briefs" read as
+              the topics page (bd startsim-rbkvp). */}
+          {isContent && activeKind ? contentCategoryLabel(activeKind) : listTitle(type)}
         </h1>
         <div className="flex items-center gap-3">
           <span data-testid="record-count" className="text-sm text-gray-500">
@@ -1000,7 +1005,10 @@ export default function TypeRecordsPage() {
             pagination={{
               // A sorted/filtered view holds the whole (bounded) set, so it paginates
               // client-side; the default view stays server-paginated.
-              enabled: true,
+              // Off for an empty table: the body already says "No results
+              // found." and the header carries the count, so a third "No items"
+              // under them only repeated it (bd startsim-0zree).
+              enabled: displayCount > 0,
               serverSide: !needAll,
               pageSize: PAGE_SIZE,
               totalCount: displayCount,

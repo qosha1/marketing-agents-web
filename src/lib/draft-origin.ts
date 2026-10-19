@@ -211,7 +211,11 @@ export function describeRecordOrigin(
       return {
         ...common,
         trigger: 'topic_approved',
-        label: 'Approved',
+        // NOT 'Approved' (bd startsim-n01hj, startsim-n0zho). That is also a
+        // draft STATUS, and in a table whose State column can read "approved"
+        // the old word made a ready_for_review draft look approved. This names
+        // what happened: the topic's approval started the writer.
+        label: 'Topic approval',
         detail: triggeredBy
           ? `${workflow}, started the moment ${triggeredBy} approved the topic.`
           : `${workflow}, started the moment the topic was approved; the record does not say by whom.`,

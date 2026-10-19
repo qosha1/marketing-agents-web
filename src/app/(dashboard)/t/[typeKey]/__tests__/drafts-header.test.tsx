@@ -32,7 +32,7 @@ interface TableStubProps {
   tableId?: string;
   data?: unknown[];
   loading?: boolean;
-  pagination?: { totalCount?: number };
+  pagination?: { totalCount?: number; enabled?: boolean };
 }
 
 vi.mock('@startsimpli/ui', async () => {
@@ -44,6 +44,7 @@ vi.mock('@startsimpli/ui', async () => {
         'data-rows': String(props.data?.length ?? 0),
         'data-total': String(props.pagination?.totalCount ?? ''),
         'data-loading': String(props.loading ?? false),
+        'data-paginated': String(props.pagination?.enabled ?? ''),
       }),
     Button: ({ children, onClick }: { children?: ReactNode; onClick?: () => void }) =>
       React.createElement('button', { onClick }, children),
@@ -109,6 +110,13 @@ const DRAFT_TYPE = {
       config: { choices: ['ready_for_review', 'approved'] },
     },
     { id: 22, name: 'topic_ref', label: 'Topic', dataType: 'string', config: {} },
+    {
+      id: 23,
+      name: 'content_type',
+      label: 'Content type',
+      dataType: 'enum',
+      config: { choices: ['weekly_brief', 'lead_magnet', 'general'] },
+    },
   ],
 } as unknown as EntityTypeDef;
 
@@ -247,5 +255,35 @@ describe('the hidden count under an active facet', () => {
     expect(url).toContain('since=all');
     expect(url).toContain('made=all');
     expect(url).not.toContain('status=approved');
+  });
+});
+
+describe('the Drafts page title and empty footer (wireframe review, startsim-c37d4)', () => {
+  it('is titled "Drafts", the sidebar word, not the singular type label', async () => {
+    renderPage();
+    await loadedTable();
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(/^Drafts$/);
+  });
+
+  it('keeps the "Drafts" title under a Kind filter; the Kind is a filter here, not a page', async () => {
+    SEARCH = 'content_type=weekly_brief';
+    renderPage();
+    await loadedTable();
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(/^Drafts$/);
+  });
+
+  it('drops the pagination footer when the view is empty, and keeps it when it has rows', async () => {
+    renderPage();
+    const table = await loadedTable();
+    await waitFor(() => expect(table.dataset.rows).toBe('2'));
+    expect(table.dataset.paginated).toBe('true');
+  });
+
+  it('an empty view has no pagination footer ("No items" under "No results found.")', async () => {
+    SEARCH = 'content_type=general';
+    renderPage();
+    const table = await loadedTable();
+    await waitFor(() => expect(table.dataset.rows).toBe('0'));
+    expect(table.dataset.paginated).toBe('false');
   });
 });

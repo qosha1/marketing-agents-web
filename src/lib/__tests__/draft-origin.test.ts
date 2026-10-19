@@ -246,7 +246,7 @@ describe('which caller started the writer', () => {
       }),
     );
     expect(origin.trigger).toBe('topic_approved');
-    expect(origin.label).toBe('Approved');
+    expect(origin.label).toBe('Topic approval');
     expect(origin.triggeredBy).toBe(REVIEWER);
     expect(origin.detail).toContain(REVIEWER);
     expect(origin.detail).toMatch(/approved the topic/i);
@@ -256,7 +256,7 @@ describe('which caller started the writer', () => {
     expect(origin.detail).not.toMatch(/pressed/i);
   });
 
-  it('keeps "Approved" and "Generated" APART, so a hand-run retry stays visible', () => {
+  it('keeps "Topic approval" and "Generated" APART, so a hand-run retry stays visible', () => {
     // Folding the two together would make the retry path invisible — and the
     // retry is the interesting row, because it means the automatic dispatch
     // failed and somebody had to chase it.
@@ -277,7 +277,7 @@ describe('which caller started the writer', () => {
 
   it('says the topic was approved without inventing who, when the caller did not say', () => {
     const origin = describeRecordOrigin(record({ data: { Origin: WRITER, Trigger: 'topic_approved' } }));
-    expect(origin.label).toBe('Approved');
+    expect(origin.label).toBe('Topic approval');
     expect(origin.triggeredBy).toBeUndefined();
     expect(origin.detail).toMatch(/does not say by whom/i);
   });
