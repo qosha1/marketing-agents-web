@@ -669,13 +669,16 @@ export default function TypeRecordsPage() {
       // layout at the price of a version number that means something different
       // per table. The defaults are what a reviewer sees either way.
       //
+      // v8 was: an attribute named `name` (scope, client) and any longtext
+      // attribute stop being default columns (bd startsim-m7fdm.40,
+      // startsim-dshrd).
       // v6 was: the News Item table stops opening on Url / Title / Snippet —
       // three wide columns in its default six, one of them a duplicate of the
       // Name column — and does not backfill their slots (bd startsim-8hgmq.1).
       // v5 was: Created moves up next to the title, ai_rank / scope_path /
       // team_verdict stop being default columns (bd startsim-b008b), and the
       // draft table gains "Created by" (bd startsim-4gw21).
-      persistKey: `records-${typeKey}-v7`,
+      persistKey: `records-${typeKey}-v8`,
     };
   }, [type?.attributes, typeKey, isContent, isNews, isDraft, stateChipAttr]);
 

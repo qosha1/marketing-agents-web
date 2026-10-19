@@ -109,3 +109,10 @@ describe('news curation wording', () => {
     expect(NEWS_REVIEW_CONFIG.decisionLabels).toMatchObject({ approve: 'Accept article', reject: 'Reject article' });
   });
 });
+
+describe('the Name column', () => {
+  it('is never doubled by an attribute called name', () => {
+    const ids = buildRecordColumns(SCOPE_ATTRS).map((c) => c.id);
+    expect(ids.filter((id) => id === 'name')).toHaveLength(1);
+  });
+});

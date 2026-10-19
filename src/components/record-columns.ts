@@ -278,6 +278,9 @@ export function defaultVisibleColumns(
   ];
 }
 
+/** Ids the leading Name and Created columns already own. */
+const FIXED_COLUMN_IDS = new Set(['name', 'createdAt']);
+
 export interface RecordColumnsOptions {
   /**
    * Render the primary column as a stacked Title + subtitle instead of a bare
@@ -337,7 +340,11 @@ export function buildRecordColumns(
 ): ColumnConfig<EntityRecord>[] {
   const hidden = new Set(opts.hide ?? []);
   const attrColumns: ColumnConfig<EntityRecord>[] = attributes
-    .filter((attr) => !hidden.has(attr.name))
+    // An attribute literally called `name` (scope, client) would share the
+    // fixed Name column's id: both rendered, both pinned by `alwaysVisible`, and
+    // React warned on the duplicate key (bd startsim-m7fdm.40). The record name
+    // already fills that column, so the attribute gets none.
+    .filter((attr) => !hidden.has(attr.name) && !FIXED_COLUMN_IDS.has(attr.name))
     .map((attr) => ({
     id: attr.name,
     header: humanizeHeader(attr.name),
