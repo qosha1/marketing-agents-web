@@ -174,8 +174,8 @@ describe('the story page', () => {
   it('does not assert absence — an empty list offers the drafts table', async () => {
     reported = { drafts: [], loading: false, generating: false, stopped: 'idle' };
     renderPage();
-    expect(await screen.findByText(/search the drafts table/i)).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /search the drafts table/i })).toHaveAttribute(
+    expect(await screen.findByText(/search drafts/i)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /search drafts/i })).toHaveAttribute(
       'href',
       '/t/draft',
     );
@@ -183,6 +183,8 @@ describe('the story page', () => {
     // reviewer who approved four seconds ago must not read it as "your approval
     // did nothing".
     expect(screen.queryByText(/nothing is linked to this topic/i)).toBeNull();
+    // Plain words: no attribute names (review bead startsim-9owoj).
+    expect(screen.queryByText(/topic_ref/)).toBeNull();
   });
 
   it('does NOT tell a reviewer to go hunt while the writer is still running', async () => {
@@ -193,20 +195,20 @@ describe('the story page', () => {
     reported = { drafts: [], loading: false, generating: true, stopped: 'idle' };
     renderPage();
     await screen.findByTestId('topic-drafts');
-    expect(screen.queryByText(/search the drafts table/i)).toBeNull();
+    expect(screen.queryByText(/search drafts/i)).toBeNull();
   });
 
   it('says it once the writer has stopped and still nothing is linked', async () => {
     reported = { drafts: [], loading: false, generating: false, stopped: 'gave_up' };
     renderPage();
-    expect(await screen.findByText(/search the drafts table/i)).toBeInTheDocument();
+    expect(await screen.findByText(/search drafts/i)).toBeInTheDocument();
   });
 
   it('says nothing about unlinked drafts while the list is still loading', async () => {
     reported = { drafts: [], loading: true, generating: false, stopped: 'idle' };
     renderPage();
     await screen.findByTestId('topic-drafts');
-    expect(screen.queryByText(/search the drafts table/i)).toBeNull();
+    expect(screen.queryByText(/search drafts/i)).toBeNull();
   });
 
   // bd startsim-jkkn7.16: this page IS the topic, and before this bead it was the

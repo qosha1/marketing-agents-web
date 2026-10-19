@@ -108,7 +108,12 @@ describe('returnTarget', () => {
   it('goes back exactly where the reviewer was, scope and all', () => {
     const t = returnTarget('/t/topic?content_type=lead_magnet&status=suggested', 'lead_magnet');
     expect(t.href).toBe('/t/topic?content_type=lead_magnet&status=suggested');
-    expect(t.label).toBe('Back to topics');
+    // Named for the page it returns to, which is headed "Evergreen" (review bead startsim-t1ckb).
+    expect(t.label).toBe('Back to Evergreen');
+  });
+
+  it('says topics when the table it returns to is not narrowed to a kind', () => {
+    expect(returnTarget('/t/topic?status=suggested', 'lead_magnet').label).toBe('Back to topics');
   });
 
   it('says "board" only when it is actually going to the board', () => {

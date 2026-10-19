@@ -3,6 +3,7 @@ import type { ColumnConfig } from '@startsimpli/ui';
 import type { AttributeDef, EntityRecord } from '@/lib/foundry-api';
 import { initialsOf } from '@/lib/roster';
 import { humanizeChoice } from '@/lib/board';
+import { CONTENT_TYPE_ATTR, contentCategoryLabel } from '@/lib/content';
 
 /** Attribute-name convention for the assignee chip (startsim-71z6) — any type
  *  that declares this attr gets the compact initials cell, not just topic/draft. */
@@ -456,6 +457,8 @@ function clamp(s: string): string {
 
 function formatCell(value: unknown, attr: AttributeDef): string {
   if (value == null || value === '') return '—';
+  // The kind reads as the sidebar names it ("Evergreen"), never as its stored key.
+  if (attr.name === CONTENT_TYPE_ATTR && typeof value === 'string') return contentCategoryLabel(value);
   if (attr.dataType === 'boolean') return value ? 'Yes' : 'No';
   if (attr.dataType === 'enum' && typeof value === 'string') return humanizeChoice(value);
   if (attr.dataType === 'date') {

@@ -899,7 +899,9 @@ export function TopicDrafts({
         </p>
       ) : (
         <ul className="mt-2 space-y-1.5">
-          {drafts.map((d) => {
+          {/* Candidate order (#1, #2, #3), then the unnumbered ones newest first,
+              rather than whatever order the fetch returned. */}
+          {[...drafts].sort(byCandidateThenNewest).map((d) => {
             const idx = draftCandidateIndex(d);
             return (
               <li key={d.id}>
@@ -933,3 +935,10 @@ export function TopicDrafts({
   );
 }
 
+/** Numbered candidates first, in order; then the unnumbered, newest first. */
+function byCandidateThenNewest(a: EntityRecord, b: EntityRecord): number {
+  const ia = draftCandidateIndex(a) || Infinity;
+  const ib = draftCandidateIndex(b) || Infinity;
+  if (ia !== ib) return ia - ib;
+  return String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? ''));
+}

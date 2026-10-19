@@ -47,6 +47,8 @@ import {
   boardAttrFilters,
   boardColumns,
   BLANK,
+  assigneeChipText,
+  draftRollupLabel,
   pickRecencyAttr,
   pickRecencyWindow,
   pickStatusAttr,
@@ -306,9 +308,7 @@ export default function BoardPage() {
     return rollupByParent(drafts, (d) => topicIdForDraft(d, relationships, allTopics), 'status');
   }, [isTopicBoard, draftsQuery.data, relationshipsQuery.data, allTopicsQuery.data]);
   function rollupLabel(counts: RollupCounts): string | null {
-    if (counts.total === 0) return null;
-    const done = counts.byStatus[DRAFT_DONE_STATUS] ?? 0;
-    return `${done}/${counts.total} ${DRAFT_DONE_STATUS}`;
+    return draftRollupLabel(counts, DRAFT_DONE_STATUS);
   }
 
   const loading = typesQuery.isLoading || !lanesSettled;
@@ -392,12 +392,13 @@ export default function BoardPage() {
             </span>
             {filters.map((f) => (
               <span key={f.name} className="rounded-full bg-primary-50 px-2 py-0.5 text-xs text-primary-700">
-                {f.name.replace(/_/g, ' ')}: {f.value}
+                {f.name.replace(/_/g, ' ')}:{' '}
+                {f.name === CONTENT_TYPE_ATTR ? contentCategoryLabel(f.value) : f.value.replace(/_/g, ' ')}
               </span>
             ))}
             {assigneeFilter ? (
               <span className="rounded-full bg-primary-50 px-2 py-0.5 text-xs text-primary-700">
-                assignee: {assigneeFilter.value === BLANK ? 'unassigned' : assigneeFilter.value}
+                {assigneeChipText(assigneeFilter.value, mySub)}
               </span>
             ) : null}
             {notShown > 0 ? (

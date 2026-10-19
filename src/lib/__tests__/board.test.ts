@@ -251,3 +251,18 @@ describe('rollupByParent (startsim-4w76 / startsim-n7s8)', () => {
     expect(rollup.get(100)).toEqual({ total: 2, byStatus: { '': 2 } });
   });
 });
+
+describe('board header and card chip text (review beads startsim-7ry4s, startsim-wym8o)', () => {
+  it('names the reader as me, not by their sub', async () => {
+    const { assigneeChipText, BLANK } = await import('@/lib/board');
+    expect(assigneeChipText('auth0|abc', 'auth0|abc')).toBe('assignee: me');
+    expect(assigneeChipText(BLANK, 'auth0|abc')).toBe('assignee: unassigned');
+    expect(assigneeChipText('Malin', 'auth0|abc')).toBe('assignee: Malin');
+  });
+
+  it('says the rollup counts drafts', async () => {
+    const { draftRollupLabel } = await import('@/lib/board');
+    expect(draftRollupLabel({ total: 1, byStatus: {} }, 'approved')).toBe('0/1 drafts approved');
+    expect(draftRollupLabel({ total: 0, byStatus: {} }, 'approved')).toBeNull();
+  });
+});

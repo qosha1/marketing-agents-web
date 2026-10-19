@@ -75,7 +75,7 @@ import { readData } from '@/lib/board';
 import { CONTENT_TYPE_ATTR, CONTENT_TYPE_KEY } from '@/lib/content';
 import { getEntity, listTypes } from '@/lib/foundry-api';
 import { draftHref, FROM_PARAM, returnTarget, safeReturnPath } from '@/lib/story-nav';
-import { DRAFT_TYPE, TOPIC_REF_ATTR } from '@/lib/topic-drafts';
+import { DRAFT_TYPE } from '@/lib/topic-drafts';
 
 export default function StoryPage() {
   const params = useParams<{ topicId: string }>();
@@ -162,13 +162,10 @@ export default function StoryPage() {
           // "your approval did nothing", which is what a flat "nothing is
           // linked to this topic" said when it led the paragraph.
           <p className="mt-3 border-t border-border pt-3 text-xs text-neutral-500">
-            One thing this list cannot see: a draft written before drafts carried
-            a <code>{TOPIC_REF_ATTR}</code> has no link to a topic, so it would
-            not appear here even though it exists. If this topic is an old one,{' '}
+            Older drafts may not be linked to their topic.{' '}
             <Link href={`/t/${DRAFT_TYPE}`} className="underline hover:text-neutral-800">
-              search the drafts table
-            </Link>{' '}
-            before concluding nothing was ever written for it.
+              Search drafts
+            </Link>
           </p>
         ) : null}
       </div>

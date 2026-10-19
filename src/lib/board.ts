@@ -370,6 +370,17 @@ export function relatedByEdge(
   return records.filter((r) => matchIds.has(r.id));
 }
 
+/**
+ * The header chip for an applied assignee facet. The facet holds the user's
+ * sub, which means nothing to read, so the reader's own sub reads "me"
+ * (review bead startsim-7ry4s).
+ */
+export function assigneeChipText(value: string, mySub: string | null | undefined): string {
+  if (value === BLANK) return 'assignee: unassigned';
+  if (mySub && value === mySub) return 'assignee: me';
+  return `assignee: ${value}`;
+}
+
 // ---- generic child-status rollup (startsim-4w76 / startsim-n7s8) ----
 
 export interface RollupCounts {
@@ -860,4 +871,15 @@ export const MAX_IN_VALUES = 200;
 export function inFilters(attrName: string, values: string[]): Record<string, string> | null {
   if (values.length === 0 || values.length > MAX_IN_VALUES) return null;
   return { [`attr.${attrName}__in`]: values.join(',') };
+}
+
+/**
+ * A topic card's draft-progress chip, e.g. "0/1 drafts approved". It says
+ * DRAFTS because it sits beside the topic's own Approve, and "0/1 approved"
+ * there read as a claim about the topic (review bead startsim-wym8o).
+ */
+export function draftRollupLabel(counts: RollupCounts, doneStatus: string): string | null {
+  if (counts.total === 0) return null;
+  const done = counts.byStatus[doneStatus] ?? 0;
+  return `${done}/${counts.total} drafts ${doneStatus}`;
 }
