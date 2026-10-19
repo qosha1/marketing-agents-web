@@ -33,6 +33,7 @@ import {
   type RecordHistoryPanelProps,
   type RevisionClient,
 } from '@startsimpli/ui/history';
+import { attrLabel, isSystemAttr } from '@/components/record-columns';
 
 import type { EntityRecord } from '@/lib/foundry-api';
 import { CollapsiblePanel, FLATTEN_CARD } from './CollapsiblePanel';
@@ -113,6 +114,8 @@ export function HistoryRail(props: HistoryRailProps) {
             client={revisions}
             queryKey={['entity', currentId, 'revisions']}
             recordLabel="this draft"
+            fieldLabel={attrLabel}
+            hideField={isSystemAttr}
             {...(historyField ? { field: historyField } : {})}
             {...(onHistoryFieldChange
               ? {

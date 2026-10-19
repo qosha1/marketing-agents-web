@@ -36,7 +36,27 @@ const HEADER_LABELS: Record<string, string> = {
   // Which candidate of the writer run this draft is; "#" said nothing.
   candidate_index: 'Candidate',
   [ASSIGNEE_NAME_ATTR]: 'Assignee',
+  // Read as a duplicate of Assignee, a mis-cased acronym and a URL fragment
+  // (bd startsim-xjf0x).
+  ai_rank: 'AI rank',
+  assignee_sub: 'Assignee ID',
+  scope_path: 'Scope',
 };
+
+/**
+ * A field's name in a sentence or a form label — history rows, the stale-save
+ * dialog, the create and edit forms. Same vocabulary as the column headers.
+ */
+export const attrLabel = humanizeHeader;
+
+/**
+ * System bookkeeping keys (`_run_id`, `_origin`, `_copied_from`): written by
+ * the pipeline, never declared, and nothing a reader can act on. History and
+ * forms leave them out (bd startsim-mpjbi).
+ */
+export function isSystemAttr(name: string): boolean {
+  return name.startsWith('_');
+}
 
 /** A small rounded initials chip — the assignee column's cell, matching the
  *  board card's compact treatment (see entity-board.tsx). */
@@ -108,7 +128,16 @@ const WIDE_FIELDS: readonly string[] = [
  * angle into a stacked Title cell via `hide`, so on topic there is no `title`
  * column to drop. This list is for the types that do not fold.
  */
-const NAME_DUPLICATE_ATTRS: readonly string[] = ['title'];
+/** The data attribute that copies the record name (bd startsim-pmwfj). */
+export const TITLE_ATTR = 'title';
+
+const NAME_DUPLICATE_ATTRS: readonly string[] = [TITLE_ATTR];
+
+/** Does this type declare the name-copy `title`? Forms then show Name alone and
+ *  write it to both, so the two never disagree. */
+export function hasTitleAttr(type: { attributes: Array<{ name: string }> }): boolean {
+  return type.attributes.some((a) => a.name === TITLE_ATTR);
+}
 
 /**
  * Attributes that are a MACHINE JOIN KEY — an opaque id whose only reader is

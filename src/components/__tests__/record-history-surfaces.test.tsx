@@ -129,7 +129,7 @@ describe('the generic record drawer (board + every non-topic table)', () => {
     expect(revisionCalls()).toHaveLength(0);
 
     fireEvent.click(toggle);
-    expect(await screen.findByText('team_verdict')).toBeInTheDocument();
+    expect(await screen.findByText('Team verdict')).toBeInTheDocument();
     expect(revisionCalls()[0]).toContain('/api/v1/entities/n-42/revisions?');
   });
 });
@@ -139,7 +139,7 @@ describe('the topic header (/story and the top of /draft)', () => {
     withQuery(<TopicContextHeader topic={record('topic-1', 3, { title: 'Qatar', status: 'ready' })} type={TOPIC_TYPE} />);
 
     fireEvent.click(screen.getByRole('button', { name: /topic history/i }));
-    expect(await screen.findByText('team_verdict')).toBeInTheDocument();
+    expect(await screen.findByText('Team verdict')).toBeInTheDocument();
     expect(revisionCalls()[0]).toContain('/api/v1/entities/topic-1/revisions?');
   });
 
@@ -151,7 +151,7 @@ describe('the topic header (/story and the top of /draft)', () => {
     });
     const view = withQuery(<TopicContextHeader topic={record('topic-1', 3, { title: 'Qatar' })} type={TOPIC_TYPE} />, qc);
     fireEvent.click(screen.getByRole('button', { name: /topic history/i }));
-    await screen.findByText('team_verdict');
+    await screen.findByText('Team verdict');
     expect(revisionCalls()).toHaveLength(1);
 
     view.rerender(
@@ -169,7 +169,7 @@ describe('the topic review drawer (/t/topic)', () => {
     withQuery(<TopicReviewExtra record={record('topic-9', 5, { status: 'suggested' })} type={TOPIC_TYPE} />);
 
     fireEvent.click(screen.getByRole('button', { name: /history/i }));
-    expect(await screen.findByText('team_verdict')).toBeInTheDocument();
+    expect(await screen.findByText('Team verdict')).toBeInTheDocument();
     expect(revisionCalls()[0]).toContain('/api/v1/entities/topic-9/revisions?');
   });
 });

@@ -116,16 +116,17 @@ describe('the rail’s History panel', () => {
     expect(list).toHaveBeenCalled();
   });
 
-  it('prints the DECLARED attribute names, never a camelised guess', async () => {
+  it('names fields from the DECLARED attribute names, in words, never a camelised guess', async () => {
     renderRail({ historyOpen: true });
 
     const panel = await waitFor(() => {
       const found = screen.getByTestId('record-history-panel');
-      expect(found.textContent).toContain('judge_verdict');
+      expect(found.textContent).toContain('AI judge');
       return found;
     });
-    expect(panel.textContent).toContain('candidate_index');
+    expect(panel.textContent).toContain('Candidate');
     expect(panel.textContent).not.toContain('judgeVerdict');
+    expect(panel.textContent).not.toContain('judge_verdict');
   });
 
   it('no longer claims write paths go unrecorded — all four record since bd startsim-jkkn7.6', async () => {

@@ -31,6 +31,7 @@ import { useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { notify } from '@startsimpli/ui';
 import { RecordHistoryPanel, versionFromRecord } from '@startsimpli/ui/history';
+import { attrLabel, isSystemAttr } from '@/components/record-columns';
 
 import { CollapsiblePanel, FLATTEN_CARD } from '@/components/draft-review/CollapsiblePanel';
 import { entityKey, revisionsKey } from '@/lib/entity-cache';
@@ -80,6 +81,8 @@ export function RecordHistorySection({
         client={client}
         queryKey={revisionsKey(recordId, version)}
         recordLabel={recordLabel}
+        fieldLabel={attrLabel}
+        hideField={isSystemAttr}
         {...(narrowed ? { field: narrowed } : {})}
         // Restoring is editing the record (bd startsim-768w.71).
         canRestore={record.permissions?.canRestore !== false}

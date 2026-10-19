@@ -107,6 +107,7 @@ import {
 } from '@/components/draft-review/TopicContextHeader';
 import { draftHref, FROM_PARAM, returnTarget, safeReturnPath } from '@/lib/story-nav';
 import { HistoryRail } from '@/components/draft-review/HistoryRail';
+import { attrLabel } from '@/components/record-columns';
 import { LanguageSwitcher } from '@/components/draft-review/LanguageSwitcher';
 import { TrackedSection } from '@/components/draft-review/TrackedSection';
 import { ContentChannels } from '@/components/draft-review/ContentChannels';
@@ -137,6 +138,7 @@ import { rememberVersion } from '@/lib/record-version';
 import { actorEditsHref, renderNextLink } from '@/lib/activity-links';
 import { revisedFrom, revisionChain } from '@/lib/review';
 import {
+  coverageReason,
   coverageSummary,
   parseSourceEntry,
   parseSources,
@@ -174,6 +176,12 @@ const STATUS_PILL_TONE: Record<string, string> = {
 };
 
 /** camelCase-aware read of a draft data value as a string. */
+/** "Oct 18" — the sent date beside the status chip; the raw value when unparseable. */
+function formatSentDate(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
 function draftStr(data: EntityRecord['data'], name: string): string {
   const v = readData(data, name);
   return v == null ? '' : String(v);
@@ -228,6 +236,7 @@ export default function DraftPage() {
   const params = useParams<{ draftId: string }>();
   const draftId = String(params.draftId);
   const qc = useQueryClient();
+  const errorSearch = useSearchParams();
 
   const draftQuery = useQuery({
     queryKey: entityKey(draftId),
@@ -261,9 +270,15 @@ export default function DraftPage() {
     return (
       <div className="space-y-3">
         <p className="text-sm text-neutral-500">Couldn’t load this draft.</p>
-        <Link href={`/board/${CONTENT_TYPE_KEY}`} className="text-sm text-neutral-600 underline">
-          Back to the board
-        </Link>
+        {/* The same place the loaded page's back link goes (bd startsim-6tkmq). */}
+        {(() => {
+          const back = returnTarget(errorSearch.get(FROM_PARAM), '');
+          return (
+            <Link href={back.href} className="text-sm text-neutral-600 underline">
+              {back.label}
+            </Link>
+          );
+        })()}
       </div>
     );
   }
@@ -917,6 +932,8 @@ function DraftEditorScreen({
             }`}
           >
             {draftStatusLabel(status)}
+            {/* Sent is not a status, it is the sent_at date (bd startsim-67qw0). */}
+            {isSent ? ` · Sent ${formatSentDate(draftStr(draft.data, 'sent_at'))}` : ''}
           </span>
         ) : null}
         {status ? attribution('status') : null}
@@ -1031,7 +1048,7 @@ function DraftEditorScreen({
             id: 'sources',
             label: 'Sources',
             badge: `${sourceItems.length}`,
-            warn: sourcesCoverage.concern,
+            warn: coverageReason(sourcesCoverage) ?? undefined,
             content: (
               <div className="space-y-3">
                 {attribution('sources')}
@@ -1050,8 +1067,12 @@ function DraftEditorScreen({
                       title={sourceGap.title}
                       description={sourceGap.description}
                       why="Which sources count as approved is decided by the tenant’s own Approved Source records. When that list is unavailable nothing is badged, rather than badged against a different list."
+                      // Retrying is a read, so every reader gets it; going to add
+                      // approved sources is an editor's errand (bd startsim-sa7vk).
                       action={
-                        sourceGap.retryable
+                        !sourceGap.retryable && !canEdit
+                          ? undefined
+                          : sourceGap.retryable
                           ? {
                               label: 'Try again',
                               onClick: () => {
@@ -1157,6 +1178,7 @@ function DraftEditorScreen({
         conflict={save.conflict}
         open={save.dialogOpen}
         recordLabel="this draft"
+        fieldLabel={attrLabel}
         busy={save.resolving}
         onDismiss={save.dismissConflict}
         // The ONLY path that adopts the version the refusal named. It re-sends

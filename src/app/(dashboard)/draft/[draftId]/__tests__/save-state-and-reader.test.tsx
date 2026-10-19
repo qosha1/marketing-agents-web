@@ -150,7 +150,7 @@ describe('a view-only reader', () => {
     search.channel = 'sources';
     renderPage();
 
-    const panel = (await screen.findByText(/Sources · evidence behind the brief/)).closest('div')!.parentElement!;
+    const panel = (await screen.findByText('Sources', { selector: 'h3' })).closest('div')!.parentElement!;
     expect(within(panel).getByText(/Gulf News/)).toBeInTheDocument();
     expect(within(panel).queryByRole('button', { name: /^verify$/i })).toBeNull();
     expect(within(panel).queryByRole('button', { name: /remove/i })).toBeNull();
@@ -163,9 +163,34 @@ describe('a view-only reader', () => {
     search.channel = 'sources';
     renderPage();
 
-    const panel = (await screen.findByText(/Sources · evidence behind the brief/)).closest('div')!.parentElement!;
+    const panel = (await screen.findByText('Sources', { selector: 'h3' })).closest('div')!.parentElement!;
     expect(within(panel).getByRole('button', { name: /^verify$/i })).toBeInTheDocument();
     expect(within(panel).getByRole('button', { name: /remove/i })).toBeInTheDocument();
     expect(within(panel).getByRole('button', { name: /add/i })).toBeInTheDocument();
+  });
+});
+
+describe('design review (bd startsim-sa7vk, startsim-67qw0)', () => {
+  it('a view-only reader is not sent to add approved sources', async () => {
+    draft = makeDraft(false);
+    search.channel = 'sources';
+    renderPage();
+    expect(await screen.findByText('No approved sources are declared')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /open approved source/i })).toBeNull();
+  });
+
+  it('an editor still gets the way to Approved Source', async () => {
+    draft = makeDraft(true);
+    search.channel = 'sources';
+    renderPage();
+    expect(await screen.findByRole('button', { name: /open approved source/i })).toBeInTheDocument();
+  });
+
+  it('a sent draft says when it went out, beside its status', async () => {
+    draft = makeDraft(true);
+    (draft.data as Record<string, unknown>).status = 'approved';
+    (draft.data as Record<string, unknown>).sent_at = '2026-10-18T12:00:00Z';
+    renderPage();
+    expect(await screen.findByText(/Approved · Sent Oct 18/)).toBeInTheDocument();
   });
 });

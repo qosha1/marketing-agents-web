@@ -21,11 +21,11 @@ import * as React from 'react';
 import { ExternalLink, Plus, ShieldCheck, ShieldQuestion, Check, Trash2, AlertTriangle } from 'lucide-react';
 
 import { cn } from '@startsimpli/ui/utils';
-import { Absence } from '@startsimpli/ui';
 
 import type { ParsedSource } from '@/lib/sources';
 import {
   ageLabel,
+  coverageReason,
   coverageSummary,
   formatSourceDate,
   hostOf,
@@ -70,7 +70,6 @@ export function SourcesTool({
   const [draftUrl, setDraftUrl] = React.useState('');
   const cov = coverageSummary(items, today);
 
-  const draftHost = hostOf(draftUrl.trim());
   const draftTier =
     approvedHosts && draftUrl.trim() ? sourceTier(draftUrl.trim(), approvedHosts) : null;
 
@@ -85,24 +84,22 @@ export function SourcesTool({
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-2">
         <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Sources · evidence behind the brief
+          Sources
         </h3>
         <span className="text-xs text-muted-foreground">
           {cov.count} source{cov.count === 1 ? '' : 's'}
         </span>
       </div>
 
-      {/* Coverage warning — thin or aging sourcing. */}
-      {cov.concern ? (
+      {/* Coverage warning — thin or aging sourcing. Not at 0: the empty line
+          below already says there are none (bd startsim-sa7vk). */}
+      {cov.concern && cov.count > 0 ? (
         <div className="flex gap-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-amber-800">
           <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" aria-hidden="true" />
           <div className="space-y-1 text-[13px] leading-relaxed">
             <p>
-              <b className="font-semibold">
-                {cov.count <= 1 ? 'One source backs the whole brief' : `${cov.count} sources`}
-                {cov.oldestDays != null ? ` — oldest is ${ageLabel(cov.oldestDays)}` : ''}.
-              </b>{' '}
-              Add a second or fresher source so the claims do not rest on a single, aging citation.
+              <b className="font-semibold">{coverageReason(cov)}.</b>{' '}
+              {cov.count === 1 ? 'Add a second source.' : 'Add a fresher source.'}
             </p>
           </div>
         </div>
@@ -137,9 +134,7 @@ export function SourcesTool({
       {canEdit ? (
         <div className="rounded-xl border border-dashed border-border bg-card p-3">
           <label htmlFor="add-source" className="mb-1.5 block text-xs font-medium text-muted-foreground">
-            {approvedHosts
-              ? 'Add a source — paste a URL; it is checked against the approved-source list'
-              : 'Add a source — paste a URL. It cannot be checked until the approved-source list loads.'}
+            Add a source
           </label>
           <div className="flex flex-wrap items-center gap-2">
             <input
@@ -155,9 +150,7 @@ export function SourcesTool({
               placeholder="https://…"
               className="min-w-0 flex-1 rounded-md border border-border bg-background px-2.5 py-1.5 text-sm text-foreground outline-none focus:border-primary focus:ring-0"
             />
-            {draftTier ? (
-              <TierBadge tier={draftTier} host={draftHost} />
-            ) : null}
+            {draftTier ? <TierBadge tier={draftTier} /> : null}
             <button
               type="button"
               onClick={submitAdd}
@@ -196,15 +189,18 @@ function SourceRow({
   return (
     <li className="rounded-xl border border-border bg-card p-3">
       <div className="flex items-start gap-3">
-        <div
-          className={cn(
-            'mt-0.5 grid h-9 w-9 flex-shrink-0 place-items-center rounded-lg text-[11px] font-bold',
-            tier === 'approved' ? 'bg-emerald-100 text-emerald-700' : 'bg-neutral-100 text-neutral-500',
-          )}
-          aria-hidden="true"
-        >
-          {tier === null ? '?' : tier === 'approved' ? 'T1' : '—'}
-        </div>
+        {/* No approved-source list, no tier: no tile (bd startsim-37a4x). */}
+        {tier !== null ? (
+          <div
+            className={cn(
+              'mt-0.5 grid h-9 w-9 flex-shrink-0 place-items-center rounded-lg text-[11px] font-bold',
+              tier === 'approved' ? 'bg-emerald-100 text-emerald-700' : 'bg-neutral-100 text-neutral-500',
+            )}
+            aria-hidden="true"
+          >
+            {tier === 'approved' ? 'T1' : '—'}
+          </div>
+        ) : null}
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
@@ -262,7 +258,7 @@ function SourceRow({
           </div>
 
           <div className="mt-2 flex flex-wrap items-center gap-2">
-            <TierBadge tier={tier} host={hostOf(source.url)} />
+            {tier !== null ? <TierBadge tier={tier} /> : null}
             {source.date ? (
               <span
                 className={cn(
@@ -290,24 +286,8 @@ function SourceRow({
   );
 }
 
-function TierBadge({ tier, host }: { tier: 'approved' | 'unverified' | null; host: string }) {
-  // No list to check against — an unknown, which is not the same statement as
-  // "unverified" (bd startsim-4ipm). The dash carries screen-reader text saying
-  // so; the page's Absence card above says what to do about it.
-  if (tier === null) {
-    return (
-      <span className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
-        <ShieldQuestion className="h-3 w-3" />
-        Tier{' '}
-        <Absence
-          tier="value"
-          title={`Tier of ${host || 'this source'}`}
-          description="Not checked — the approved-source list is unavailable."
-        />
-        {host ? ` · ${host}` : ''}
-      </span>
-    );
-  }
+/** The host is NOT repeated here: the row prints it once on its own line. */
+function TierBadge({ tier }: { tier: 'approved' | 'unverified' }) {
   if (tier === 'approved') {
     return (
       <span className="inline-flex items-center gap-1 rounded-md bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
@@ -319,7 +299,7 @@ function TierBadge({ tier, host }: { tier: 'approved' | 'unverified' | null; hos
   return (
     <span className="inline-flex items-center gap-1 rounded-md bg-neutral-100 px-2 py-0.5 text-[11px] font-medium text-neutral-500">
       <ShieldQuestion className="h-3 w-3" />
-      Unverified{host ? ` · ${host}` : ''}
+      Unverified
     </span>
   );
 }

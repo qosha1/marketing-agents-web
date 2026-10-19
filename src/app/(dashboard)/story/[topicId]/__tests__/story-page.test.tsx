@@ -234,7 +234,7 @@ describe('the story page', () => {
     global.fetch = vi.fn(async () => new Response(JSON.stringify(page), { status: 200 })) as typeof fetch;
     renderPage();
     fireEvent.click(await screen.findByRole('button', { name: /topic history/i }));
-    expect(await screen.findByText('team_verdict')).toBeInTheDocument();
+    expect(await screen.findByText('Team verdict')).toBeInTheDocument();
     const urls = vi.mocked(global.fetch).mock.calls.map(([u]) => String(u));
     expect(urls.some((u) => u.startsWith('/api/v1/entities/topic-1/revisions?'))).toBe(true);
   });

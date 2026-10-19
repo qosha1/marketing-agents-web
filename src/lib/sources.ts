@@ -192,6 +192,17 @@ export interface CoverageSummary {
 }
 
 /** Roll up the source set into a coverage summary for the warning banner. */
+/**
+ * Why the sourcing needs attention, in a few words — the Sources banner's bold
+ * line and the tab dot's tooltip. Null when it does not.
+ */
+export function coverageReason(cov: CoverageSummary): string | null {
+  if (!cov.concern) return null;
+  if (cov.count === 0) return 'No sources';
+  const age = cov.oldestDays != null ? ` — oldest is ${ageLabel(cov.oldestDays)}` : '';
+  return cov.count === 1 ? `One source backs the whole brief${age}` : `${cov.count} sources${age}`;
+}
+
 export function coverageSummary(items: ParsedSource[], today: Date): CoverageSummary {
   const ages = items.map((s) => sourceAgeDays(s.date, today)).filter((n): n is number => n != null);
   const oldestDays = ages.length ? Math.max(...ages) : null;

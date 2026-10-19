@@ -29,8 +29,9 @@ export interface Channel {
   label: string;
   /** Small count badge (e.g. "462w", "1"). */
   badge?: React.ReactNode;
-  /** Show an amber "needs attention" dot on the tab. */
-  warn?: boolean;
+  /** Show an amber "needs attention" dot on the tab. A string is the reason,
+   *  shown on hover and read out (bd startsim-t34ur). */
+  warn?: boolean | string;
   content: React.ReactNode;
 }
 
@@ -111,7 +112,9 @@ export function ContentChannels({
               {c.warn ? (
                 <span
                   className="h-1.5 w-1.5 rounded-full bg-amber-500"
-                  aria-label="needs attention"
+                  role="img"
+                  aria-label={typeof c.warn === 'string' ? c.warn : 'needs attention'}
+                  title={typeof c.warn === 'string' ? c.warn : undefined}
                 />
               ) : null}
             </button>
