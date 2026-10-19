@@ -738,7 +738,15 @@ function DraftEditorScreen({
     // change to the field's debounce; without this it would PATCH the whole
     // blob a second later and record a revision nobody made.
     if (editSeq.current === savedSeq.current) return;
-    await persist({}, 'Could not save the draft.');
+    // THE EDITORS' PILLS READ A THROW, NOT A BOOLEAN (bd startsim-m7fdm.30).
+    // TrackedSection and DocumentEditor show "Save failed" only when onSave
+    // rejects; `persist` resolves `false` for a 500, a 412 refusal, a pause
+    // and a closed restore gate alike, so returning it quietly left the pill
+    // reading "Saved" beside the stale-save dialog. Nothing reached the
+    // server in any of those cases, so each is a failed save to the pill.
+    if (!(await persist({}, 'Could not save the draft.'))) {
+      throw new Error('The draft was not saved.');
+    }
   }
 
   // Mirror the queue step so the key listener binds ONCE yet always calls the
@@ -783,7 +791,10 @@ function DraftEditorScreen({
     void persist({}, 'Could not save sources.');
   }
 
+  // A view-only reader gets no source controls (bd startsim-m7fdm.31), and the
+  // handlers refuse too, so nothing that reaches them can write.
   function addSource(url: string) {
+    if (!canEdit) return;
     const clean = url.trim();
     if (!clean) return;
     // A bare URL parses with raw=<url> (publisher=host, no date), so it serializes
@@ -794,6 +805,7 @@ function DraftEditorScreen({
   }
 
   function removeSource(id: string) {
+    if (!canEdit) return;
     persistSources(
       sourceItemsRef.current.filter((s) => s.id !== id),
       sourceMetaRef.current.filter((m) => m.id !== id),
@@ -801,6 +813,7 @@ function DraftEditorScreen({
   }
 
   function toggleVerify(id: string) {
+    if (!canEdit) return;
     const existing = sourceMetaRef.current.find((m) => m.id === id);
     const nextMeta = existing
       ? sourceMetaRef.current.map((m) => (m.id === id ? { ...m, verified: !m.verified } : m))
@@ -1003,7 +1016,14 @@ function DraftEditorScreen({
             content: (
               <div className="space-y-2">
                 {attribution('seo')}
-                <DocumentEditor sections={seoSection} onChange={onChange} onSave={saveSections} />
+                {/* Read-only for a view-only reader (bd startsim-m7fdm.31): no
+                    inputs, no autosave, no pill. */}
+                <DocumentEditor
+                  sections={seoSection}
+                  onChange={onChange}
+                  onSave={saveSections}
+                  readOnly={!canEdit}
+                />
               </div>
             ),
           },
@@ -1061,6 +1081,7 @@ function DraftEditorScreen({
                   onAdd={addSource}
                   onRemove={removeSource}
                   onToggleVerify={toggleVerify}
+                  canEdit={canEdit}
                 />
               </div>
             ),

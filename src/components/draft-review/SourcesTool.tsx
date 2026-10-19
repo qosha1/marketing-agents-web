@@ -49,6 +49,12 @@ export interface SourcesToolProps {
   onAdd(url: string): void;
   onRemove(id: string): void;
   onToggleVerify(id: string): void;
+  /**
+   * False for a view-only reader (bd startsim-m7fdm.31): the rows stay, with a
+   * Verified badge where one is set, but Add, Verify and Remove are not drawn.
+   * A control the person cannot use is hidden, not greyed out.
+   */
+  canEdit?: boolean;
 }
 
 export function SourcesTool({
@@ -59,6 +65,7 @@ export function SourcesTool({
   onAdd,
   onRemove,
   onToggleVerify,
+  canEdit = true,
 }: SourcesToolProps) {
   const [draftUrl, setDraftUrl] = React.useState('');
   const cov = coverageSummary(items, today);
@@ -115,6 +122,7 @@ export function SourcesTool({
               tier={approvedHosts ? sourceTier(s.url, approvedHosts) : null}
               ageDays={sourceAgeDays(s.date, today)}
               verified={!!verified[s.id]}
+              canEdit={canEdit}
               // The check extracts URLs from the same rows we render, so an exact
               // match is the honest test: a row that doesn't match simply isn't
               // marked — the jump still opened this channel.
@@ -125,41 +133,43 @@ export function SourcesTool({
         </ul>
       )}
 
-      {/* Add a source */}
-      <div className="rounded-xl border border-dashed border-border bg-card p-3">
-        <label htmlFor="add-source" className="mb-1.5 block text-xs font-medium text-muted-foreground">
-          {approvedHosts
-            ? 'Add a source — paste a URL; it is checked against the approved-source list'
-            : 'Add a source — paste a URL. It cannot be checked until the approved-source list loads.'}
-        </label>
-        <div className="flex flex-wrap items-center gap-2">
-          <input
-            id="add-source"
-            value={draftUrl}
-            onChange={(e) => setDraftUrl(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                submitAdd();
-              }
-            }}
-            placeholder="https://…"
-            className="min-w-0 flex-1 rounded-md border border-border bg-background px-2.5 py-1.5 text-sm text-foreground outline-none focus:border-primary focus:ring-0"
-          />
-          {draftTier ? (
-            <TierBadge tier={draftTier} host={draftHost} />
-          ) : null}
-          <button
-            type="button"
-            onClick={submitAdd}
-            disabled={!draftUrl.trim()}
-            className="inline-flex items-center gap-1 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground disabled:opacity-40"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            Add
-          </button>
+      {/* Add a source — an editor's control only. */}
+      {canEdit ? (
+        <div className="rounded-xl border border-dashed border-border bg-card p-3">
+          <label htmlFor="add-source" className="mb-1.5 block text-xs font-medium text-muted-foreground">
+            {approvedHosts
+              ? 'Add a source — paste a URL; it is checked against the approved-source list'
+              : 'Add a source — paste a URL. It cannot be checked until the approved-source list loads.'}
+          </label>
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              id="add-source"
+              value={draftUrl}
+              onChange={(e) => setDraftUrl(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  submitAdd();
+                }
+              }}
+              placeholder="https://…"
+              className="min-w-0 flex-1 rounded-md border border-border bg-background px-2.5 py-1.5 text-sm text-foreground outline-none focus:border-primary focus:ring-0"
+            />
+            {draftTier ? (
+              <TierBadge tier={draftTier} host={draftHost} />
+            ) : null}
+            <button
+              type="button"
+              onClick={submitAdd}
+              disabled={!draftUrl.trim()}
+              className="inline-flex items-center gap-1 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground disabled:opacity-40"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Add
+            </button>
+          </div>
         </div>
-      </div>
+      ) : null}
     </div>
   );
 }
@@ -171,6 +181,7 @@ function SourceRow({
   verified,
   onToggleVerify,
   onRemove,
+  canEdit,
 }: {
   source: ParsedSource;
   /** null when the approved-source list is unavailable — an unknown, not a no. */
@@ -179,6 +190,7 @@ function SourceRow({
   verified: boolean;
   onToggleVerify: () => void;
   onRemove: () => void;
+  canEdit: boolean;
 }) {
   const stale = isStale(ageDays);
   return (
@@ -215,28 +227,37 @@ function SourceRow({
                   <ExternalLink className="h-3 w-3" />
                 </a>
               ) : null}
-              <button
-                type="button"
-                onClick={onToggleVerify}
-                aria-pressed={verified}
-                className={cn(
-                  'inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs',
-                  verified
-                    ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
-                    : 'border-border bg-background text-muted-foreground hover:text-foreground',
-                )}
-              >
-                {verified ? <Check className="h-3 w-3" /> : null}
-                {verified ? 'Verified' : 'Verify'}
-              </button>
-              <button
-                type="button"
-                onClick={onRemove}
-                aria-label={`Remove ${source.publisher || source.url}`}
-                className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-rose-600"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
+              {canEdit ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={onToggleVerify}
+                    aria-pressed={verified}
+                    className={cn(
+                      'inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs',
+                      verified
+                        ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
+                        : 'border-border bg-background text-muted-foreground hover:text-foreground',
+                    )}
+                  >
+                    {verified ? <Check className="h-3 w-3" /> : null}
+                    {verified ? 'Verified' : 'Verify'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onRemove}
+                    aria-label={`Remove ${source.publisher || source.url}`}
+                    className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-rose-600"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </>
+              ) : verified ? (
+                <span className="inline-flex items-center gap-1 rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs text-emerald-700">
+                  <Check className="h-3 w-3" />
+                  Verified
+                </span>
+              ) : null}
             </div>
           </div>
 

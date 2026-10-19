@@ -182,6 +182,32 @@ describe('BlogSection autosave', () => {
 
     expect(screen.getByText('Save failed')).toBeInTheDocument();
   });
+
+  it('clears "Save failed" once the text is stored another way (Keep mine, a sibling save) — m7fdm.30', async () => {
+    const onSave = vi.fn(() => Promise.reject(new Error('refused')));
+    const { rerender } = render(<BlogSection value="" stored="" onChange={noop} onSave={onSave} />);
+
+    rerender(<BlogSection value="kept" stored="" onChange={noop} onSave={onSave} />);
+    await tick(1_200);
+    expect(screen.getByText('Save failed')).toBeInTheDocument();
+
+    // The page hands back the stored text after "Keep my version" lands.
+    rerender(<BlogSection value="kept" stored="kept" onChange={noop} onSave={onSave} />);
+    await tick(0);
+    expect(screen.getByText('Saved')).toBeInTheDocument();
+    expect(screen.queryByText('Save failed')).toBeNull();
+  });
+
+  it('keeps "Save failed" while what is stored is still not what was typed', async () => {
+    const onSave = vi.fn(() => Promise.reject(new Error('refused')));
+    const { rerender } = render(<BlogSection value="" stored="" onChange={noop} onSave={onSave} />);
+
+    rerender(<BlogSection value="mine" stored="" onChange={noop} onSave={onSave} />);
+    await tick(1_200);
+    rerender(<BlogSection value="mine" stored="theirs" onChange={noop} onSave={onSave} />);
+    await tick(0);
+    expect(screen.getByText('Save failed')).toBeInTheDocument();
+  });
 });
 
 describe('TrackedSection surface (bd startsim-q8sgy)', () => {
