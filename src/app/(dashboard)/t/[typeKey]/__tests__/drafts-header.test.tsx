@@ -33,6 +33,9 @@ interface TableStubProps {
   data?: unknown[];
   loading?: boolean;
   pagination?: { totalCount?: number; enabled?: boolean };
+  filters?: {
+    config?: { sections?: { filters: { id: string; options: string[]; optionLabels?: Record<string, string> }[] }[] };
+  };
 }
 
 vi.mock('@startsimpli/ui', async () => {
@@ -45,6 +48,12 @@ vi.mock('@startsimpli/ui', async () => {
         'data-total': String(props.pagination?.totalCount ?? ''),
         'data-loading': String(props.loading ?? false),
         'data-paginated': String(props.pagination?.enabled ?? ''),
+        'data-state-chips': JSON.stringify(
+          (props.filters?.config?.sections ?? [])
+            .flatMap((sec) => sec.filters)
+            .filter((f) => f.id === 'status')
+            .flatMap((f) => f.options.map((o) => f.optionLabels?.[o] ?? o)),
+        ),
       }),
     Button: ({ children, onClick }: { children?: ReactNode; onClick?: () => void }) =>
       React.createElement('button', { onClick }, children),
@@ -107,7 +116,9 @@ const DRAFT_TYPE = {
       name: 'status',
       label: 'Status',
       dataType: 'enum',
-      config: { choices: ['ready_for_review', 'approved'] },
+      // `ready` is a RETIRED value the live type still declares; no row here
+      // carries it, so it must not be offered as a chip (bd startsim-krfe4).
+      config: { choices: ['approved', 'ready_for_review', 'ready'] },
     },
     { id: 22, name: 'topic_ref', label: 'Topic', dataType: 'string', config: {} },
     {
@@ -285,5 +296,15 @@ describe('the Drafts page title and empty footer (wireframe review, startsim-c37
     const table = await loadedTable();
     await waitFor(() => expect(table.dataset.rows).toBe('0'));
     expect(table.dataset.paginated).toBe('false');
+  });
+});
+
+describe('the Drafts State chips (startsim-krfe4)', () => {
+  it('read in the team words, in pipeline order, without a retired value no row carries', async () => {
+    renderPage();
+    const table = await loadedTable();
+    await waitFor(() =>
+      expect(JSON.parse(table.dataset.stateChips ?? '[]')).toEqual(['Ready for review', 'Approved']),
+    );
   });
 });

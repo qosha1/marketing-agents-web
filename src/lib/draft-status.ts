@@ -182,3 +182,21 @@ export function missingRequiredStatuses(type: StatusTypeDef): string[] {
 export function declaredAwaitingDecision(type: StatusTypeDef): string[] {
   return declaredDraftStatuses(type).filter(awaitsDecision);
 }
+
+/**
+ * The State chips the Drafts table offers, in pipeline order (bd
+ * startsim-krfe4).
+ *
+ * The live type still DECLARES the four retired values (see AWAITING_DECISION
+ * above), so reading the chips straight off the schema offered eleven, two of
+ * which — `ready` and `ready_for_review` — mean opposite things. A retired value
+ * is offered only while some loaded row still carries it: a chip that can only
+ * ever narrow to nothing is noise, and one that a row does carry must stay, or
+ * that row becomes unfilterable.
+ */
+export function draftStateChipOptions(declared: string[], carried: Iterable<string>): string[] {
+  const named = STATUSES.map((s) => s.key).filter((k) => declared.includes(k));
+  const seen = new Set(carried);
+  const retired = declared.filter((k) => !BY_KEY.has(k) && seen.has(k));
+  return [...named, ...retired];
+}

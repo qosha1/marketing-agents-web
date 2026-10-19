@@ -93,6 +93,7 @@ import { dispatchDraftForApproval } from '@/lib/approve-dispatch';
 import { createApproveWatch } from '@/lib/approve-watch';
 import { currentReturnPath, storyHref } from '@/lib/story-nav';
 import { listTitle } from '@/foundry.nav';
+import { draftStateChipOptions, draftStatusLabel } from '@/lib/draft-status';
 import { primeEntity } from '@/lib/entity-cache';
 import { canEditRecord } from '@/lib/track-changes';
 import {
@@ -667,13 +668,34 @@ export default function TypeRecordsPage() {
       });
     }
     if (stateKey) {
+      // Drafts read in the team's own words, in pipeline order, without the
+      // retired values no row carries (bd startsim-krfe4). Other types keep the
+      // declared choices as they are.
+      const declared = choicesOf(statusAttr);
+      const stateOptions =
+        isDraft && stateKey === STATUS_ATTR
+          ? draftStateChipOptions(
+              declared,
+              (allQuery.data ?? []).map((r) => String(readData(r.data, STATUS_ATTR) ?? '')),
+            )
+          : declared;
       sections.push({
         id: 'state',
         type: 'chips',
         // Named after the attribute it filters, through the same helper as that
         // attribute's column header: `status` still reads "State", and
         // `source_type` reads "Source type".
-        filters: [{ id: stateKey, label: humanizeHeader(stateKey), options: choicesOf(statusAttr) }],
+        filters: [
+          {
+            id: stateKey,
+            label: humanizeHeader(stateKey),
+            options: stateOptions,
+            optionLabels:
+              isDraft && stateKey === STATUS_ATTR
+                ? Object.fromEntries(stateOptions.map((o) => [o, draftStatusLabel(o)]))
+                : undefined,
+          },
+        ],
       });
     }
     if (sections.length === 0) return undefined;
@@ -689,7 +711,7 @@ export default function TypeRecordsPage() {
     };
     // applyFilters closes over the current searchParams/pathname, refreshed each render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasContentTypeAttr, statusAttr, stateKey, filterState]);
+  }, [hasContentTypeAttr, statusAttr, stateKey, filterState, isDraft, allQuery.data]);
 
   function handleRowClick(row: EntityRecord) {
     if (typeKey === DRAFT_TYPE_KEY) router.push(`/draft/${row.id}`);
