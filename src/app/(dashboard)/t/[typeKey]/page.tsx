@@ -1068,26 +1068,24 @@ export default function TypeRecordsPage() {
             // over "No items" (bd startsim-yjyl1, startsim-bukjg). Data types
             // only: the topic and draft views narrow by default, and their
             // header already says what is held back.
-            emptyState={
-              isContent || isDraft ? undefined : (
-                <p data-testid="records-empty" className="rounded-lg border border-dashed px-4 py-8 text-center text-sm text-gray-500">
-                  {search.trim() || anyFilter ? 'No matches.' : `No ${type.label.toLowerCase()} records yet.`}
-                </p>
-              )
-            }
-            columnVisibility={columnVisibility}
-            // One line, in place of "No results found." over a "No items" footer.
+            // Topics get the same one line, worded for a topic list and its kind
+            // pages (review beads startsim-s6yxr, startsim-wq6b1).
             emptyState={
               isContent ? (
-                <p className="py-8 text-center text-sm text-gray-500">
+                <p data-testid="records-empty" className="rounded-lg border border-dashed px-4 py-8 text-center text-sm text-gray-500">
                   {search.trim() || filterState[STATUS_ATTR]
                     ? 'No topics match.'
                     : activeKind
                       ? `No ${contentCategoryLabel(activeKind)} topics yet.`
                       : 'No topics yet.'}
                 </p>
-              ) : undefined
+              ) : isDraft ? undefined : (
+                <p data-testid="records-empty" className="rounded-lg border border-dashed px-4 py-8 text-center text-sm text-gray-500">
+                  {search.trim() || anyFilter ? 'No matches.' : `No ${type.label.toLowerCase()} records yet.`}
+                </p>
+              )
             }
+            columnVisibility={columnVisibility}
             sorting={{
               // Client-side sort over whatever set is loaded; picking a sort flips
               // `needAll` on (above), so it always sorts the FULL bounded set, not
