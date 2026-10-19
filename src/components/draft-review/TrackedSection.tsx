@@ -96,6 +96,8 @@ export function TrackedSection({
   className,
 }: TrackedSectionProps) {
   const [status, setStatus] = React.useState<SaveStatus>('idle');
+  // The text whose save failed, so the pill can tell when it lands another way.
+  const [failedText, setFailedText] = React.useState<string | null>(null);
   const words = countWords(value);
 
   // Debounced autosave, mirroring DocumentEditor: fire onSave only on a real
@@ -135,7 +137,10 @@ export function TrackedSection({
         savedRef.current = value;
         setStatus('saved');
       } catch {
-        if (!cancelled) setStatus('error');
+        if (!cancelled) {
+          setFailedText(value);
+          setStatus('error');
+        }
       }
     }, autosaveMs);
 
@@ -144,6 +149,14 @@ export function TrackedSection({
       clearTimeout(timer);
     };
   }, [value, autosaveMs]);
+
+  // A FAILED PILL CLEARS WHEN THE TEXT LANDS ANOTHER WAY (bd startsim-m7fdm.30).
+  // "Keep my version" in the stale-save dialog, or the next save of a sibling
+  // field (every page write carries the whole blob), stores this text without
+  // going through this card's own debounce. The page hands the stored text
+  // back as `stored`; once it is the text that failed, that text is saved.
+  const shownStatus: SaveStatus =
+    status === 'error' && stored !== undefined && stored === failedText ? 'saved' : status;
 
   return (
     <div className={className}>
@@ -161,7 +174,7 @@ export function TrackedSection({
         autoFocus={autoFocus}
         headerExtra={
           <>
-            <SaveStatusPill status={status} />
+            <SaveStatusPill status={shownStatus} />
             <span className="text-xs text-muted-foreground">{words} words</span>
           </>
         }
