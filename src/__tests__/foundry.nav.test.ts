@@ -40,10 +40,25 @@ describe('buildNav', () => {
     expect(items[0]).toMatchObject({ href: '/', label: 'Dashboard' });
   });
 
-  it('has an Activity link to every edit across records (bd startsim-1pqb9)', () => {
-    expect(items.find((e) => !isGroup(e) && (e as { href?: string }).href === '/activity')).toMatchObject({
-      label: 'Activity',
-    });
+  it('has no Activity item (Lane 2 removes it from the sidebar)', () => {
+    const all = items.flatMap((e) => (isGroup(e) ? e.items : [e as { href: string; label: string }]));
+    expect(all.map((i) => i.label)).not.toContain('Activity');
+    expect(all.map((i) => i.href)).not.toContain('/activity');
+  });
+
+  it('has a Research group: Overview, Topics, Sources, Settings, right after Dashboard', () => {
+    expect(items[1]).toMatchObject({ label: 'Research' });
+    expect(group(items, 'Research').items.map((i) => ({ href: i.href, label: i.label }))).toEqual([
+      { href: '/research', label: 'Overview' },
+      { href: '/research/topics', label: 'Topics' },
+      { href: '/research/sources', label: 'Sources' },
+      { href: '/research/settings', label: 'Settings' },
+    ]);
+  });
+
+  it('gives the four Research items four different icons', () => {
+    const r = group(items, 'Research') as unknown as { items: { icon?: { type: unknown } }[] };
+    expect(new Set(r.items.map((i) => i.icon?.type)).size).toBe(4);
   });
 
   it('lists each content TYPE as its own sidebar item, between Topics and Drafts', () => {
@@ -51,7 +66,6 @@ describe('buildNav', () => {
     // the Topics table. They are top-level destinations now.
     const content = group(items, 'Content');
     expect(content.items.map((i) => ({ href: i.href, label: i.label }))).toEqual([
-      { href: '/t/topic', label: 'Topics' },
       { href: '/t/topic?content_type=weekly_brief', label: 'Weekly Briefs' },
       // OGMC calls this type "Evergreen" (bd startsim-wn2p.15). Note the href still carries the
       // STORED value `lead_magnet` — relabelling must not touch the value, or every bookmarked
@@ -79,29 +93,32 @@ describe('buildNav', () => {
     ]);
     const content = group(buildNav([topic4, draft]), 'Content');
     expect(content.items.map((i) => i.label)).toEqual([
-      'Topics', 'Weekly Briefs', 'Case study', 'Drafts',
+      'Weekly Briefs', 'Case study', 'Drafts',
     ]);
-    expect(content.items[2]!.href).toBe('/t/topic?content_type=case_study');
+    expect(content.items[1]!.href).toBe('/t/topic?content_type=case_study');
   });
 
-  it('falls back to Topics + Drafts when the type declares no content_type', () => {
+  it('falls back to Drafts alone when the type declares no content_type', () => {
     const plainTopic = type('topic', 'Topic', [statusAttr]);
     const content = group(buildNav([plainTopic, draft]), 'Content');
-    expect(content.items.map((i) => i.label)).toEqual(['Topics', 'Drafts']);
+    expect(content.items.map((i) => i.label)).toEqual(['Drafts']);
   });
 
   it('lists the OTHER declared types under Data, excluding topic and draft', () => {
     const data = group(items, 'Data');
     const labels = data.items.map((i) => i.label);
-    expect(labels).toEqual(['Deal', 'Source']);
-    expect(labels).not.toContain('Topic'); // covered by Content → Topics
+    expect(labels).toEqual(['Deal']);
+    // Sources and documents live under Research now (Settings, Sources).
+    expect(labels).not.toContain('Source');
+    expect(labels).not.toContain('Topic'); // covered by Research → Topics
     expect(labels).not.toContain('Draft'); // covered by Content → Drafts
   });
 
   it('routes a status type to its board and a plain type to its table', () => {
-    const data = group(items, 'Data');
+    const other = type('note', 'Note');
+    const data = group(buildNav([topic, draft, deal, other]), 'Data');
     expect(data.items.find((i) => i.label === 'Deal')?.href).toBe('/board/deal');
-    expect(data.items.find((i) => i.label === 'Source')?.href).toBe('/t/source');
+    expect(data.items.find((i) => i.label === 'Note')?.href).toBe('/t/note');
   });
 
   it('surfaces no About link (scaffold leftover, removed)', () => {
@@ -121,8 +138,9 @@ describe('buildNav', () => {
   it('still renders without any declared types (schema not yet loaded)', () => {
     const items3 = buildNav([]);
     expect(items3[0]).toMatchObject({ href: '/', label: 'Dashboard' });
-    // With no schema there are no declared kinds — Topics + Drafts still render.
-    expect(group(items3, 'Content').items.map((i) => i.label)).toEqual(['Topics', 'Drafts']);
+    // With no schema there are no declared kinds — Drafts still renders, and Research always does.
+    expect(group(items3, 'Content').items.map((i) => i.label)).toEqual(['Drafts']);
+    expect(group(items3, 'Research').items).toHaveLength(4);
   });
 });
 
