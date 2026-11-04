@@ -20,7 +20,7 @@ const api = vi.hoisted(() => ({ getEntity: vi.fn(), listEntities: vi.fn(), listT
 vi.mock('@/lib/foundry-api', () => api);
 const start = vi.hoisted(() => ({ startContent: vi.fn(), fetchTopicDrafts: vi.fn() }));
 vi.mock('@/lib/research/start-content', () => ({ startContent: start.startContent }));
-vi.mock('@/lib/topic-drafts', () => ({ fetchTopicDrafts: start.fetchTopicDrafts }));
+vi.mock('@/lib/topic-drafts', async (orig) => ({ ...(await orig<object>()), fetchTopicDrafts: start.fetchTopicDrafts }));
 
 import TopicPage from '../page';
 
@@ -46,7 +46,7 @@ describe('Research > one topic', () => {
   it('shows the documents in this topic, each with title link, outlet and date, and one quote', async () => {
     renderPage(<TopicPage />);
     expect(await screen.findByText('Documents in this topic')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Route opens' })).toHaveAttribute('href', 'https://a.example/1');
+    expect(await screen.findByRole('link', { name: 'Route opens' })).toHaveAttribute('href', 'https://a.example/1');
     expect(screen.getByText(/Example Wire · /)).toBeInTheDocument();
     expect(screen.getByText(/The route opened on Monday\./)).toBeInTheDocument();
   });

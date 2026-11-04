@@ -35,7 +35,7 @@ describe('Research > Topics', () => {
       expect(screen.getByRole('columnheader', { name: new RegExp(`^${h}`) })).toBeInTheDocument();
     }
     expect(screen.getAllByRole('columnheader')).toHaveLength(5);
-    expect(screen.getByText('2 items in Content')).toBeInTheDocument();
+    expect(await screen.findByText('2 items in Content')).toBeInTheDocument();
     expect(screen.getByText('None yet')).toBeInTheDocument();
     expect(screen.queryByText(/work on this/i)).toBeNull();
     expect(screen.queryAllByRole('checkbox')).toHaveLength(0);

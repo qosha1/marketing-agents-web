@@ -20,7 +20,7 @@ describe('Research > Overview', () => {
   it('shows the four read-only tiles', async () => {
     renderPage(<OverviewPage />);
     for (const label of ['Sources configured', 'Documents this week', 'Topics in progress', 'Made into content']) {
-      expect(await screen.findByText(label)).toBeInTheDocument();
+      expect((await screen.findAllByText(label)).length).toBeGreaterThan(0);
     }
     expect(screen.getByText('5')).toBeInTheDocument();
     expect(screen.getByText('7')).toBeInTheDocument();
@@ -37,7 +37,10 @@ describe('Research > Overview', () => {
   it('lists topics by stage', async () => {
     renderPage(<OverviewPage />);
     for (const s of ['Collecting', 'Ready to write', 'Made into content']) {
-      expect(await screen.findByText(s)).toBeInTheDocument();
+      expect((await screen.findAllByText(s)).length).toBeGreaterThan(0);
     }
+    const panel = screen.getByRole('heading', { name: 'Topics' }).closest('section')!;
+    expect(panel).toHaveTextContent(/Collecting\s*2/);
+    expect(panel).toHaveTextContent(/Made into content\s*9/);
   });
 });

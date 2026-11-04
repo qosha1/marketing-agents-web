@@ -22,6 +22,24 @@ const nextConfig: NextConfig = {
     NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL,
   },
   turbopack: {},
+  // Research replaced the News and Approved Source tables and the all-kinds Topics
+  // table (lane 2, epic startsim-tntrh). The old addresses still work. A topic
+  // table with a Kind, a queue, a record to open or a return path is the content
+  // spine's own view and is left alone.
+  async redirects() {
+    const keep = ["content_type", "open", "queue", "from", "since", "created_after"].map((key) => ({
+      type: "query" as const,
+      key,
+    }));
+    return [
+      { source: "/t/news_item", destination: "/research/sources", permanent: false },
+      { source: "/board/news_item", destination: "/research/sources", permanent: false },
+      { source: "/t/source", destination: "/research/settings", permanent: false },
+      { source: "/board/source", destination: "/research/settings", permanent: false },
+      { source: "/t/topic", missing: keep, destination: "/research/topics", permanent: false },
+      { source: "/board/topic", missing: keep, destination: "/research/topics", permanent: false },
+    ];
+  },
   async rewrites() {
     // Same-origin proxy: the browser calls /api/* (NEXT_PUBLIC_API_URL unset),
     // and Next forwards to the tenant Django backend server-side. DRF wants a
