@@ -50,7 +50,9 @@ describe('buildNav', () => {
     // The three kinds used to be reachable only as a "Kind:" filter chip inside
     // the Topics table. They are top-level destinations now.
     const content = group(items, 'Content');
-    expect(content.items.map((i) => ({ href: i.href, label: i.label }))).toEqual([
+    // The v2 pages (All content, Calendar) lead the group; the v1 tables follow.
+    expect(content.items.slice(0, 2).map((i) => i.href)).toEqual(['/content', '/content/calendar']);
+    expect(content.items.slice(2).map((i) => ({ href: i.href, label: i.label }))).toEqual([
       { href: '/t/topic', label: 'Topics' },
       { href: '/t/topic?content_type=weekly_brief', label: 'Weekly Briefs' },
       // OGMC calls this type "Evergreen" (bd startsim-wn2p.15). Note the href still carries the
@@ -61,7 +63,7 @@ describe('buildNav', () => {
       { href: '/t/draft', label: 'Drafts' },
     ]);
     // Every one is the flat, clickable table route (not the kanban board).
-    expect(content.items.every((i) => i.href.startsWith('/t/'))).toBe(true);
+    expect(content.items.slice(2).every((i) => i.href.startsWith('/t/'))).toBe(true);
   });
 
   it('gives each kind its own icon, so the collapsed rail tells them apart (review bead startsim-uaayw)', () => {
@@ -78,16 +80,16 @@ describe('buildNav', () => {
       { ...contentTypeAttr, config: { choices: ['weekly_brief', 'case_study'] } },
     ]);
     const content = group(buildNav([topic4, draft]), 'Content');
-    expect(content.items.map((i) => i.label)).toEqual([
+    expect(content.items.slice(2).map((i) => i.label)).toEqual([
       'Topics', 'Weekly Briefs', 'Case study', 'Drafts',
     ]);
-    expect(content.items[2]!.href).toBe('/t/topic?content_type=case_study');
+    expect(content.items[4]!.href).toBe('/t/topic?content_type=case_study');
   });
 
   it('falls back to Topics + Drafts when the type declares no content_type', () => {
     const plainTopic = type('topic', 'Topic', [statusAttr]);
     const content = group(buildNav([plainTopic, draft]), 'Content');
-    expect(content.items.map((i) => i.label)).toEqual(['Topics', 'Drafts']);
+    expect(content.items.slice(2).map((i) => i.label)).toEqual(['Topics', 'Drafts']);
   });
 
   it('lists the OTHER declared types under Data, excluding topic and draft', () => {
@@ -122,7 +124,7 @@ describe('buildNav', () => {
     const items3 = buildNav([]);
     expect(items3[0]).toMatchObject({ href: '/', label: 'Dashboard' });
     // With no schema there are no declared kinds — Topics + Drafts still render.
-    expect(group(items3, 'Content').items.map((i) => i.label)).toEqual(['Topics', 'Drafts']);
+    expect(group(items3, 'Content').items.slice(2).map((i) => i.label)).toEqual(['Topics', 'Drafts']);
   });
 });
 

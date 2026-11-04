@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { CONTENT_TYPES, newContentInput, validateNewContent } from '@/lib/content-new';
+import { CONTENT_TYPES, newContentInput, sharedScopePath, validateNewContent } from '@/lib/content-new';
 
 describe('add content by hand', () => {
   it('offers more than one type', () => {
@@ -38,5 +38,15 @@ describe('add content by hand', () => {
   it('never invents a scope path', () => {
     const input = newContentInput({ title: 'T', type: 'blog', topicId: '', brief: '' }, { scopePath: null });
     expect(input.data).not.toHaveProperty('scope_path');
+  });
+});
+
+describe('the scope a new item takes when it has no topic or project', () => {
+  it('is the one path every visible record shares', () => {
+    expect(sharedScopePath(['/ogmc', '/ogmc', undefined])).toBe('/ogmc');
+  });
+  it('is none when the paths differ or there are none', () => {
+    expect(sharedScopePath(['/ogmc', '/other'])).toBeNull();
+    expect(sharedScopePath([])).toBeNull();
   });
 });

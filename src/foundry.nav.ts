@@ -106,6 +106,9 @@ export function buildNav(types: EntityTypeDef[]): GroupedNavEntry[] {
     {
       label: 'Content',
       items: [
+        // v2 Content (bd startsim-xwtv0): the approved work, and its calendar.
+        { href: '/content', label: 'All content', icon: createElement(FileText) },
+        { href: '/content/calendar', label: 'Calendar', icon: createElement(CalendarDays) },
         // Topics = every kind. Then one destination PER KIND, then the written
         // bodies. The kinds used to be reachable only as a "Kind:" filter chip
         // inside the Topics table; a weekly brief and a lead magnet are
