@@ -101,7 +101,7 @@ describe('projectListFilters (startsim-kqwmm: server-side search, sort, filter, 
     expect(projectListFilters({})).toEqual({
       'attr.kind': PROJECT_KIND,
       page_size: String(PROJECTS_PAGE_SIZE),
-      ordering: 'attr.name',
+      order: 'attr.name',
     });
   });
 
@@ -111,11 +111,11 @@ describe('projectListFilters (startsim-kqwmm: server-side search, sort, filter, 
   });
 
   it('sorts by name or client, either direction', () => {
-    expect(projectListFilters({ sortBy: 'name', sortDirection: 'desc' }).ordering).toBe('-attr.name');
-    expect(projectListFilters({ sortBy: 'client', sortDirection: 'asc' }).ordering).toBe('attr.parent');
-    expect(projectListFilters({ sortBy: 'client', sortDirection: 'desc' }).ordering).toBe('-attr.parent');
+    expect(projectListFilters({ sortBy: 'name', sortDirection: 'desc' }).order).toBe('-attr.name');
+    expect(projectListFilters({ sortBy: 'client', sortDirection: 'asc' }).order).toBe('attr.parent');
+    expect(projectListFilters({ sortBy: 'client', sortDirection: 'desc' }).order).toBe('-attr.parent');
     // Sources has no server-side value yet: it falls back to the default order.
-    expect(projectListFilters({ sortBy: 'sources', sortDirection: 'desc' }).ordering).toBe('attr.name');
+    expect(projectListFilters({ sortBy: 'sources', sortDirection: 'desc' }).order).toBe('attr.name');
   });
 
   it('filters to one client, or to projects with no client', () => {

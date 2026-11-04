@@ -137,7 +137,7 @@ export function projectListFilters(q: ProjectListQuery): Record<string, string> 
   const filters: Record<string, string> = {
     'attr.kind': PROJECT_KIND,
     page_size: String(PROJECTS_PAGE_SIZE),
-    ordering: `${q.sortDirection === 'desc' && q.sortBy && SORT_ATTR[q.sortBy] ? '-' : ''}attr.${attr}`,
+    order: `${q.sortDirection === 'desc' && q.sortBy && SORT_ATTR[q.sortBy] ? '-' : ''}attr.${attr}`,
   };
   const term = q.search?.trim();
   if (term) filters['attr.name__icontains'] = term;

@@ -76,7 +76,7 @@ describe('ProjectsList', () => {
   it('asks the server for page 1 of projects only, sorted by name', async () => {
     renderList();
     await screen.findByText('GCC Weekly');
-    expect(listEntities).toHaveBeenCalledWith('scope', 1, expect.objectContaining({ 'attr.kind': 'project', ordering: 'attr.name' }));
+    expect(listEntities).toHaveBeenCalledWith('scope', 1, expect.objectContaining({ 'attr.kind': 'project', order: 'attr.name' }));
   });
 
   it('searches by name on the server', async () => {
@@ -93,7 +93,7 @@ describe('ProjectsList', () => {
     await screen.findByText('GCC Weekly');
     fireEvent.click(screen.getByText('Client'));
     await waitFor(() =>
-      expect(listEntities).toHaveBeenLastCalledWith('scope', 1, expect.objectContaining({ ordering: 'attr.parent' })),
+      expect(listEntities).toHaveBeenLastCalledWith('scope', 1, expect.objectContaining({ order: 'attr.parent' })),
     );
   });
 
