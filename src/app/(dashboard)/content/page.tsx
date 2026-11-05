@@ -12,7 +12,6 @@ import { useQuery } from '@tanstack/react-query';
 import { Plus } from 'lucide-react';
 import { Button, UnifiedTable, type FiltersConfig } from '@startsimpli/ui';
 
-import { AddContentDialog } from '@/components/content/AddContentDialog';
 import { choicesOf } from '@/lib/board';
 import {
   CONTENT_COLUMNS,
@@ -43,7 +42,6 @@ export default function ContentPage() {
   const [status, setStatus] = useState<ContentStatus | null>(null);
   const [sort, setSort] = useState<{ sortBy: string | null; sortDirection: 'asc' | 'desc' }>({ sortBy: null, sortDirection: 'asc' });
   const [page, setPage] = useState(1);
-  const [adding, setAdding] = useState(false);
 
   const types = useQuery({ queryKey: ['types'], queryFn: () => listTypes() });
   const draftType = (types.data?.results ?? []).find((t) => t.key === 'draft');
@@ -127,8 +125,10 @@ export default function ContentPage() {
           <Link href="/content/calendar" className="rounded-md border border-border px-3 py-2 text-sm hover:bg-neutral-50">
             Calendar
           </Link>
-          <Button onClick={() => setAdding(true)}>
-            <Plus className="mr-1 h-4 w-4" /> Add content
+          <Button asChild>
+            <Link href="/content/new">
+              <Plus className="mr-1 h-4 w-4" /> Add content
+            </Link>
           </Button>
         </div>
       </div>
@@ -177,13 +177,14 @@ export default function ContentPage() {
               <>
                 <p className="font-medium text-gray-700">No content yet</p>
                 <p>Start one from a topic, or add it yourself.</p>
+                <Link href="/content/new" className="mt-3 inline-block rounded-md border border-border px-3 py-2 text-sm text-gray-700 hover:bg-neutral-50">
+                  Add content
+                </Link>
               </>
             )}
           </div>
         }
       />
-
-      <AddContentDialog open={adding} onOpenChange={setAdding} />
     </div>
   );
 }

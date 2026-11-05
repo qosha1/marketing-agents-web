@@ -89,3 +89,25 @@ describe('the reminder selection', () => {
     expect(due.map((i) => i.id)).toEqual([1]);
   });
 });
+
+describe('posted items on the calendar (design: "[Item 5] · posted")', () => {
+  it('asks for the posted ones by the day they went out', async () => {
+    const { postedFilters } = await import('@/lib/content-calendar');
+    const f = postedFilters(2026, 9);
+    expect(f['attr.status__in']).toBe('published,sent');
+    expect(f['attr.sent_at__gte']).toBe('2026-10-01');
+    expect(f['attr.sent_at__lt']).toBe('2026-11-01');
+  });
+
+  it('files a posted item under its sent_at day, whatever the zone', () => {
+    const posted = item(9, { status: 'published', sentAt: '2026-10-20' });
+    expect(placeItems([posted], 'Asia/Dubai').get('2026-10-20')!.map((i) => i.id)).toEqual([9]);
+  });
+
+  it('labels an item by its type, or "posted"', async () => {
+    const { calendarLabel } = await import('@/lib/content-calendar');
+    expect(calendarLabel(item(1, { channel: 'linkedin' }))).toMatch(/· LinkedIn$/);
+    expect(calendarLabel(item(2, { channel: 'blog' }))).toMatch(/· Blog$/);
+    expect(calendarLabel(item(3, { status: 'published' }))).toMatch(/· posted$/);
+  });
+});

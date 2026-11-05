@@ -5,7 +5,7 @@
  * area that saves itself. No versions, no show-changes, no mentions; who changed
  * what is the History panel's job.
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Check, Loader2, AlertCircle } from 'lucide-react';
 
 import { CONTENT_TYPES, type ContentType } from '@/lib/content-new';
@@ -16,11 +16,14 @@ export function ContentEditor({
   initialType,
   initialText,
   canEdit,
+  footer,
   onSave,
 }: {
   initialType: ContentType['key'];
   initialText: Record<ContentType['field'], string>;
   canEdit: boolean;
+  /** Under the text: what the item is based on. Nothing when null. */
+  footer?: ReactNode;
   /** Write `value` into `field`. Resolves true when it is on the server. */
   onSave: (field: ContentType['field'], value: string) => Promise<boolean>;
 }) {
@@ -78,6 +81,7 @@ export function ContentEditor({
         readOnly={!canEdit}
         onChange={(e) => setTexts({ ...texts, [field]: e.target.value })}
       />
+      {footer ? <div className="flex items-center gap-2 border-t border-border pt-3 text-sm text-neutral-500">{footer}</div> : null}
     </section>
   );
 }
