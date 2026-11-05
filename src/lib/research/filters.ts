@@ -55,23 +55,68 @@ export function documentFilters(q: DocumentQuery, now: Date = new Date()): Entit
   return f;
 }
 
+/** Sort direction -> the `order=` the tenant understands for the row's own date. */
+const CREATED_ORDER: Record<string, 'recent' | 'oldest'> = { asc: 'oldest', desc: 'recent' };
+
+/** The range chips on Topics. Default 30 days, as the wireframe shows. */
+export const TOPIC_RANGES = [
+  { value: '7', label: '7 days' },
+  { value: '14', label: '14 days' },
+  { value: '30', label: '30 days' },
+  { value: '90', label: '90 days' },
+  { value: 'all', label: 'All' },
+];
+export const TOPIC_DEFAULT_RANGE = '30';
+
 const TOPIC_COLUMNS = { title: 'title', markets: 'market' };
 
-export function topicFilters(q: { search?: string; sort?: SortState }): EntityFilters {
+export interface TopicQuery {
+  search?: string;
+  sort?: SortState;
+  market?: string;
+  range?: string;
+}
+
+/**
+ * Topics are narrowed on the row's own `created_at` (`created_after`): the date
+ * the pipeline grouped the documents into a topic. Newest first unless a column
+ * says otherwise; the Dates column sorts on that same date.
+ */
+export function topicFilters(q: TopicQuery, now: Date = new Date()): EntityFilters {
   const f: EntityFilters = { 'attr.status__in': TOPIC_LISTED_STATUSES.join(',') };
   const search = q.search?.trim();
   if (search) f['attr.title__icontains'] = search;
-  const order = orderParam(q.sort, TOPIC_COLUMNS, '');
-  if (order) f.order = order;
+  if (q.market) f['attr.market__icontains'] = q.market;
+  if (q.range && q.range !== 'all') {
+    const from = new Date(now);
+    from.setDate(from.getDate() - Number(q.range));
+    f.created_after = dayString(from);
+  }
+  if (q.sort?.by === 'dates') f.order = CREATED_ORDER[q.sort.dir ?? 'desc'];
+  else {
+    const order = orderParam(q.sort, TOPIC_COLUMNS, '');
+    if (order) f.order = order;
+  }
   return f;
 }
 
-const SOURCE_COLUMNS = { domain: 'domain', tier: 'tier', type: 'source_type', active: 'active' };
+// A source's name is its domain unless renamed; the tenant sorts on attributes only.
+const SOURCE_COLUMNS = { name: 'domain', domain: 'domain', tier: 'tier', type: 'source_type', active: 'active' };
 
-export function sourceFilters(q: { search?: string; sort?: SortState }): EntityFilters {
+export interface SourceQuery {
+  search?: string;
+  sort?: SortState;
+  type?: string;
+  active?: 'all' | 'on' | 'off';
+}
+
+export function sourceFilters(q: SourceQuery): EntityFilters {
   const f: EntityFilters = {};
   const search = q.search?.trim();
   if (search) f.search = search;
+  if (q.type) f['attr.source_type'] = q.type;
+  if (q.active === 'on') f['attr.active'] = 'true';
+  else if (q.active === 'off') f['attr.active'] = 'false';
   const order = orderParam(q.sort, SOURCE_COLUMNS, '');
   if (order) f.order = order;
   return f;

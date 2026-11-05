@@ -38,6 +38,9 @@ describe('Research > Sources (pulled-in documents)', () => {
       'Document', 'Source', 'Published', 'Review',
     ]);
     expect(screen.queryByRole('button', { name: /add|new|create|import/i })).toBeNull();
+    // The wireframe's toolbar order: search first, then Source, Review, Date.
+    const bar = screen.getByRole('searchbox').closest('div')!.parentElement!;
+    expect(within(bar).getAllByRole('combobox').map((c) => c.getAttribute('aria-label'))).toEqual(['Source', 'Review', 'Date']);
   });
 
   it('shows each review state in words', async () => {

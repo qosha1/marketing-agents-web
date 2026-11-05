@@ -1,5 +1,5 @@
 {
-  "$note": "TWELVE TOPICS: all three content types crossed with all four declared statuses. `scope` is passed as a PATH and the server stamps it onto scope_path (apps/api/views.py::_upsert_one), so renaming the attribute needs no fixture edit. Statuses are the declared enum and nothing else — an undeclared value is refused at the write, which makes this fixture a test of the schema as well as data for the UI. THERE IS DELIBERATELY NO ROW WITHOUT A SCOPE, and that is not a gap: the tenant REFUSES one. `topic` declares scope_path as its scope path, and upsert answers 400 — \"this row would carry none, so no scoped read would ever return it - invisible rather than broken\". So the scope-ABSENCE state that src/app/(dashboard)/t/[typeKey]/__tests__/scope-absence.test.tsx renders an explanation for is reachable only as LEGACY data: rows written before the type declared a scope axis. It cannot be seeded through the API by design, and the only honest ways to get one locally are to declare the type unscoped, write the row, then re-declare it scoped — or to write the row straight into sqlite. Neither belongs in a fixture that claims to be the product's own write path. What IS exercisable here is the EMPTY SCOPE: /ogmc/empty-campaign holds no rows at all (see scopes.json). THE THREE OFF-/ogmc ROWS ARE SPREAD ACROSS STATUSES ON PURPOSE: putting the child, the sibling and the prefix-trap scope all on `suggested` left /ogmc's own intake lane empty, so the first browser check of the Topics table showed three topics none of which belonged to the primary scope — a fixture that made the product look broken.",
+  "$note": "TWELVE TOPICS: all three content types crossed with all four declared statuses. `scope` is passed as a PATH and the server stamps it onto scope_path (apps/api/views.py::_upsert_one), so renaming the attribute needs no fixture edit. Statuses are the declared enum and nothing else — an undeclared value is refused at the write, which makes this fixture a test of the schema as well as data for the UI. THERE IS DELIBERATELY NO ROW WITHOUT A SCOPE, and that is not a gap: the tenant REFUSES one. `topic` declares scope_path as its scope path, and upsert answers 400 — \"this row would carry none, so no scoped read would ever return it - invisible rather than broken\". So the scope-ABSENCE state that src/app/(dashboard)/t/[typeKey]/__tests__/scope-absence.test.tsx renders an explanation for is reachable only as LEGACY data: rows written before the type declared a scope axis. It cannot be seeded through the API by design, and the only honest ways to get one locally are to declare the type unscoped, write the row, then re-declare it scoped — or to write the row straight into sqlite. Neither belongs in a fixture that claims to be the product's own write path. What IS exercisable here is the EMPTY SCOPE: /ogmc/empty-campaign holds no rows at all (see scopes.json). THE THREE OFF-/ogmc ROWS ARE SPREAD ACROSS STATUSES ON PURPOSE: putting the child, the sibling and the prefix-trap scope all on `suggested` left /ogmc's own intake lane empty, so the first browser check of the Topics table showed three topics none of which belonged to the primary scope — a fixture that made the product look broken. TOPICS 13 AND 14 HAVE NO DRAFTS, on purpose: 13 is `suggested` (Start content must approve it first, then run the writer) and 14 is `ready` (straight to the writer) and cites a source that is not a URL. Every other topic already has content, so these are the only ones that exercise a first Start content.",
   "rows": [
     {
       "entity_type": "topic",
@@ -239,6 +239,41 @@
         "team_verdict": "reject",
         "team_notes": "Off-brief.",
         "source_1": "https://example.local/news/12"
+      }
+    },
+    {
+      "entity_type": "topic",
+      "external_id": "topic-seed-13",
+      "name": "New trade route opens between Jebel Ali and Dammam",
+      "scope": "/ogmc",
+      "data": {
+        "title": "New trade route opens between Jebel Ali and Dammam",
+        "subtitle": "A seeded weekly_brief topic with no content yet.",
+        "angle": "A faster land-bridge for foreign exporters; check which cargo classes qualify.",
+        "market": "UAE, Saudi Arabia",
+        "content_type": "weekly_brief",
+        "status": "suggested",
+        "ai_rank": 0.9,
+        "source_1": "https://example.local/news/02",
+        "source_2": "https://example.local/news/04",
+        "source_3": "https://example.local/news/06"
+      }
+    },
+    {
+      "entity_type": "topic",
+      "external_id": "topic-seed-14",
+      "name": "Licence fee change for foreign companies",
+      "scope": "/ogmc",
+      "data": {
+        "title": "Licence fee change for foreign companies",
+        "subtitle": "A ready topic with no content yet, citing one document and one reference that is not a URL.",
+        "angle": "Which foreign companies pay the new fee, and from when.",
+        "market": "Kuwait",
+        "content_type": "general",
+        "status": "ready",
+        "ai_rank": 0.8,
+        "source_1": "ministry-circular-17",
+        "source_2": "https://example.local/news/13"
       }
     }
   ]

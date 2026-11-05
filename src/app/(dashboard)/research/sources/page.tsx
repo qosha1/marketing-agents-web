@@ -9,6 +9,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { UnifiedTable, notify, type ColumnConfig } from '@startsimpli/ui';
 
+import { ResearchToolbar } from '@/components/research/list-toolbar';
 import { ResearchHead, plural } from '@/components/research/page-head';
 import { readData } from '@/lib/board';
 import { listEntities, listTypes, updateEntity, type EntityRecord, type EntityTypeDef } from '@/lib/foundry-api';
@@ -18,8 +19,6 @@ import { documentLine, formatDay } from '@/lib/research/topics';
 import { tablePaging, tableSorting, useResearchList } from '@/lib/research/use-list';
 
 const str = (v: unknown) => (v == null ? '' : String(v));
-
-const selectClass = 'h-9 rounded-md border border-border bg-background px-2 text-sm text-neutral-800';
 
 export default function ResearchSourcesPage() {
   const qc = useQueryClient();
@@ -69,7 +68,7 @@ export default function ResearchSourcesPage() {
       id: 'review',
       header: 'Review',
       sortable: true,
-      width: 230,
+      width: 250,
       cell: (d) => <ReviewCell doc={d} type={newsType} onChoose={(choice) => decide.mutate({ doc: d, choice })} />,
     },
   ];
@@ -78,43 +77,62 @@ export default function ResearchSourcesPage() {
 
   return (
     <div className="space-y-4">
-      <ResearchHead title="Sources" sub={plural(list.total, 'document')} />
-      <div className="flex flex-wrap items-center gap-2">
-        <label className="sr-only" htmlFor="f-source">Source</label>
-        <select id="f-source" aria-label="Source" className={selectClass} value={source} onChange={(e) => resetPage(setSource)(e.target.value)}>
-          <option value="">Source: all</option>
-          {(sourcesQuery.data?.results ?? []).map((s) => (
-            <option key={s.id} value={s.name}>{s.name}</option>
-          ))}
-        </select>
-        <label className="sr-only" htmlFor="f-review">Review</label>
-        <select id="f-review" aria-label="Review" className={selectClass} value={review} onChange={(e) => resetPage(setReview)(e.target.value as typeof review)}>
-          <option value="all">Review: all</option>
-          <option value="good">{REVIEW_LABEL.good}</option>
-          <option value="not_good">{REVIEW_LABEL.not_good}</option>
-          <option value="unreviewed">{REVIEW_LABEL.unreviewed}</option>
-        </select>
-        <label className="sr-only" htmlFor="f-date">Date</label>
-        <select id="f-date" aria-label="Date" className={selectClass} value={range} onChange={(e) => resetPage(setRange)(e.target.value as typeof range)}>
-          <option value="all">Date: any time</option>
-          <option value="7">Last 7 days</option>
-          <option value="30">Last 30 days</option>
-          <option value="90">Last 90 days</option>
-        </select>
-      </div>
+      <ResearchHead title="Sources" count={plural(list.total, 'document')} />
+      <ResearchToolbar
+        search={list.search}
+        onSearch={list.setSearch}
+        placeholder="Search documents…"
+        menus={[
+          {
+            id: 'Source',
+            value: source,
+            onChange: resetPage(setSource),
+            options: [
+              { value: '', label: 'Source' },
+              ...(sourcesQuery.data?.results ?? []).map((s) => ({ value: s.name, label: s.name })),
+            ],
+          },
+          {
+            id: 'Review',
+            value: review,
+            onChange: (v) => resetPage(setReview)(v as typeof review),
+            options: [
+              { value: 'all', label: 'Review' },
+              { value: 'good', label: REVIEW_LABEL.good },
+              { value: 'not_good', label: REVIEW_LABEL.not_good },
+              { value: 'unreviewed', label: REVIEW_LABEL.unreviewed },
+            ],
+          },
+          {
+            id: 'Date',
+            value: range,
+            onChange: (v) => resetPage(setRange)(v as typeof range),
+            options: [
+              { value: 'all', label: 'Date' },
+              { value: '7', label: 'Last 7 days' },
+              { value: '30', label: 'Last 30 days' },
+              { value: '90', label: 'Last 90 days' },
+            ],
+          },
+        ]}
+      />
       <UnifiedTable<EntityRecord>
         tableId="research-sources"
         data={list.rows}
         columns={columns}
         getRowId={(d) => String(d.id)}
         loading={list.loading}
-        search={{ enabled: true, placeholder: 'Search documents…', value: list.search, onChange: list.setSearch, debounceMs: 300, preserveFocus: true }}
         pagination={tablePaging(list)}
         sorting={tableSorting(list)}
         emptyState={
-          <p className="rounded-lg border border-dashed px-4 py-8 text-center text-sm text-neutral-500">
-            {anyFilter ? 'No documents match.' : 'No documents yet. Documents appear here once sources are set up in Settings.'}
-          </p>
+          anyFilter ? (
+            <p className="rounded-lg border border-dashed px-4 py-10 text-center text-sm text-neutral-600">No documents match.</p>
+          ) : (
+            <div className="rounded-lg border border-dashed px-4 py-10 text-center">
+              <p className="text-sm font-medium text-neutral-900">No documents yet</p>
+              <p className="text-sm text-neutral-500">Documents appear here once sources are set up in Settings.</p>
+            </div>
+          )
         }
       />
     </div>
@@ -131,16 +149,22 @@ function ReviewCell({ doc, type, onChoose }: { doc: EntityRecord; type: EntityTy
         e.stopPropagation();
         onChoose(choice);
       }}
-      className={`rounded-md border px-2 py-1 text-xs ${on ? 'border-neutral-900 bg-neutral-900 text-white' : 'border-border text-neutral-700 hover:bg-neutral-50'}`}
+      className={`h-[26px] whitespace-nowrap rounded-md border px-2.5 text-xs font-medium ${
+        on
+          ? choice === 'good'
+            ? 'border-emerald-600 bg-emerald-50 text-emerald-700'
+            : 'border-red-300 bg-red-50 text-red-700'
+          : 'border-border bg-white text-neutral-700 hover:bg-neutral-50'
+      }`}
     >
       {label}
     </button>
   );
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-1.5">
       {btn('good', REVIEW_LABEL.good, current === 'good')}
       {btn('not_good', REVIEW_LABEL.not_good, current === 'not_good')}
-      {current === 'unreviewed' ? <span className="text-xs text-neutral-400">{REVIEW_LABEL.unreviewed}</span> : null}
+      {current === 'unreviewed' ? <span className="whitespace-nowrap text-xs text-neutral-400">{REVIEW_LABEL.unreviewed}</span> : null}
     </div>
   );
 }

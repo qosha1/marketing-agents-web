@@ -18,8 +18,12 @@ vi.mock('next/link', async () => {
 });
 const api = vi.hoisted(() => ({ getEntity: vi.fn(), listEntities: vi.fn(), listTypes: vi.fn() }));
 vi.mock('@/lib/foundry-api', () => api);
-const start = vi.hoisted(() => ({ startContent: vi.fn(), fetchTopicDrafts: vi.fn() }));
-vi.mock('@/lib/research/start-content', () => ({ startContent: start.startContent }));
+const start = vi.hoisted(() => ({ startContent: vi.fn(), waitForDraft: vi.fn(), fetchTopicDrafts: vi.fn() }));
+vi.mock('@/lib/research/start-content', async (orig) => ({
+  ...(await orig<object>()),
+  startContent: start.startContent,
+  waitForDraft: start.waitForDraft,
+}));
 vi.mock('@/lib/topic-drafts', async (orig) => ({ ...(await orig<object>()), fetchTopicDrafts: start.fetchTopicDrafts }));
 
 import TopicPage from '../page';
@@ -36,6 +40,7 @@ const DOC = record('n1', 'news_item', {
 beforeEach(() => {
   push.mockReset();
   start.startContent.mockReset();
+  start.waitForDraft.mockReset();
   start.fetchTopicDrafts.mockReset().mockResolvedValue([]);
   api.getEntity.mockReset().mockResolvedValue(TOPIC);
   api.listTypes.mockReset().mockResolvedValue(page([TOPIC_TYPE, NEWS_TYPE] as never));
@@ -70,14 +75,33 @@ describe('Research > one topic', () => {
     start.fetchTopicDrafts.mockResolvedValue([record('d1', 'draft', { status: 'ready_for_review' }, { name: 'Route opens: the brief' })]);
     renderPage(<TopicPage />);
     expect(await screen.findByText('Content made from this topic')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /Route opens: the brief/ })).toHaveAttribute('href', '/draft/d1');
+    expect(screen.getByRole('link', { name: /Route opens: the brief/ })).toHaveAttribute('href', '/content/d1');
+    expect(screen.getByText('Ready for review')).toBeInTheDocument();
+    expect(screen.getByText(/^Started /)).toBeInTheDocument();
   });
 
-  it('Start content creates the draft from the topic and opens it', async () => {
-    start.startContent.mockResolvedValue({ href: '/story/t1', started: true });
+  it('Start content on a topic that already has content opens that item', async () => {
+    start.startContent.mockResolvedValue({ state: 'open', href: '/content/d1' });
     renderPage(<TopicPage />);
     fireEvent.click(await screen.findByRole('button', { name: 'Start content' }));
-    await waitFor(() => expect(push).toHaveBeenCalledWith('/story/t1'));
+    await waitFor(() => expect(push).toHaveBeenCalledWith('/content/d1'));
     expect(start.startContent.mock.calls[0][0]).toBe(TOPIC);
+  });
+
+  it('Start content on a topic with none waits for the writer’s draft, then opens it', async () => {
+    start.startContent.mockResolvedValue({ state: 'writing' });
+    start.waitForDraft.mockResolvedValue(record('d7', 'draft', {}));
+    renderPage(<TopicPage />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Start content' }));
+    await waitFor(() => expect(push).toHaveBeenCalledWith('/content/d7'));
+  });
+
+  it('says so, and lets you try again, when the writer never answers', async () => {
+    start.startContent.mockResolvedValue({ state: 'writing' });
+    start.waitForDraft.mockResolvedValue(null);
+    renderPage(<TopicPage />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Start content' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Start content' })).not.toBeDisabled());
+    expect(push).not.toHaveBeenCalled();
   });
 });
