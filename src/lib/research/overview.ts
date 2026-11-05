@@ -4,7 +4,7 @@
  */
 import { countEntities } from '@/lib/foundry-api';
 
-import { dayString, projectFilters } from './filters';
+import { dayString } from './filters';
 
 export interface DayBar {
   day: string;
@@ -31,16 +31,15 @@ export function lastSevenDays(now: Date = new Date()): string[] {
 }
 
 export async function loadOverview(now: Date = new Date()): Promise<OverviewData> {
-  const scope = projectFilters();
   const days = lastSevenDays(now);
-  const topicsWith = (status: string) => countEntities('topic', { ...scope, 'attr.status': status });
+  const topicsWith = (status: string) => countEntities('topic', { 'attr.status': status });
 
   const [sourcesConfigured, sourcesOn, counts, collecting, ready, made] = await Promise.all([
-    countEntities('source', scope),
-    countEntities('source', { ...scope, 'attr.active': 'true' }),
+    countEntities('source'),
+    countEntities('source', { 'attr.active': 'true' }),
     Promise.all(
       days.map((day) =>
-        countEntities('news_item', { ...scope, 'attr.published_at__gte': day, 'attr.published_at__lte': day }),
+        countEntities('news_item', { 'attr.published_at__gte': day, 'attr.published_at__lte': day }),
       ),
     ),
     topicsWith('suggested'),

@@ -8,7 +8,7 @@ import { UnifiedTable, type ColumnConfig } from '@startsimpli/ui';
 
 import { ResearchHead, plural } from '@/components/research/page-head';
 import { listEntities } from '@/lib/foundry-api';
-import { topicFilters, projectFilters } from '@/lib/research/filters';
+import { topicFilters } from '@/lib/research/filters';
 import { countDraftsByTopic, topicRow, type TopicRow } from '@/lib/research/topics';
 import { tablePaging, tableSorting, useResearchList } from '@/lib/research/use-list';
 
@@ -45,7 +45,7 @@ export default function ResearchTopicsPage() {
     queryKey: ['research', 'topic-drafts', ids],
     enabled: ids.length > 0,
     queryFn: () =>
-      listEntities('draft', 1, { ...projectFilters(), 'attr.topic_ref__in': ids.join(','), page_size: '200' }),
+      listEntities('draft', 1, { 'attr.topic_ref__in': ids.join(','), page_size: '200' }),
   });
 
   const rows = useMemo(() => {

@@ -4,23 +4,12 @@
  * foundry-api) and nothing here scans rows on the client.
  */
 import type { EntityFilters } from '@/lib/foundry-api';
-import { getActiveProjectId } from '@/lib/project-scope';
 
 import type { DocumentReview } from './review';
 
 /** The statuses a document can hold that mean nobody has judged it yet. */
 export const UNREVIEWED_STATUSES = ['new', 'surfaced', 'cited', 'ignored', 'preview_only'];
 export const TOPIC_LISTED_STATUSES = ['suggested', 'ready', 'written'];
-
-/**
- * The one seam where the active project reaches a list query. Nothing is added
- * until lane 1's `getActiveProjectId()` returns a project; the attribute name is
- * theirs to confirm, so it is spelled once, here.
- */
-export const PROJECT_ATTR = 'project_id';
-export function projectFilters(projectId: string | null = getActiveProjectId()): EntityFilters {
-  return projectId ? { [`attr.${PROJECT_ATTR}`]: projectId } : {};
-}
 
 export interface SortState {
   by?: string | null;
@@ -50,7 +39,7 @@ export function dayString(d: Date): string {
 }
 
 export function documentFilters(q: DocumentQuery, now: Date = new Date()): EntityFilters {
-  const f: EntityFilters = { ...projectFilters() };
+  const f: EntityFilters = {};
   const search = q.search?.trim();
   if (search) f['attr.title__icontains'] = search;
   if (q.source) f['attr.source_name'] = q.source;
@@ -69,7 +58,7 @@ export function documentFilters(q: DocumentQuery, now: Date = new Date()): Entit
 const TOPIC_COLUMNS = { title: 'title', markets: 'market' };
 
 export function topicFilters(q: { search?: string; sort?: SortState }): EntityFilters {
-  const f: EntityFilters = { ...projectFilters(), 'attr.status__in': TOPIC_LISTED_STATUSES.join(',') };
+  const f: EntityFilters = { 'attr.status__in': TOPIC_LISTED_STATUSES.join(',') };
   const search = q.search?.trim();
   if (search) f['attr.title__icontains'] = search;
   const order = orderParam(q.sort, TOPIC_COLUMNS, '');
@@ -80,7 +69,7 @@ export function topicFilters(q: { search?: string; sort?: SortState }): EntityFi
 const SOURCE_COLUMNS = { domain: 'domain', tier: 'tier', type: 'source_type', active: 'active' };
 
 export function sourceFilters(q: { search?: string; sort?: SortState }): EntityFilters {
-  const f: EntityFilters = { ...projectFilters() };
+  const f: EntityFilters = {};
   const search = q.search?.trim();
   if (search) f.search = search;
   const order = orderParam(q.sort, SOURCE_COLUMNS, '');

@@ -1,27 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-const scope = vi.hoisted(() => ({ id: null as string | null }));
-vi.mock('@/lib/project-scope', () => ({ getActiveProjectId: () => scope.id }));
-
-import { documentFilters, projectFilters, sourceFilters, topicFilters, UNREVIEWED_STATUSES } from '../filters';
+import { documentFilters, sourceFilters, topicFilters, UNREVIEWED_STATUSES } from '../filters';
 
 const NOW = new Date('2026-11-04T12:00:00');
 
-beforeEach(() => {
-  scope.id = null;
-});
-
 describe('research list filters (all server-side)', () => {
-  it('adds no project filter until a project is active, then scopes every list', () => {
-    expect(projectFilters()).toEqual({});
-    scope.id = 'p-1';
-    const f = projectFilters();
-    expect(Object.values(f)).toEqual(['p-1']);
-    expect(documentFilters({}, NOW)).toMatchObject(f);
-    expect(topicFilters({})).toMatchObject(f);
-    expect(sourceFilters({})).toMatchObject(f);
-  });
-
   it('documents: search, source, review and date range become tenant filters', () => {
     const f = documentFilters(
       { search: ' customs ', source: 'Example Wire', review: 'good', range: '7' },
