@@ -1,12 +1,10 @@
 'use client';
 
 /**
- * App shell nav for a Foundry-templated tenant app. The sidebar is data-driven:
- * the nav item tree comes from `buildNav` (see src/foundry.nav.ts) over the entity
- * types the tenant declared, rendered through the shared @startsimpli/ui
- * <GroupedNav/>. No schema/admin tools here — those live in the Foundry console.
- * Brand comes from foundry.config (substituted at fork time). Edit this however
- * you like — it's your app.
+ * App shell nav (wireframe C01): brand, the project switcher, the short fixed link
+ * list in `buildNav` (src/foundry.nav.ts), and the account footer. No schema/admin
+ * tools here — those live in the Foundry console. Brand comes from foundry.config
+ * (substituted at fork time).
  *
  * Two homes for the same nav (bd startsim-g2m75). From `md` up it is the fixed
  * rail beside the content. Below `md` a 240px rail left ~52px of content at
@@ -17,17 +15,14 @@
  * this renders inside a layout and layouts don't re-render on soft navigation.
  */
 import { useState } from 'react';
-import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
-import { useQuery } from '@tanstack/react-query';
-import { FolderKanban, LogOut } from 'lucide-react';
+import { LogOut } from 'lucide-react';
 import { useAuth } from '@startsimpli/auth';
-import { GroupedNav, NavDrawer, NavDrawerButton } from '@startsimpli/ui';
+import { NavDrawer, NavDrawerButton } from '@startsimpli/ui';
 
 import { signinUrl } from '@/lib/api';
-import { listTypes } from '@/lib/foundry-api';
 import { buildNav } from '@/foundry.nav';
-import { navIsActive } from '@/lib/nav-active';
+import { SidebarNav } from '@/components/sidebar-nav';
 import { FOUNDRY } from '@/foundry.config';
 import { ProjectSwitcher } from '@/components/projects/project-switcher';
 
@@ -53,8 +48,6 @@ function SidebarBody({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
   const search = useSearchParams().toString();
   const { user, logout } = useAuth();
-  const typesQuery = useQuery({ queryKey: ['schema-types'], queryFn: () => listTypes() });
-  const types = typesQuery.data?.results ?? [];
 
   const activeHref = pathname + (search ? `?${search}` : '');
   const brand = useBrand();
@@ -66,35 +59,10 @@ function SidebarBody({ onNavigate }: { onNavigate?: () => void }) {
         <span className="truncate font-semibold text-gray-900">{brand}</span>
       </div>
 
-      <ProjectSwitcher />
+      <ProjectSwitcher onNavigate={onNavigate} />
 
-      <div className="flex-1 overflow-y-auto px-3 py-4">
-        <Link
-          href="/projects"
-          onClick={onNavigate}
-          aria-current={pathname.startsWith('/projects') ? 'page' : undefined}
-          className={`mb-2 flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition hover:bg-gray-50 ${
-            pathname.startsWith('/projects') ? 'bg-primary-50 text-primary-700' : 'text-gray-700'
-          }`}
-        >
-          <FolderKanban className="h-4 w-4" />
-          Projects
-        </Link>
-        <GroupedNav
-          items={buildNav(types)}
-          activeHref={activeHref}
-          isActive={navIsActive}
-          renderLink={({ link, active, className, content }) => (
-            <Link
-              href={link.href}
-              className={className}
-              aria-current={active ? 'page' : undefined}
-              onClick={onNavigate}
-            >
-              {content}
-            </Link>
-          )}
-        />
+      <div className="flex-1 overflow-y-auto px-3 pt-4">
+        <SidebarNav entries={buildNav()} activeHref={activeHref} onNavigate={onNavigate} />
       </div>
 
       <div className="shrink-0 border-t border-gray-200 p-3">

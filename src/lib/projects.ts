@@ -71,18 +71,16 @@ export function buildProjectInput(args: {
   };
 }
 
-/** A tenant with no scopes at all gets one. A tenant with a client but no project does not. */
-export function needsDefaultProject(scopeCount: number): boolean {
-  return scopeCount === 0;
-}
-
-export function defaultProjectInput(account: { name?: string | null; email?: string | null }): ProjectInput {
-  const who = account.name?.trim() || account.email?.split('@')[0]?.trim() || '';
-  return buildProjectInput({
-    name: who ? `${who}'s project` : 'My project',
-    clientPath: null,
-    takenPaths: [],
-  });
+/** A client: a root scope that groups projects and nothing else. */
+export function buildClientInput(args: { name: string; takenPaths: string[] }): ProjectInput {
+  const name = args.name.trim();
+  if (!name) throw new Error('A client needs a name.');
+  const path = projectPath(name, null, args.takenPaths);
+  return {
+    entityType: PROJECT_TYPE,
+    name,
+    data: { name, kind: CLIENT_KIND, path, parent: '', active: true },
+  };
 }
 
 export interface ProjectRow {
@@ -93,6 +91,7 @@ export interface ProjectRow {
   client: string | null;
   clientPath: string | null;
   brief: string;
+  createdAt: string;
 }
 
 function str(v: unknown): string {
@@ -108,6 +107,7 @@ export function projectRow(record: EntityRecord, clientsByPath: Map<string, stri
     client: parent ? (clientsByPath.get(parent) ?? parent) : null,
     clientPath: parent || null,
     brief: str(readData(record.data, BRIEF_ATTR)),
+    createdAt: record.createdAt ?? '',
   };
 }
 

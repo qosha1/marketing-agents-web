@@ -39,14 +39,7 @@ vi.mock('@startsimpli/auth', () => ({
 }));
 
 vi.mock('@/lib/api', () => ({ signinUrl: () => 'https://auth.example.test/signin' }));
-vi.mock('@/lib/foundry-api', () => ({ listTypes: async () => ({ results: [] }), listAllEntities: async () => [{ id: 1 }] }));
-vi.mock('@/foundry.nav', () => ({
-  buildNav: () => [
-    { href: '/', label: 'Dashboard' },
-    { href: '/activity', label: 'Activity' },
-  ],
-}));
-
+vi.mock('@/lib/foundry-api', () => ({ listTypes: async () => ({ results: [] }), listAllEntities: async () => [] }));
 import { AppSidebar } from '../app-sidebar';
 
 function renderSidebar() {
@@ -79,7 +72,7 @@ describe('AppSidebar at phone width', () => {
     renderSidebar();
     fireEvent.click(menuButton());
     const drawer = screen.getByRole('dialog', { name: /navigation/i });
-    expect(within(drawer).getByRole('link', { name: /activity/i })).toBeInTheDocument();
+    expect(within(drawer).getByRole('link', { name: /^content$/i })).toBeInTheDocument();
     expect(within(drawer).getByRole('button', { name: /log out/i })).toBeInTheDocument();
   });
 

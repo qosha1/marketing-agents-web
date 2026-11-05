@@ -61,22 +61,83 @@ export function stampActiveProject(
   return { ...data, [SCOPE_PATH_ATTR]: active };
 }
 
-export interface SwitcherOption {
+export interface ProjectChoice {
   path: string;
   label: string;
+  /** The client this project is for, or null for a project of your own. */
+  clientName: string | null;
 }
 
-/** Top-level scopes: clients, and solo projects (their own root). */
-export function switcherOptions(scopes: EntityRecord[]): SwitcherOption[] {
-  return scopes
-    .filter((r) => {
-      const kind = readData(r.data, 'kind');
-      const parent = String(readData(r.data, 'parent') ?? '').trim();
-      return !parent && (kind === CLIENT_KIND || kind === PROJECT_KIND) && readData(r.data, 'active') !== false;
-    })
+export interface SwitcherModel {
+  /** Projects of your own (no client). */
+  solo: ProjectChoice[];
+  /** Clients that have at least one project, with those projects. */
+  clients: { path: string; name: string; projects: ProjectChoice[] }[];
+  /** Every project, in menu order. */
+  projects: ProjectChoice[];
+  /** Any active client at all: it decides whether the wording and the Client column appear. */
+  hasClients: boolean;
+}
+
+function textOf(r: EntityRecord, key: string): string {
+  const v = readData(r.data, key);
+  return typeof v === 'string' ? v.trim() : '';
+}
+
+/**
+ * What the switcher lists (wireframe C01): projects of your own first, then each
+ * client with its projects. Inactive scopes are left out. A project whose parent
+ * is not a client is treated as a project of your own, so it can never vanish.
+ */
+export function switcherModel(scopes: EntityRecord[]): SwitcherModel {
+  const live = scopes.filter((r) => readData(r.data, 'active') !== false && textOf(r, 'path'));
+  const nameOf = (r: EntityRecord) => textOf(r, 'name') || r.name;
+  const clientRows = live.filter((r) => textOf(r, 'kind') === CLIENT_KIND);
+  const clientByPath = new Map(clientRows.map((r) => [textOf(r, 'path'), nameOf(r)]));
+  const byName = (a: { label: string }, b: { label: string }) => a.label.localeCompare(b.label);
+
+  const choices = live
+    .filter((r) => textOf(r, 'kind') === PROJECT_KIND)
+    .map((r) => ({ path: textOf(r, 'path'), label: nameOf(r), parent: textOf(r, 'parent') }));
+  const toChoice = (c: (typeof choices)[number]): ProjectChoice => ({
+    path: c.path,
+    label: c.label,
+    clientName: clientByPath.get(c.parent) ?? null,
+  });
+
+  const solo = choices.filter((c) => !clientByPath.has(c.parent)).map(toChoice).sort(byName);
+  const clients = clientRows
     .map((r) => ({
-      path: String(readData(r.data, 'path') ?? ''),
-      label: String(readData(r.data, 'name') ?? r.name),
+      path: textOf(r, 'path'),
+      name: nameOf(r),
+      projects: choices.filter((c) => c.parent === textOf(r, 'path')).map(toChoice).sort(byName),
     }))
-    .filter((o) => o.path);
+    .filter((c) => c.projects.length > 0)
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  return {
+    solo,
+    clients,
+    projects: [...solo, ...clients.flatMap((c) => c.projects)],
+    hasClients: clientRows.length > 0,
+  };
+}
+
+export interface ActiveChoice {
+  label: string;
+  /** The line above the name: the client, or the word "Project". */
+  caption: string;
+}
+
+/**
+ * Who the active path is, or null when it names nothing that exists any more (a
+ * deleted project, a path saved by an older build). Null means the caller should
+ * clear it: a stale scope would show empty lists with no explanation.
+ */
+export function describeActive(scopes: EntityRecord[], model: SwitcherModel, path: string | null): ActiveChoice | null {
+  if (!path) return null;
+  const project = model.projects.find((p) => p.path === path);
+  if (project) return { label: project.label, caption: project.clientName ?? 'Project' };
+  const client = scopes.find((r) => textOf(r, 'path') === path && textOf(r, 'kind') === CLIENT_KIND);
+  return client ? { label: textOf(client, 'name') || client.name, caption: 'Client' } : null;
 }
