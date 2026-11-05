@@ -38,6 +38,25 @@ describe('research list filters (all server-side)', () => {
     expect(f['attr.title__icontains']).toBe('visa');
   });
 
+  it('topics: range is a created_after bound, market narrows on the text, Dates sorts on the row date', () => {
+    const f = topicFilters({ range: '14', market: 'UAE' }, NOW);
+    expect(f.created_after).toBe('2026-10-21');
+    expect(f['attr.market__icontains']).toBe('UAE');
+    expect(topicFilters({ range: 'all' }, NOW).created_after).toBeUndefined();
+    expect(topicFilters({ sort: { by: 'dates', dir: 'asc' } }, NOW).order).toBe('oldest');
+    expect(topicFilters({ sort: { by: 'dates', dir: 'desc' } }, NOW).order).toBe('recent');
+    expect(topicFilters({ sort: { by: 'markets', dir: 'desc' } }, NOW).order).toBe('-attr.market');
+  });
+
+  it('sources: type and active become tenant filters; Name sorts on the domain attribute', () => {
+    const f = sourceFilters({ type: 'advisory', active: 'on', sort: { by: 'name', dir: 'asc' } });
+    expect(f['attr.source_type']).toBe('advisory');
+    expect(f['attr.active']).toBe('true');
+    expect(f.order).toBe('attr.domain');
+    expect(sourceFilters({ active: 'off' })['attr.active']).toBe('false');
+    expect(sourceFilters({ active: 'all' })['attr.active']).toBeUndefined();
+  });
+
   it('sources: search by name', () => {
     expect(sourceFilters({ search: 'wire' })['search']).toBe('wire');
   });

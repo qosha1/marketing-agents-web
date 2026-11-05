@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { countDraftsByTopic, documentLine, excerptOf, formatDay, topicRow, topicSourceUrls } from '../topics';
+import { agoText, countDraftsByTopic, documentLine, documentSpan, excerptOf, formatDay, formatWeekday, topicRow, topicSourceUrls } from '../topics';
 import { record } from './fixtures';
 
 describe('topics list rows', () => {
@@ -60,5 +60,30 @@ describe('document lines on the topic page', () => {
     const long = record('n2', 'news_item', { content: 'x'.repeat(500) });
     expect(excerptOf(long).length).toBeLessThanOrEqual(221);
     expect(excerptOf(record('n3', 'news_item', {}))).toBe('');
+  });
+});
+
+describe('document dates and ages', () => {
+  const doc = (d: string) => record('n', 'news_item', { published_at: d });
+
+  it('spans the topic’s documents, one day shown once', () => {
+    expect(documentSpan([doc('2026-10-20'), doc('2026-10-16'), doc('2026-10-18')])).toBe('Oct 16 – Oct 20');
+    expect(documentSpan([doc('2026-10-13')])).toBe('Oct 13');
+    expect(documentSpan([])).toBe('');
+  });
+
+  it('a topic row takes its Dates from its documents, else from when it was made', () => {
+    const t = record('t', 'topic', { title: 'T', source_1: 'u1', source_2: 'u2' });
+    expect(topicRow(t, 0, { u1: doc('2026-10-14'), u2: doc('2026-10-17') }).dates).toBe('Oct 14 – Oct 17');
+    expect(topicRow(t, 0).dates).toBe('Oct 20');
+  });
+
+  it('labels weekdays and says how long ago', () => {
+    expect(formatWeekday('2026-11-04')).toBe('Wed');
+    const now = new Date('2026-11-04T12:00:00Z');
+    expect(agoText('2026-11-04T11:48:00Z', now)).toBe('12 minutes ago');
+    expect(agoText('2026-11-04T09:00:00Z', now)).toBe('3 hours ago');
+    expect(agoText('2026-11-02T12:00:00Z', now)).toBe('2 days ago');
+    expect(agoText(undefined, now)).toBe('a while ago');
   });
 });

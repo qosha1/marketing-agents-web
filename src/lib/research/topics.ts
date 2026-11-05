@@ -30,16 +30,34 @@ export function topicTitle(topic: EntityRecord): string {
   return str(readData(topic.data, 'title')) || topic.name;
 }
 
-export function topicRow(topic: EntityRecord, inContent: number): TopicRow {
+export function topicRow(
+  topic: EntityRecord,
+  inContent: number,
+  docsByUrl: Record<string, EntityRecord> = {},
+): TopicRow {
   return {
     id: String(topic.id),
     title: topicTitle(topic),
     angle: str(readData(topic.data, 'angle')),
     sources: topicSourceUrls(topic).length,
     markets: str(readData(topic.data, 'market')),
-    dates: formatDay(topic.createdAt),
+    dates: documentSpan(topicSourceUrls(topic).map((u) => docsByUrl[u]).filter(Boolean)) || formatDay(topic.createdAt),
     inContent,
   };
+}
+
+/** Day of the week, as the overview's bars are labelled. */
+export function formatWeekday(iso: string): string {
+  const d = new Date(`${iso}T12:00:00`);
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-US', { weekday: 'short' });
+}
+
+/** `Oct 16 – Oct 20`, or `Oct 13` when every document is from one day. */
+export function documentSpan(docs: EntityRecord[]): string {
+  const days = docs.map((d) => str(readData(d.data, 'published_at')).slice(0, 10)).filter(Boolean).sort();
+  if (days.length === 0) return '';
+  const [from, to] = [formatDay(days[0]), formatDay(days[days.length - 1])];
+  return from === to ? from : `${from} – ${to}`;
 }
 
 /** `{ topic id: how many drafts }` from one list of drafts. */
@@ -67,4 +85,16 @@ const EXCERPT_MAX = 220;
 export function excerptOf(doc: EntityRecord): string {
   const text = (str(readData(doc.data, 'snippet')) || str(readData(doc.data, 'content'))).replace(/\s+/g, ' ');
   return text.length > EXCERPT_MAX ? `${text.slice(0, EXCERPT_MAX).trimEnd()}…` : text;
+}
+
+/** `12 minutes ago`, `3 hours ago`, `2 days ago`. */
+export function agoText(iso: string | null | undefined, now: Date = new Date()): string {
+  const t = iso ? new Date(iso).getTime() : NaN;
+  if (Number.isNaN(t)) return 'a while ago';
+  const mins = Math.max(0, Math.round((now.getTime() - t) / 60_000));
+  const unit = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'} ago`;
+  if (mins < 1) return 'just now';
+  if (mins < 60) return unit(mins, 'minute');
+  if (mins < 60 * 24) return unit(Math.round(mins / 60), 'hour');
+  return unit(Math.round(mins / (60 * 24)), 'day');
 }
