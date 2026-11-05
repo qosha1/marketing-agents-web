@@ -1,0 +1,296 @@
+{
+  "$note": "Projects fixtures for the app shell (switcher, Projects list, Project page): a client with two projects, two solo projects (one with a non-standard external id and an accented name), and an empty project. Each project holds its own topics so a project switch visibly narrows Research and Content. Appended after the other fixtures so it does not disturb their ids.",
+  "rows": [
+    {
+      "entity_type": "scope",
+      "external_id": "scope:/acme",
+      "name": "Acme Agency",
+      "data": {
+        "name": "Acme Agency",
+        "kind": "client",
+        "path": "/acme",
+        "parent": "",
+        "active": true,
+        "brand_voice": "Plain, friendly, no jargon."
+      }
+    },
+    {
+      "entity_type": "scope",
+      "external_id": "scope:/acme/launch",
+      "name": "Launch Campaign",
+      "data": {
+        "name": "Launch Campaign",
+        "kind": "project",
+        "path": "/acme/launch",
+        "parent": "/acme",
+        "active": true,
+        "brand_voice": "Launch announcements for Acme's new product line."
+      }
+    },
+    {
+      "entity_type": "scope",
+      "external_id": "scope:/acme/newsletter",
+      "name": "Acme Newsletter",
+      "data": {
+        "name": "Acme Newsletter",
+        "kind": "project",
+        "path": "/acme/newsletter",
+        "parent": "/acme",
+        "active": true
+      }
+    },
+    {
+      "entity_type": "scope",
+      "external_id": "scope:/field-notes",
+      "name": "Field Notes",
+      "data": {
+        "name": "Field Notes",
+        "kind": "project",
+        "path": "/field-notes",
+        "parent": "",
+        "active": true,
+        "brand_voice": "Short field reports from site visits. First person, specific, no hype."
+      }
+    },
+    {
+      "entity_type": "scope",
+      "external_id": "legacy_Notes 2 (imported)",
+      "name": "Café Notes & Co.",
+      "data": {
+        "name": "Café Notes & Co.",
+        "kind": "project",
+        "path": "/cafe-notes-co",
+        "parent": "",
+        "active": true
+      }
+    },
+    {
+      "entity_type": "scope",
+      "external_id": "scope:/fresh-start",
+      "name": "Fresh Start",
+      "data": {
+        "name": "Fresh Start",
+        "kind": "project",
+        "path": "/fresh-start",
+        "parent": "",
+        "active": true
+      }
+    },
+    {
+      "entity_type": "topic",
+      "external_id": "topic-shell-01",
+      "name": "Acme launch: what changes for customers",
+      "scope": "/acme/launch",
+      "data": {
+        "title": "Acme launch: what changes for customers",
+        "subtitle": "Seeded for the project switcher.",
+        "angle": "Seeded angle.",
+        "market": "GCC",
+        "content_type": "weekly_brief",
+        "status": "suggested",
+        "ai_rank": 0.5,
+        "source_1": "https://example.local/news/01",
+        "source_2": "",
+        "assignee_sub": "",
+        "assignee_name": ""
+      }
+    },
+    {
+      "entity_type": "topic",
+      "external_id": "topic-shell-02",
+      "name": "Acme launch FAQ",
+      "scope": "/acme/launch",
+      "data": {
+        "title": "Acme launch FAQ",
+        "subtitle": "Seeded for the project switcher.",
+        "angle": "Seeded angle.",
+        "market": "GCC",
+        "content_type": "general",
+        "status": "ready",
+        "ai_rank": 0.5,
+        "source_1": "https://example.local/news/01",
+        "source_2": "",
+        "assignee_sub": "",
+        "assignee_name": ""
+      }
+    },
+    {
+      "entity_type": "topic",
+      "external_id": "topic-shell-03",
+      "name": "Acme newsletter: October roundup",
+      "scope": "/acme/newsletter",
+      "data": {
+        "title": "Acme newsletter: October roundup",
+        "subtitle": "Seeded for the project switcher.",
+        "angle": "Seeded angle.",
+        "market": "GCC",
+        "content_type": "weekly_brief",
+        "status": "written",
+        "ai_rank": 0.5,
+        "source_1": "https://example.local/news/01",
+        "source_2": "",
+        "assignee_sub": "",
+        "assignee_name": ""
+      }
+    },
+    {
+      "entity_type": "topic",
+      "external_id": "topic-shell-04",
+      "name": "Field notes: Doha site visit",
+      "scope": "/field-notes",
+      "data": {
+        "title": "Field notes: Doha site visit",
+        "subtitle": "Seeded for the project switcher.",
+        "angle": "Seeded angle.",
+        "market": "GCC",
+        "content_type": "general",
+        "status": "suggested",
+        "ai_rank": 0.5,
+        "source_1": "https://example.local/news/01",
+        "source_2": "",
+        "assignee_sub": "",
+        "assignee_name": ""
+      }
+    },
+    {
+      "entity_type": "topic",
+      "external_id": "topic-shell-05",
+      "name": "Field notes: Riyadh supplier call",
+      "scope": "/field-notes",
+      "data": {
+        "title": "Field notes: Riyadh supplier call",
+        "subtitle": "Seeded for the project switcher.",
+        "angle": "Seeded angle.",
+        "market": "GCC",
+        "content_type": "lead_magnet",
+        "status": "ready",
+        "ai_rank": 0.5,
+        "source_1": "https://example.local/news/01",
+        "source_2": "",
+        "assignee_sub": "",
+        "assignee_name": ""
+      }
+    },
+    {
+      "entity_type": "topic",
+      "external_id": "topic-shell-06",
+      "name": "Café notes: first tasting",
+      "scope": "/cafe-notes-co",
+      "data": {
+        "title": "Café notes: first tasting",
+        "subtitle": "Seeded for the project switcher.",
+        "angle": "Seeded angle.",
+        "market": "GCC",
+        "content_type": "general",
+        "status": "suggested",
+        "ai_rank": 0.5,
+        "source_1": "https://example.local/news/01",
+        "source_2": "",
+        "assignee_sub": "",
+        "assignee_name": ""
+      }
+    },
+    {
+      "entity_type": "draft",
+      "external_id": "draft-shell-01",
+      "name": "Doha site visit: write-up",
+      "scope": "/field-notes",
+      "data": {
+        "status": "approved",
+        "lang": "en",
+        "content_type": "general",
+        "candidate_index": 0,
+        "chosen": true,
+        "blog": "# Doha site visit: write-up\n\nSeeded body for the project switcher fixtures.\n\nSecond paragraph.",
+        "linkedin": "Doha site visit: write-up (seeded).",
+        "seo": {
+          "title": "Doha site visit: write-up",
+          "meta": "Seeded."
+        },
+        "sources": [
+          {
+            "url": "https://example.gov.local/a",
+            "title": "Primary"
+          }
+        ],
+        "auto_checks": {
+          "sources_ok": true,
+          "length_ok": true
+        },
+        "judge_verdict": {
+          "score": 7,
+          "notes": "Seeded."
+        },
+        "topic_ref": "{{id:topic:topic-shell-04}}"
+      }
+    },
+    {
+      "entity_type": "draft",
+      "external_id": "draft-shell-02",
+      "name": "Riyadh supplier call: notes",
+      "scope": "/field-notes",
+      "data": {
+        "status": "ready_for_review",
+        "lang": "en",
+        "content_type": "lead_magnet",
+        "candidate_index": 0,
+        "chosen": true,
+        "blog": "# Riyadh supplier call: notes\n\nSeeded body for the project switcher fixtures.\n\nSecond paragraph.",
+        "linkedin": "Riyadh supplier call: notes (seeded).",
+        "seo": {
+          "title": "Riyadh supplier call: notes",
+          "meta": "Seeded."
+        },
+        "sources": [
+          {
+            "url": "https://example.gov.local/a",
+            "title": "Primary"
+          }
+        ],
+        "auto_checks": {
+          "sources_ok": true,
+          "length_ok": true
+        },
+        "judge_verdict": {
+          "score": 7,
+          "notes": "Seeded."
+        },
+        "topic_ref": "{{id:topic:topic-shell-05}}"
+      }
+    },
+    {
+      "entity_type": "draft",
+      "external_id": "draft-shell-03",
+      "name": "Acme launch FAQ",
+      "scope": "/acme/launch",
+      "data": {
+        "status": "approved",
+        "lang": "en",
+        "content_type": "general",
+        "candidate_index": 0,
+        "chosen": true,
+        "blog": "# Acme launch FAQ\n\nSeeded body for the project switcher fixtures.\n\nSecond paragraph.",
+        "linkedin": "Acme launch FAQ (seeded).",
+        "seo": {
+          "title": "Acme launch FAQ",
+          "meta": "Seeded."
+        },
+        "sources": [
+          {
+            "url": "https://example.gov.local/a",
+            "title": "Primary"
+          }
+        ],
+        "auto_checks": {
+          "sources_ok": true,
+          "length_ok": true
+        },
+        "judge_verdict": {
+          "score": 7,
+          "notes": "Seeded."
+        },
+        "topic_ref": "{{id:topic:topic-shell-02}}"
+      }
+    }
+  ]
+}

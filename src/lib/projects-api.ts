@@ -18,9 +18,8 @@ import {
   BRIEF_ATTR,
   CLIENT_KIND,
   PROJECT_TYPE,
+  buildClientInput,
   buildProjectInput,
-  defaultProjectInput,
-  needsDefaultProject,
   projectListFilters,
   projectRow,
   type ProjectListQuery,
@@ -30,6 +29,8 @@ import {
 export interface ClientOption {
   path: string;
   name: string;
+  /** An archived client still names its projects, but is not offered for new ones. */
+  active: boolean;
 }
 
 export function clientOptions(records: EntityRecord[]): ClientOption[] {
@@ -37,6 +38,7 @@ export function clientOptions(records: EntityRecord[]): ClientOption[] {
     .map((r) => ({
       path: String(readData(r.data, 'path') ?? ''),
       name: String(readData(r.data, 'name') ?? r.name),
+      active: readData(r.data, 'active') !== false,
     }))
     .filter((c) => c.path);
 }
@@ -61,36 +63,34 @@ export async function listProjectsPage(
   return { count: res.count ?? 0, rows: res.results.map((r) => projectRow(r, byPath)) };
 }
 
-export async function createProject(args: { name: string; clientPath: string | null }): Promise<EntityRecord> {
+export async function createProject(args: {
+  name: string;
+  /** An existing client's path, or null for a project of your own. */
+  clientPath: string | null;
+  /** Make this client first (the dialog's "New client…"); wins over `clientPath`. */
+  newClientName?: string;
+}): Promise<EntityRecord> {
   const takenPaths = await listScopePaths();
-  return createEntity(buildProjectInput({ ...args, takenPaths }));
+  let clientPath = args.clientPath;
+  if (args.newClientName?.trim()) {
+    const client = await createEntity(buildClientInput({ name: args.newClientName, takenPaths }));
+    clientPath = String(readData(client.data, 'path') ?? '') || null;
+    if (clientPath) takenPaths.push(clientPath);
+  }
+  return createEntity(buildProjectInput({ name: args.name, clientPath, takenPaths }));
 }
 
-/** A tenant with no scopes at all is given one project named from the account. */
-let defaultInFlight: Promise<EntityRecord | null> | null = null;
-export function ensureDefaultProject(account: {
-  name?: string | null;
-  email?: string | null;
-}): Promise<EntityRecord | null> {
-  // The rail and the phone drawer both mount a switcher: one creation, not two.
-  defaultInFlight ??= createDefaultIfEmpty(account).finally(() => {
-    defaultInFlight = null;
-  });
-  return defaultInFlight;
-}
-
-async function createDefaultIfEmpty(account: {
-  name?: string | null;
-  email?: string | null;
-}): Promise<EntityRecord | null> {
-  const probe = await listEntities(PROJECT_TYPE, 1, { page_size: '1' });
-  if (!needsDefaultProject(probe.count ?? 0)) return null;
-  return createEntity(defaultProjectInput(account));
-}
-
-export async function loadProject(id: number | string): Promise<{ record: EntityRecord; row: ProjectRow }> {
+export async function loadProject(
+  id: number | string,
+  clients: ClientOption[] = [],
+): Promise<{ record: EntityRecord; row: ProjectRow }> {
   const record = await getEntity(id);
-  return { record, row: projectRow(record, new Map()) };
+  return { record, row: projectRow(record, new Map(clients.map((c) => [c.path, c.name]))) };
+}
+
+/** Move a project to another client (or to none). The path stays: it is the project's id and its content's scope. */
+export async function changeProjectClient(record: EntityRecord, clientPath: string | null): Promise<EntityRecord> {
+  return updateEntity(record.id, { data: laneMoveData(record.data, 'parent', clientPath ?? '') });
 }
 
 export async function saveBrief(record: EntityRecord, brief: string): Promise<EntityRecord> {
@@ -98,15 +98,14 @@ export async function saveBrief(record: EntityRecord, brief: string): Promise<En
 }
 
 /**
- * How many sources a project has, or null when sources are not scoped to a
- * project yet (`source` is deliberately unscoped today, so the tenant would
- * answer ?scope= with a 400). Lights up by itself once `source` declares a path.
+ * How many sources a project has. `source` is not scoped to a project yet, so
+ * every project shares the one set and the count is that set's size; once `source`
+ * declares a scope path the count narrows to the project by itself.
  */
-export async function countProjectSources(path: string): Promise<number | null> {
+export async function countProjectSources(path: string): Promise<number> {
   const types = await listTypes();
   const source = types.results.find((t) => t.key === 'source');
   const scope = (source?.config as { scope?: { pathAttribute?: unknown; path_attribute?: unknown } } | undefined)?.scope;
   const declared = scope?.pathAttribute ?? scope?.path_attribute;
-  if (!declared) return null;
-  return countEntities('source', { scope: path });
+  return declared ? countEntities('source', { scope: path }) : countEntities('source');
 }

@@ -2,8 +2,8 @@
  * The Dashboard's page chrome and its onward links (wireframe review, epic
  * startsim-89qmd).
  *
- * - The page is called what the sidebar calls it, at the h1 size every other
- *   page uses, with no caption (startsim-cl61n, startsim-flt8u).
+ * - The page itself is a holding page (wireframe V01): one dashed "To do" card.
+ *   The widgets below are kept for when the Dashboard is designed.
  * - A Content pipeline stage opens the Topics table on that state; it used to
  *   be a disabled button that looked clickable (startsim-m7fdm.35).
  * - The Ingestion card's figures open the articles and the sources
@@ -72,13 +72,14 @@ function wrap(node: ReactNode) {
 beforeEach(() => push.mockReset());
 
 describe('Dashboard page chrome', () => {
-  it('is titled "Dashboard" as the page h1, with no caption', () => {
+  it('is a holding page: the "Dashboard" h1 and one dashed "To do" card, no widgets', () => {
     wrap(<DashboardHome />);
-    const h1 = screen.getByRole('heading', { level: 1 });
-    expect(h1).toHaveTextContent('Dashboard');
-    expect(h1.className).toContain('text-2xl');
-    expect(screen.queryByText(/System health/)).toBeNull();
-    expect(screen.queryByText(/What needs a human right now/)).toBeNull();
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Dashboard');
+    const card = screen.getByText('To do').parentElement!;
+    expect(card.className).toContain('border-dashed');
+    expect(screen.queryByText(/What needs a human/)).toBeNull();
+    expect(screen.queryByText(/Content pipeline/)).toBeNull();
+    expect(screen.queryByText(/Ingestion/)).toBeNull();
   });
 });
 

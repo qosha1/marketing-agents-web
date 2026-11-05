@@ -11,8 +11,7 @@ import {
   BRIEF_ATTR,
   PROJECT_KIND,
   buildProjectInput,
-  defaultProjectInput,
-  needsDefaultProject,
+  buildClientInput,
   projectPath,
   projectRow,
   sourcesBelong,
@@ -64,15 +63,10 @@ describe('project entity', () => {
     expect(projectPath('!!!', null, [])).toBe('/project');
   });
 
-  it('a first-time user with no scopes at all is given a default project named from their account', () => {
-    expect(needsDefaultProject(0)).toBe(true);
-    // OGMC has a client scope and no projects yet: it must NOT get a surprise project.
-    expect(needsDefaultProject(1)).toBe(false);
-    const input = defaultProjectInput({ name: 'Quinn Osha', email: 'quinn@example.com' });
-    expect(input.name).toBe("Quinn Osha's project");
-    expect(input.data).toMatchObject({ kind: PROJECT_KIND, parent: '' });
-    expect(defaultProjectInput({ email: 'quinn@example.com' }).name).toBe("quinn's project");
-    expect(defaultProjectInput({}).name).toBe('My project');
+  it('a client is a root scope of kind client, on a free path', () => {
+    const input = buildClientInput({ name: 'Acme Agency', takenPaths: ['/acme-agency'] });
+    expect(input.data).toMatchObject({ kind: 'client', path: '/acme-agency-2', parent: '', active: true });
+    expect(() => buildClientInput({ name: ' ', takenPaths: [] })).toThrow(/name/i);
   });
 
   it('a project row names its client, blank when it has none, and reads the brief', () => {

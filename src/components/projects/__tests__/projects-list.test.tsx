@@ -4,13 +4,13 @@
  */
 import * as React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('next/navigation', () => ({
   usePathname: () => '/projects',
   useSearchParams: () => new URLSearchParams(),
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  useRouter: () => ({ push, replace: vi.fn() }),
 }));
 vi.mock('next/link', () => ({
   default: ({ href, children, ...rest }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
@@ -18,6 +18,7 @@ vi.mock('next/link', () => ({
   ),
 }));
 
+const push = vi.fn();
 const listEntities = vi.fn();
 const listAllEntities = vi.fn();
 vi.mock('@/lib/foundry-api', () => ({
@@ -46,6 +47,7 @@ function renderList() {
 }
 
 beforeEach(() => {
+  push.mockReset();
   listEntities.mockReset();
   listAllEntities.mockReset();
   listAllEntities.mockResolvedValue([CLIENT]);
@@ -67,10 +69,33 @@ describe('ProjectsList', () => {
     expect(blogRow.textContent).not.toContain('OGMC');
   });
 
-  it('links each project name to its page', async () => {
+  it('opens a project when its row is clicked', async () => {
     renderList();
-    const link = await screen.findByRole('link', { name: 'GCC Weekly' });
-    expect(link).toHaveAttribute('href', '/projects/2');
+    fireEvent.click(await screen.findByText('GCC Weekly'));
+    expect(push).toHaveBeenCalledWith('/projects/2');
+  });
+
+  it('hides the Client column and filter when there is no client at all', async () => {
+    listAllEntities.mockResolvedValue([]);
+    listEntities.mockResolvedValue({ count: 1, next: null, previous: null, results: [BLOG] });
+    renderList();
+    await screen.findByText('My Blog');
+    expect(screen.queryByText('Client')).toBeNull();
+    expect(screen.queryByLabelText('Client')).toBeNull();
+  });
+
+  it('filters by client on the server', async () => {
+    renderList();
+    await screen.findByText('GCC Weekly');
+    fireEvent.change(await screen.findByLabelText('Client'), { target: { value: '/ogmc' } });
+    await waitFor(() =>
+      expect(listEntities).toHaveBeenLastCalledWith('scope', 1, expect.objectContaining({ 'attr.parent': '/ogmc' })),
+    );
+  });
+
+  it('counts the projects under the title', async () => {
+    renderList();
+    expect(await screen.findByText('2 projects')).toBeInTheDocument();
   });
 
   it('asks the server for page 1 of projects only, sorted by name', async () => {
@@ -91,7 +116,7 @@ describe('ProjectsList', () => {
   it('sorts server-side when a header is clicked', async () => {
     renderList();
     await screen.findByText('GCC Weekly');
-    fireEvent.click(screen.getByText('Client'));
+    fireEvent.click(within(screen.getByRole('columnheader', { name: /client/i })).getByRole('button'));
     await waitFor(() =>
       expect(listEntities).toHaveBeenLastCalledWith('scope', 1, expect.objectContaining({ order: 'attr.parent' })),
     );
@@ -105,17 +130,23 @@ describe('ProjectsList', () => {
     await waitFor(() => expect(listEntities).toHaveBeenLastCalledWith('scope', 2, expect.anything()));
   });
 
-  it('says what to do when there are no projects', async () => {
+  it('first run: "Start your first project" with the New project action and the client hint', async () => {
+    listAllEntities.mockResolvedValue([]);
     listEntities.mockResolvedValue({ count: 0, next: null, previous: null, results: [] });
     renderList();
-    expect(await screen.findByText(/no projects yet/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /new project/i })).toBeInTheDocument();
+    expect(await screen.findByText('Start your first project')).toBeInTheDocument();
+    expect(screen.getByText(/writing for clients\? you can pick or add one/i)).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /new project/i }).length).toBeGreaterThan(0);
   });
 
-  it('shows a dash in Sources while sources are not scoped to a project', async () => {
+  it('marks the active project as Current', async () => {
+    Object.defineProperty(window, 'localStorage', {
+      value: { getItem: () => '/my-blog', setItem: vi.fn(), removeItem: vi.fn() },
+      configurable: true,
+    });
     renderList();
-    await screen.findByText('GCC Weekly');
-    const gccRow = screen.getAllByRole('row').find((r) => r.textContent?.includes('GCC Weekly'))!;
-    expect(gccRow.textContent).toMatch(/—|-/);
+    await screen.findByText('My Blog');
+    const blogRow = screen.getAllByRole('row').find((r) => r.textContent?.includes('My Blog'))!;
+    expect(blogRow.textContent).toContain('Current');
   });
 });
