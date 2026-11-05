@@ -112,4 +112,27 @@ describe('ProjectPage', () => {
     expect(screen.getByRole('link', { name: /back to projects/i })).toHaveAttribute('href', '/projects');
     expect(getEntity).toHaveBeenCalledTimes(1);
   });
+
+  it('Change client saves the new client on the project, then shows it', async () => {
+    listAllEntities.mockResolvedValue([
+      { id: 1, name: 'OGMC', data: { name: 'OGMC', path: '/ogmc', kind: 'client' } },
+      { id: 9, name: 'Acme', data: { name: 'Acme', path: '/acme', kind: 'client' } },
+    ]);
+    renderPage();
+    await screen.findByRole('heading', { name: 'GCC Weekly' });
+    fireEvent.click(screen.getByRole('button', { name: /change client/i }));
+    const select = await screen.findByLabelText('Client');
+    fireEvent.change(select, { target: { value: '/acme' } });
+    updateEntity.mockResolvedValue({ ...RECORD, data: { ...RECORD.data, parent: '/acme' } });
+    getEntity.mockResolvedValue({ ...RECORD, data: { ...RECORD.data, parent: '/acme' } });
+    const dialog = screen.getByRole('dialog');
+    fireEvent.click(Array.from(dialog.querySelectorAll('button')).find((b) => b.textContent === 'Change client')!);
+    await waitFor(() => expect(updateEntity).toHaveBeenCalledTimes(1));
+    const [id, body] = updateEntity.mock.calls[0];
+    expect(id).toBe(2);
+    expect(body.data.parent).toBe('/acme');
+    expect(body.data.path).toBe('/ogmc/gcc-weekly');
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(await screen.findByText('Acme')).toBeInTheDocument();
+  });
 });

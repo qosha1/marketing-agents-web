@@ -14,8 +14,10 @@ vi.mock('@/lib/foundry-api', () => api);
 
 import SettingsPage from '../page';
 
+vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+
 beforeEach(() => {
-  api.listTypes.mockReset().mockResolvedValue(page([{ id: 's', key: 'source', label: 'Source', attributes: [{ id: 'a', name: 'source_type', dataType: 'enum', required: false, config: { choices: ['state_wire', 'advisory'] } }] }] as never));
+  api.listTypes.mockReset().mockResolvedValue(page([{ id: 's', key: 'source', label: 'Source', attributes: [{ id: 'a', name: 'source_type', dataType: 'enum', required: false, config: { choices: ['state_wire', 'advisory'] } }, ...['domain', 'tier', 'active', 'adapter', 'coverage', 'feed_url', 'notes'].map((n, i) => ({ id: `b${i}`, name: n, dataType: n === 'active' ? 'boolean' : n === 'tier' ? 'integer' : 'string', required: false, config: {} }))] }] as never));
   api.listEntities.mockReset().mockResolvedValue(
     page([
       record('s1', 'source', { domain: 'example.gov.local', tier: 1, source_type: 'state_wire', active: true }, { name: 'Example Wire' }),
@@ -56,5 +58,15 @@ describe('Research > Settings (source configuration)', () => {
       expect(last[2]['attr.source_type']).toBe('advisory');
       expect(last[2]['attr.active']).toBe('true');
     });
+  });
+
+  it('Add source asks only for Name, Domain, Tier, Type, Active', async () => {
+    renderPage(<SettingsPage />);
+    await screen.findByText('Example Wire');
+    fireEvent.click(screen.getByRole('button', { name: 'Add source' }));
+    const dialog = await screen.findByRole('dialog');
+    const labels = Array.from(dialog.querySelectorAll('label')).map((l) => l.textContent?.replace(/[\s*]+/g, '').toLowerCase());
+    expect(labels).toEqual(['name', 'domain', 'tier', 'sourcetype', 'active']);
+    for (const gone of ['adapter', 'coverage', 'feedurl', 'notes']) expect(labels).not.toContain(gone);
   });
 });

@@ -18,6 +18,8 @@ interface RecordFormProps {
   /** Values the form opens with — e.g. the Kind of the list it was opened
    *  from, so a topic added on Weekly Briefs lands in Weekly Briefs. */
   defaults?: Record<string, unknown>;
+  /** Ask only for these attributes, in this order (e.g. the short Add source form). Others stay as stored, untouched. */
+  fields?: string[];
 }
 
 /**
@@ -26,7 +28,7 @@ interface RecordFormProps {
  * cleanly into a dialog; the tall body scrolls so a many-field type never
  * overflows the viewport.
  */
-export function RecordForm({ type, onSuccess, onCancel, defaults }: RecordFormProps) {
+export function RecordForm({ type, onSuccess, onCancel, defaults, fields }: RecordFormProps) {
   const queryClient = useQueryClient();
   const [name, setName] = useState('');
   const [nameMissing, setNameMissing] = useState(false);
@@ -37,12 +39,15 @@ export function RecordForm({ type, onSuccess, onCancel, defaults }: RecordFormPr
     type.attributes.some((a) => a.name === ASSIGNEE_NAME_ATTR);
   // Name is the title (`title` copies it), the assignee pair is one roster
   // picker, and `_`-keys are the pipeline's own (bd startsim-umlou, startsim-m27hp).
-  const shown = type.attributes.filter(
+  const allShown = type.attributes.filter(
     (a) =>
       a.name !== TITLE_ATTR &&
       !isSystemAttr(a.name) &&
       !(hasAssigneePair && a.name === ASSIGNEE_NAME_ATTR),
   );
+  const shown = fields
+    ? fields.flatMap((f) => allShown.filter((a) => a.name === f))
+    : allShown;
 
   function setValue(key: string, value: unknown) {
     setValues((prev) => ({ ...prev, [key]: value }));
