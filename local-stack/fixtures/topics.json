@@ -14,8 +14,8 @@
         "content_type": "weekly_brief",
         "status": "suggested",
         "ai_rank": 0.95,
-        "source_1": "https://example.gov.local/a",
-        "source_2": "https://example.press.local/b",
+        "source_1": "https://example.local/news/01",
+        "source_2": "https://example.local/news/02",
         "assignee_sub": "",
         "assignee_name": ""
       }
@@ -35,8 +35,8 @@
         "ai_rank": 0.9,
         "team_verdict": "accept",
         "team_notes": "Looks fine.",
-        "source_1": "https://example.gov.local/a",
-        "source_2": "https://example.press.local/b",
+        "source_1": "https://example.local/news/02",
+        "source_2": "https://example.local/news/03",
         "scheduled_for": "2026-10-10",
         "assignee_sub": "",
         "assignee_name": ""
@@ -57,8 +57,7 @@
         "ai_rank": 0.85,
         "team_verdict": "accept",
         "team_notes": "Looks fine.",
-        "source_1": "https://example.gov.local/a",
-        "source_2": "https://example.press.local/b",
+        "source_1": "https://example.local/news/03",
         "delivered_at": "2026-09-20"
       }
     },
@@ -77,8 +76,8 @@
         "ai_rank": 0.8,
         "team_verdict": "reject",
         "team_notes": "Off-brief.",
-        "source_1": "https://example.gov.local/a",
-        "source_2": "https://example.press.local/b",
+        "source_1": "https://example.local/news/04",
+        "source_2": "https://example.local/news/05",
         "assignee_sub": "",
         "assignee_name": ""
       }
@@ -96,8 +95,8 @@
         "content_type": "lead_magnet",
         "status": "suggested",
         "ai_rank": 0.75,
-        "source_1": "https://example.gov.local/a",
-        "source_2": "https://example.press.local/b",
+        "source_1": "https://example.local/news/05",
+        "source_2": "https://example.local/news/06",
         "assignee_sub": "",
         "assignee_name": ""
       }
@@ -117,8 +116,7 @@
         "ai_rank": 0.7,
         "team_verdict": "accept",
         "team_notes": "Looks fine.",
-        "source_1": "https://example.gov.local/a",
-        "source_2": "https://example.press.local/b",
+        "source_1": "https://example.local/news/06",
         "scheduled_for": "2026-10-10"
       }
     },
@@ -137,8 +135,8 @@
         "ai_rank": 0.65,
         "team_verdict": "accept",
         "team_notes": "Looks fine.",
-        "source_1": "https://example.gov.local/a",
-        "source_2": "https://example.press.local/b",
+        "source_1": "https://example.local/news/07",
+        "source_2": "https://example.local/news/08",
         "delivered_at": "2026-09-20",
         "assignee_sub": "",
         "assignee_name": ""
@@ -159,8 +157,8 @@
         "ai_rank": 0.6,
         "team_verdict": "reject",
         "team_notes": "Off-brief.",
-        "source_1": "https://example.gov.local/a",
-        "source_2": "https://example.press.local/b",
+        "source_1": "https://example.local/news/08",
+        "source_2": "https://example.local/news/09",
         "assignee_sub": "",
         "assignee_name": ""
       }
@@ -178,8 +176,7 @@
         "content_type": "general",
         "status": "suggested",
         "ai_rank": 0.55,
-        "source_1": "https://example.gov.local/a",
-        "source_2": "https://example.press.local/b"
+        "source_1": "https://example.local/news/09"
       }
     },
     {
@@ -197,8 +194,8 @@
         "ai_rank": 0.5,
         "team_verdict": "accept",
         "team_notes": "Looks fine.",
-        "source_1": "https://example.gov.local/a",
-        "source_2": "https://example.press.local/b",
+        "source_1": "https://example.local/news/10",
+        "source_2": "https://example.local/news/11",
         "scheduled_for": "2026-10-10",
         "assignee_sub": "",
         "assignee_name": ""
@@ -219,8 +216,8 @@
         "ai_rank": 0.45,
         "team_verdict": "accept",
         "team_notes": "Looks fine.",
-        "source_1": "https://example.gov.local/a",
-        "source_2": "https://example.press.local/b",
+        "source_1": "https://example.local/news/11",
+        "source_2": "https://example.local/news/12",
         "delivered_at": "2026-09-20",
         "assignee_sub": "",
         "assignee_name": ""
@@ -241,8 +238,7 @@
         "ai_rank": 0.4,
         "team_verdict": "reject",
         "team_notes": "Off-brief.",
-        "source_1": "https://example.gov.local/a",
-        "source_2": "https://example.press.local/b"
+        "source_1": "https://example.local/news/12"
       }
     }
   ]

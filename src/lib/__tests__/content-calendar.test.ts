@@ -46,9 +46,9 @@ describe('the server query for a month', () => {
     expect(f['attr.status__in']).toBe('scheduled');
   });
 
-  it('adds no project parameter when none is active', () => {
+  it('leaves project scoping to listEntities (it never sets scope itself)', () => {
     expect(calendarFilters(2026, 9, null)).not.toHaveProperty('scope');
-    expect(calendarFilters(2026, 9, '/ogmc').scope).toBe('/ogmc');
+    expect(calendarFilters(2026, 9, '/ogmc')).not.toHaveProperty('scope');
   });
 });
 

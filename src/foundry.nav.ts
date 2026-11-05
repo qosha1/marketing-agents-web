@@ -8,9 +8,11 @@
  *
  * The tree:
  *   - Dashboard (/)               — the review/system-health home
- *   - Activity (/activity)        — every edit across records, by person or machine
+ *   - Research group             — Overview, Topics, Sources, Settings (/research/*).
+ *       The topic list, the pulled-in documents (news_item) and the source
+ *       configuration (source) live here, so Data does not list them again.
+ *       There is no Activity item; /activity still exists by URL.
  *   - Content group               — the content data tables:
- *       · Topics (/t/topic)       — every idea (all kinds), click → review/edit
  *       · one item PER content_type — the same table pre-filtered to that kind,
  *         derived from the DECLARED enum so a new kind needs no code change
  *       · Drafts (/t/draft)       — every written body, click → the draft editor
@@ -27,17 +29,19 @@
  */
 import { createElement } from 'react';
 import {
+  BarChart3,
   Building2,
   CalendarDays,
   FileText,
   FolderTree,
-  History,
   Layers,
   LayoutDashboard,
   LayoutGrid,
   Leaf,
   Lightbulb,
   Newspaper,
+  Search,
+  Settings,
   ShieldCheck,
   Shapes,
   Table,
@@ -55,6 +59,12 @@ import type { EntityTypeDef } from '@/lib/foundry-api';
  * as the Drafts table.
  */
 const DRAFT_TYPE_KEY = 'draft';
+
+/**
+ * Types the Research group already covers: documents (`news_item`) are Research
+ * > Sources and `source` is Research > Settings, so Data must not repeat them.
+ */
+const RESEARCH_TYPE_KEYS = ['news_item', 'source'];
 
 /** The sidebar's own words for the two content tables. */
 const CONTENT_NAV_LABELS: Record<string, string> = {
@@ -95,25 +105,31 @@ const TYPE_ICONS: Record<string, LucideIcon> = {
  */
 export function buildNav(types: EntityTypeDef[]): GroupedNavEntry[] {
   const dataTypes = types.filter(
-    (t) => t.key !== CONTENT_TYPE_KEY && t.key !== DRAFT_TYPE_KEY,
+    (t) => t.key !== CONTENT_TYPE_KEY && t.key !== DRAFT_TYPE_KEY && !RESEARCH_TYPE_KEYS.includes(t.key),
   );
 
   const items: GroupedNavEntry[] = [
     { href: '/', label: 'Dashboard', icon: createElement(LayoutDashboard) },
-    // Every edit across records — who changed what, person or machine
-    // (bd startsim-1pqb9). Its filters live in its own URL.
-    { href: '/activity', label: 'Activity', icon: createElement(History) },
+    {
+      label: 'Research',
+      icon: createElement(Search),
+      items: [
+        { href: '/research', label: 'Overview', icon: createElement(BarChart3) },
+        { href: '/research/topics', label: 'Topics', icon: createElement(Lightbulb) },
+        { href: '/research/sources', label: 'Sources', icon: createElement(Newspaper) },
+        { href: '/research/settings', label: 'Settings', icon: createElement(Settings) },
+      ],
+    },
     {
       label: 'Content',
       items: [
         // v2 Content (bd startsim-xwtv0): the approved work, and its calendar.
         { href: '/content', label: 'All content', icon: createElement(FileText) },
         { href: '/content/calendar', label: 'Calendar', icon: createElement(CalendarDays) },
-        // Topics = every kind. Then one destination PER KIND, then the written
-        // bodies. The kinds used to be reachable only as a "Kind:" filter chip
-        // inside the Topics table; a weekly brief and a lead magnet are
-        // different jobs, so they get their own places to stand.
-        { href: `/t/${CONTENT_TYPE_KEY}`, label: CONTENT_NAV_LABELS[CONTENT_TYPE_KEY], icon: createElement(Lightbulb) },
+        // One destination PER KIND, then the written bodies. The kinds used to
+        // be reachable only as a "Kind:" filter chip inside the Topics table; a
+        // weekly brief and a lead magnet are different jobs, so they get their
+        // own places to stand. (The all-kinds topic list is Research > Topics.)
         ...declaredContentTypes(types.find((t) => t.key === CONTENT_TYPE_KEY)).map((c) => ({
           href: contentTabHref(c.key),
           label: c.label,

@@ -65,7 +65,6 @@ export function calendarFilters(year: number, month: number, projectId: string |
     order: 'attr.scheduled_for',
     page_size: '200',
   };
-  if (projectId) f.scope = projectId;
   return f;
 }
 

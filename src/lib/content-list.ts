@@ -63,7 +63,6 @@ export function contentListFilters(q: ContentListQuery): EntityFilters {
   if (term) filters.search = term;
   const order = q.sortBy ? serverOrder(q.sortBy, q.sortDirection) : null;
   if (order) filters.order = order;
-  if (q.projectId) filters.scope = q.projectId;
   return filters;
 }
 

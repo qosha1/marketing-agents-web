@@ -113,8 +113,8 @@ const SCHEMA: EntityTypeDef[] = [
   { id: 'topic', key: 'topic', label: 'Topic', attributes: [schemaStatusAttr, schemaContentTypeAttr] },
   { id: 'draft', key: 'draft', label: 'Draft', attributes: [] },
   // Declares status, so typeRoute makes its nav href the BOARD, not the table.
-  { id: 'news_item', key: 'news_item', label: 'News Item', attributes: [schemaStatusAttr] },
-  { id: 'source', key: 'source', label: 'Source', attributes: [] },
+  { id: 'deal', key: 'deal', label: 'Deal', attributes: [schemaStatusAttr] },
+  { id: 'note', key: 'note', label: 'Note', attributes: [] },
 ];
 
 /** Every nav item the sidebar would highlight at `location`, by label. */
@@ -141,11 +141,11 @@ describe('a nav item is active for BOTH presentations of the thing it names', ()
   it('lights a board-href Data item on its TABLE, the mirror of the same hole', () => {
     // News Item's href is /board/news_item (typeRoute), so this is the side the
     // Data group was blank on.
-    expect(highlighted('/t/news_item')).toEqual(['News Item']);
+    expect(highlighted('/t/deal')).toEqual(['Deal']);
   });
 
   it('lights a board-href Data item on its own board', () => {
-    expect(highlighted('/board/news_item')).toEqual(['News Item']);
+    expect(highlighted('/board/deal')).toEqual(['Deal']);
   });
 
   it('THE TRAP: a board of another kind lights THAT kind, never its sibling', () => {
@@ -154,9 +154,12 @@ describe('a nav item is active for BOTH presentations of the thing it names', ()
     expect(highlighted('/board/topic?content_type=lead_magnet')).toEqual(['Evergreen']);
   });
 
-  it('lights Topics on the all-kinds board, as it already does on the all-kinds table', () => {
-    expect(highlighted('/board/topic')).toEqual(['Topics']);
-    expect(highlighted('/t/topic')).toEqual(['Topics']);
+  it('lights Research Topics on its list and on one topic, and Overview only on its own page', () => {
+    expect(highlighted('/research/topics')).toEqual(['Topics']);
+    expect(highlighted('/research/topics/abc')).toEqual(['Topics']);
+    expect(highlighted('/research')).toEqual(['Overview']);
+    expect(highlighted('/research/sources')).toEqual(['Sources']);
+    expect(highlighted('/research/settings')).toEqual(['Settings']);
   });
 
   it('yields the all-kinds item to a kind on the board too', () => {

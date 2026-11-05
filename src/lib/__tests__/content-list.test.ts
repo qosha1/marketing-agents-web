@@ -72,8 +72,8 @@ describe('the server query', () => {
     expect(contentListFilters({ ...base, projectId: null })).not.toHaveProperty('scope');
   });
 
-  it('scopes to the active project when there is one', () => {
-    expect(contentListFilters({ ...base, projectId: '/ogmc/gulf' }).scope).toBe('/ogmc/gulf');
+  it('leaves project scoping to listEntities even when a project is active', () => {
+    expect(contentListFilters({ ...base, projectId: '/ogmc/gulf' })).not.toHaveProperty('scope');
   });
 });
 
