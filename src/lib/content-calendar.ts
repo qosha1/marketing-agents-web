@@ -8,7 +8,9 @@
  */
 import { readData } from '@/lib/board';
 import { contentStatusOf } from '@/lib/content-status';
+import { CONTENT_TYPES } from '@/lib/content-new';
 import type { EntityFilters, EntityRecord } from '@/lib/foundry-api';
+import { draftTitle } from '@/lib/topic-drafts';
 
 export interface GridCell {
   year: number;
@@ -68,6 +70,27 @@ export function calendarFilters(year: number, month: number, projectId: string |
   return f;
 }
 
+/** The posted ones of a month, by the day they went out (`sent_at` is a plain date). */
+export function postedFilters(year: number, month: number): EntityFilters {
+  const day = (d: Date) => d.toISOString().slice(0, 10);
+  return {
+    'attr.status__in': 'published,sent',
+    'attr.sent_at__gte': day(new Date(Date.UTC(year, month, 1))),
+    'attr.sent_at__lt': day(new Date(Date.UTC(year, month + 1, 1))),
+    order: 'attr.sent_at',
+    page_size: '200',
+  };
+}
+
+/** "Title · LinkedIn", or "Title · posted" once it has gone out. */
+export function calendarLabel(item: EntityRecord): string {
+  if (contentStatusOf(readData(item.data, 'status')) === 'posted') return `${draftTitle(item)} · posted`;
+  const channel = String(readData(item.data, 'channel') ?? '');
+  const blogOnly = !!String(readData(item.data, 'blog') ?? '') && !String(readData(item.data, 'linkedin') ?? '');
+  const type = CONTENT_TYPES.find((t) => t.key === channel) ?? (blogOnly ? CONTENT_TYPES.find((t) => t.key === 'blog') : undefined) ?? CONTENT_TYPES[0];
+  return `${draftTitle(item)} · ${type.label.replace(/ post$/, '')}`;
+}
+
 function localKey(d: Date, timeZone?: string): string {
   const parts = new Intl.DateTimeFormat('en-CA', {
     year: 'numeric', month: '2-digit', day: '2-digit', ...(timeZone ? { timeZone } : {}),
@@ -85,6 +108,11 @@ function scheduledAt(item: EntityRecord): Date | null {
 export function placeItems(items: EntityRecord[], timeZone?: string): Map<string, EntityRecord[]> {
   const out = new Map<string, EntityRecord[]>();
   for (const item of items) {
+    if (contentStatusOf(readData(item.data, 'status')) === 'posted') {
+      const day = String(readData(item.data, 'sent_at') ?? '').slice(0, 10);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(day)) out.set(day, [...(out.get(day) ?? []), item]);
+      continue;
+    }
     const at = scheduledAt(item);
     if (!at) continue;
     const key = localKey(at, timeZone);

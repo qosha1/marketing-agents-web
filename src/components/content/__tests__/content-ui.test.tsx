@@ -61,7 +61,7 @@ describe('Calendar grid (bd startsim-fggqp)', () => {
     render(<CalendarGrid year={2026} month={9} placed={placeItems([item], 'UTC')} todayKey="2026-10-01" />);
     const cell = document.querySelector('[data-day="2026-10-27"]')!;
     const link = cell.querySelector('a')!;
-    expect(link.textContent).toBe('Item 5');
+    expect(link.textContent).toBe('Item 5 · LinkedIn');
     expect(link.getAttribute('href')).toBe('/content/5');
     expect(document.querySelectorAll('a').length).toBe(1);
   });

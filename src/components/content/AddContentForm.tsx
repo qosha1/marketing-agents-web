@@ -2,12 +2,13 @@
 
 /**
  * Add content by hand (bd startsim-rcnt1): Title, Type, optional Based on topic,
- * What should it say. Creates a Draft and opens it.
+ * What should it say. Creates a Draft and opens it. Lives on /content/new, as
+ * in the design (V16 "New").
  */
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { BaseDialog, Button, notify } from '@startsimpli/ui';
+import { Button, notify } from '@startsimpli/ui';
 
 import { CONTENT_TYPES, newContentInput, sharedScopePath, validateNewContent, type NewContentForm } from '@/lib/content-new';
 import { createEntity, listEntities } from '@/lib/foundry-api';
@@ -17,7 +18,7 @@ import { getActiveProjectId } from '@/lib/project-scope';
 
 const FIELD = 'w-full rounded-md border border-border bg-background px-3 py-2 text-sm';
 
-export function AddContentDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
+export function AddContentForm() {
   const router = useRouter();
   const qc = useQueryClient();
   const [form, setForm] = useState<NewContentForm>({ title: '', type: CONTENT_TYPES[0].key, topicId: '', brief: '' });
@@ -28,14 +29,12 @@ export function AddContentDialog({ open, onOpenChange }: { open: boolean; onOpen
   const topics = useQuery({
     queryKey: ['content-topics'],
     queryFn: () => listEntities('topic', 1, { 'attr.status__in': 'ready,written', page_size: '50' }),
-    enabled: open,
   });
 
   // Existing items, to find the one scope they all share (see sharedScopePath).
   const existing = useQuery({
     queryKey: ['content-scope-probe'],
     queryFn: () => listEntities('draft', 1, { page_size: '25' }),
-    enabled: open,
   });
   const [problem, setProblem] = useState('');
 
@@ -59,7 +58,6 @@ export function AddContentDialog({ open, onOpenChange }: { open: boolean; onOpen
       setProblem('');
       const created = await createEntity(newContentInput(form, { scopePath }));
       await qc.invalidateQueries({ queryKey: ['content-list'] });
-      onOpenChange(false);
       router.push(`/content/${created.id}`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Could not add the content.';
@@ -71,11 +69,9 @@ export function AddContentDialog({ open, onOpenChange }: { open: boolean; onOpen
   }
 
   return (
-    <BaseDialog open={open} onOpenChange={onOpenChange} size="md" loading={busy}>
-      <BaseDialog.Header>
-        <BaseDialog.Title>Add content</BaseDialog.Title>
-      </BaseDialog.Header>
-      <form onSubmit={submit} className="space-y-4 px-6 pb-6">
+    <div className="max-w-xl space-y-4">
+      <h1 className="text-2xl font-bold text-gray-900">Add content</h1>
+      <form onSubmit={submit} className="space-y-4">
         <label className="block space-y-1 text-sm font-medium">
           Title
           <input
@@ -118,9 +114,9 @@ export function AddContentDialog({ open, onOpenChange }: { open: boolean; onOpen
         {problem ? <p role="alert" className="text-sm text-red-600">{problem}</p> : null}
         <div className="flex gap-2">
           <Button type="submit" disabled={busy}>{busy ? 'Creating…' : 'Create'}</Button>
-          <Button type="button" variant="secondary" onClick={() => onOpenChange(false)} disabled={busy}>Cancel</Button>
+          <Button type="button" variant="secondary" onClick={() => router.push('/content')} disabled={busy}>Cancel</Button>
         </div>
       </form>
-    </BaseDialog>
+    </div>
   );
 }

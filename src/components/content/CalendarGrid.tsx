@@ -3,8 +3,7 @@
 /** The month grid (bd startsim-xr4f2): Monday first, items on their day, click opens the item. */
 import Link from 'next/link';
 
-import { monthGrid } from '@/lib/content-calendar';
-import { draftTitle } from '@/lib/topic-drafts';
+import { calendarLabel, monthGrid } from '@/lib/content-calendar';
 import type { EntityRecord } from '@/lib/foundry-api';
 
 const DOWS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -45,7 +44,7 @@ export function CalendarGrid({
                     href={`/content/${item.id}`}
                     className="block truncate rounded bg-emerald-50 px-1.5 py-0.5 text-xs text-emerald-800 hover:bg-emerald-100"
                   >
-                    {draftTitle(item)}
+                    {calendarLabel(item)}
                   </Link>
                 ))}
               </div>

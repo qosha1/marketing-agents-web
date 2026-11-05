@@ -11,14 +11,15 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, notify } from '@startsimpli/ui';
-import { RecordHistoryPanel, StaleSaveDialog } from '@startsimpli/ui/history';
+import { StaleSaveDialog } from '@startsimpli/ui/history';
 
 import { ContentEditor } from '@/components/content/ContentEditor';
 import { CommentsPanel } from '@/components/content/CommentsPanel';
+import { ContentHistory } from '@/components/content/ContentHistory';
 import { RejectDialog } from '@/components/content/RejectDialog';
 import { SchedulePicker } from '@/components/content/SchedulePicker';
 import { useContentWrite } from '@/components/content/useContentWrite';
-import { attrLabel, isSystemAttr } from '@/components/record-columns';
+import { attrLabel } from '@/components/record-columns';
 import { readData } from '@/lib/board';
 import { CONTENT_TYPES } from '@/lib/content-new';
 import {
@@ -114,14 +115,6 @@ export function ContentItem({ draft }: { draft: EntityRecord }) {
             {status ? (
               <span className={`rounded-full px-2.5 py-0.5 text-xs ${CHIP[status]}`}>{contentStatusLabel(status)}</span>
             ) : null}
-            {topic.data ? (
-              <span>
-                Based on{' '}
-                <Link href={`/story/${topic.data.id}`} className="underline">
-                  {str(topic.data.data, 'title') || topic.data.name}
-                </Link>
-              </span>
-            ) : null}
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -135,6 +128,16 @@ export function ContentItem({ draft }: { draft: EntityRecord }) {
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
         <ContentEditor
+          footer={
+            topic.data ? (
+              <>
+                Based on{' '}
+                <Link href={`/story/${topic.data.id}`} className="rounded-full bg-indigo-50 px-2.5 py-0.5 text-indigo-700 hover:underline">
+                  {str(topic.data.data, 'title') || topic.data.name}
+                </Link>
+              </>
+            ) : null
+          }
           initialType={initialType}
           initialText={{ blog: str(record.data, 'blog'), linkedin: str(record.data, 'linkedin') }}
           canEdit={canEdit}
@@ -150,22 +153,7 @@ export function ContentItem({ draft }: { draft: EntityRecord }) {
             />
           ) : null}
           <CommentsPanel recordId={String(draft.id)} />
-          <section className="space-y-2 rounded-lg border border-border p-4" aria-label="History">
-            <h2 className="text-sm font-semibold">History</h2>
-            <RecordHistoryPanel
-              client={revisions}
-              queryKey={['entity', String(draft.id), 'revisions', save.version ?? null]}
-              recordLabel="this item"
-              fieldLabel={attrLabel}
-              hideField={isSystemAttr}
-              canRestore={false}
-              classNames={{
-                header: 'hidden',
-                title: 'hidden',
-                body: 'max-h-96 overflow-y-auto px-0 py-1',
-              }}
-            />
-          </section>
+          <ContentHistory client={revisions} recordId={String(draft.id)} version={save.version ?? null} />
         </div>
       </div>
 

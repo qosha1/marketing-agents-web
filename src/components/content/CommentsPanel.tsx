@@ -10,17 +10,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@startsimpli/ui';
 
 import { readComments } from '@/lib/content-comments';
+import { ago } from '@/lib/content-history';
 import { trackChangesClient } from '@/lib/track-changes';
-
-function ago(iso: string): string {
-  const t = new Date(iso).getTime();
-  if (Number.isNaN(t)) return '';
-  const m = Math.max(0, Math.round((Date.now() - t) / 60000));
-  if (m < 1) return 'just now';
-  if (m < 60) return `${m} min ago`;
-  if (m < 1440) return `${Math.round(m / 60)} h ago`;
-  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-}
 
 export function CommentsPanel({ recordId }: { recordId: string }) {
   const qc = useQueryClient();
