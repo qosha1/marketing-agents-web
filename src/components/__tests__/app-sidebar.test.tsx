@@ -39,7 +39,7 @@ vi.mock('@startsimpli/auth', () => ({
 }));
 
 vi.mock('@/lib/api', () => ({ signinUrl: () => 'https://auth.example.test/signin' }));
-vi.mock('@/lib/foundry-api', () => ({ listTypes: async () => ({ results: [] }) }));
+vi.mock('@/lib/foundry-api', () => ({ listTypes: async () => ({ results: [] }), listAllEntities: async () => [{ id: 1 }] }));
 vi.mock('@/foundry.nav', () => ({
   buildNav: () => [
     { href: '/', label: 'Dashboard' },

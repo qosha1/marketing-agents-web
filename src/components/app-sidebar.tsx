@@ -20,7 +20,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { LogOut } from 'lucide-react';
+import { FolderKanban, LogOut } from 'lucide-react';
 import { useAuth } from '@startsimpli/auth';
 import { GroupedNav, NavDrawer, NavDrawerButton } from '@startsimpli/ui';
 
@@ -29,6 +29,7 @@ import { listTypes } from '@/lib/foundry-api';
 import { buildNav } from '@/foundry.nav';
 import { navIsActive } from '@/lib/nav-active';
 import { FOUNDRY } from '@/foundry.config';
+import { ProjectSwitcher } from '@/components/projects/project-switcher';
 
 
 function useBrand() {
@@ -65,7 +66,20 @@ function SidebarBody({ onNavigate }: { onNavigate?: () => void }) {
         <span className="truncate font-semibold text-gray-900">{brand}</span>
       </div>
 
+      <ProjectSwitcher />
+
       <div className="flex-1 overflow-y-auto px-3 py-4">
+        <Link
+          href="/projects"
+          onClick={onNavigate}
+          aria-current={pathname.startsWith('/projects') ? 'page' : undefined}
+          className={`mb-2 flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition hover:bg-gray-50 ${
+            pathname.startsWith('/projects') ? 'bg-primary-50 text-primary-700' : 'text-gray-700'
+          }`}
+        >
+          <FolderKanban className="h-4 w-4" />
+          Projects
+        </Link>
         <GroupedNav
           items={buildNav(types)}
           activeHref={activeHref}
