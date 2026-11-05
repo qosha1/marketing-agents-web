@@ -13,7 +13,8 @@ import { useAuth } from '@startsimpli/auth';
 import { listAllEntities } from '@/lib/foundry-api';
 import { ensureDefaultProject } from '@/lib/projects-api';
 import { PROJECT_TYPE } from '@/lib/projects';
-import { setActiveProjectId, switcherOptions, useActiveProjectId } from '@/lib/project-scope';
+import { setActiveProjectId, switcherOptions } from '@/lib/project-scope';
+import { useActiveProjectId } from '@/lib/use-active-project';
 
 export function ProjectSwitcher() {
   const { user } = useAuth();

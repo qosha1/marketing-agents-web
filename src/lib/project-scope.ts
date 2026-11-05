@@ -9,15 +9,13 @@
  *
  * `getActiveProjectId()` keeps the signature lanes 2 and 3 import.
  */
-import { useSyncExternalStore } from 'react';
-
 import { readData } from '@/lib/board';
 import { SCOPE_PATH_ATTR } from '@/lib/scope';
 import { CLIENT_KIND, PROJECT_KIND } from '@/lib/projects';
 import type { EntityRecord } from '@/lib/foundry-api';
 
 export const ACTIVE_PROJECT_KEY = 'ma.activeProject';
-const CHANGE_EVENT = 'ma:active-project';
+export const CHANGE_EVENT = 'ma:active-project';
 
 export function getActiveProjectId(): string | null {
   try {
@@ -37,21 +35,6 @@ export function setActiveProjectId(path: string | null): void {
   } catch {
     // Storage blocked: the choice just does not persist.
   }
-}
-
-function subscribe(cb: () => void): () => void {
-  if (typeof window === 'undefined') return () => {};
-  window.addEventListener(CHANGE_EVENT, cb);
-  window.addEventListener('storage', cb);
-  return () => {
-    window.removeEventListener(CHANGE_EVENT, cb);
-    window.removeEventListener('storage', cb);
-  };
-}
-
-/** The active project as React state; re-renders when the switcher changes it. */
-export function useActiveProjectId(): string | null {
-  return useSyncExternalStore(subscribe, getActiveProjectId, () => null);
 }
 
 type TypeLike = { key: string; config?: Record<string, unknown> } | undefined;
