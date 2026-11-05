@@ -18,9 +18,11 @@ import {
   CONTENT_PAGE_SIZE,
   contentListFilters,
   contentRow,
+  isLocalSort,
+  sortRowsLocally,
   type ContentRow,
 } from '@/lib/content-list';
-import { fetchContentPage, fetchTopicMarkets } from '@/lib/content-queries';
+import { fetchAllContent, fetchContentPage, fetchTopicMarkets } from '@/lib/content-queries';
 import { CONTENT_STATUS_KEYS, contentStatusLabel, type ContentStatus } from '@/lib/content-status';
 import { listTypes } from '@/lib/foundry-api';
 import { getActiveProjectId } from '@/lib/project-scope';
@@ -32,7 +34,7 @@ const TONE: Record<ContentStatus, string> = {
   posted: 'bg-sky-100 text-sky-700',
 };
 
-const SORTABLE = new Set(['assigned', 'status', 'scheduled']);
+const SORTABLE = new Set(['title', 'market', 'assigned', 'status', 'scheduled']);
 
 export default function ContentPage() {
   const router = useRouter();
@@ -54,17 +56,25 @@ export default function ContentPage() {
     search, status, sortBy: sort.sortBy, sortDirection: sort.sortDirection, page, declaredStatuses: declared, projectId,
   });
   const list = useQuery({
-    queryKey: ['content-list', projectId, filters, page],
+    queryKey: ['content-list', projectId, filters, page, sort.sortBy, sort.sortDirection],
     queryFn: async () => {
+      if (sort.sortBy && isLocalSort(sort.sortBy)) {
+        // Title and Market have nothing to order by on the server: read the
+        // whole filtered set, order it here, and page it here.
+        const all = await fetchAllContent(filters);
+        const topics = await fetchTopicMarkets(all);
+        const ordered = sortRowsLocally(all.map((r) => contentRow(r, topics)), sort.sortBy, sort.sortDirection);
+        return { res: { count: ordered.length, results: [] }, topics, ordered: ordered.slice((page - 1) * CONTENT_PAGE_SIZE, page * CONTENT_PAGE_SIZE) };
+      }
       const res = await fetchContentPage(filters, page);
-      return { res, topics: await fetchTopicMarkets(res.results ?? []) };
+      return { res, topics: await fetchTopicMarkets(res.results ?? []), ordered: null };
     },
     enabled: !!draftType,
     placeholderData: (prev) => prev,
   });
 
   const rows: ContentRow[] = useMemo(
-    () => (list.data?.res.results ?? []).map((r) => contentRow(r, list.data?.topics ?? {})),
+    () => list.data?.ordered ?? (list.data?.res.results ?? []).map((r) => contentRow(r, list.data?.topics ?? {})),
     [list.data],
   );
   const total = list.data?.res.count ?? 0;

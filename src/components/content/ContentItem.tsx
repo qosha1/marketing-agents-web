@@ -31,10 +31,9 @@ import {
   rejectData,
   scheduleData,
   schedulingAvailable,
-  schedulingDeclared,
   unscheduleData,
 } from '@/lib/content-status';
-import { getEntity, listTypes, whoami, type EntityRecord } from '@/lib/foundry-api';
+import { getEntity, whoami, type EntityRecord } from '@/lib/foundry-api';
 import { entityKey } from '@/lib/entity-cache';
 import { revisionClient } from '@/lib/revisions';
 import { canEditRecord } from '@/lib/track-changes';
@@ -58,9 +57,6 @@ export function ContentItem({ draft }: { draft: EntityRecord }) {
 
   const me = useQuery({ queryKey: ['whoami'], queryFn: () => whoami(), staleTime: 5 * 60_000 });
   const canEdit = canEditRecord(record, me.data?.role);
-  const types = useQuery({ queryKey: ['types'], queryFn: () => listTypes() });
-  const draftType = (types.data?.results ?? []).find((t) => t.key === 'draft');
-  const canSchedule = schedulingDeclared(draftType);
 
   const topicRef = str(record.data, 'topic_ref');
   const topic = useQuery({ queryKey: entityKey(topicRef), queryFn: () => getEntity(topicRef), enabled: !!topicRef });
@@ -144,7 +140,7 @@ export function ContentItem({ draft }: { draft: EntityRecord }) {
           onSave={(field, value) => write((d) => ({ ...d, [field]: value }), 'Could not save the draft.')}
         />
         <div className="space-y-4">
-          {canEdit && canSchedule && schedulingAvailable(status) ? (
+          {canEdit && schedulingAvailable(status) ? (
             <SchedulePicker
               current={scheduledAt}
               busy={busy}

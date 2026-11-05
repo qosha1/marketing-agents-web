@@ -5,7 +5,8 @@
  * Updated column, no sub-labels, rejected never shown. Everything the server can
  * narrow or order is narrowed and ordered there (rule 8); Title and Market are
  * not server-orderable (a draft's title is the `name` column, its market lives
- * on the topic), so they are not.
+ * on the topic), so they are not: choosing them reads the whole filtered set
+ * and orders and pages it in the browser (bd startsim-bj3zz.13).
  */
 import { readData } from '@/lib/board';
 import { contentStatusLabel, contentStatusOf, visibleStatusValues, type ContentStatus } from '@/lib/content-status';
@@ -38,6 +39,25 @@ export function serverOrder(column: string, direction: 'asc' | 'desc'): string |
   const attr = SERVER_ORDER[column as ContentColumn['id']];
   if (!attr) return null;
   return direction === 'desc' ? `-${attr}` : attr;
+}
+
+/** Columns the server cannot order by; they sort the whole filtered result in the browser. */
+export function isLocalSort(column: string | null): boolean {
+  return column === 'title' || column === 'market';
+}
+
+const BLANK = '—';
+
+/** Sort rows by Title or Market, case-insensitively; blank values stay last in both directions. */
+export function sortRowsLocally(rows: ContentRow[], column: string, direction: 'asc' | 'desc'): ContentRow[] {
+  const key = (r: ContentRow) => (column === 'market' ? r.market : r.title).trim();
+  const sign = direction === 'desc' ? -1 : 1;
+  return [...rows].sort((a, b) => {
+    const ka = key(a), kb = key(b);
+    const ba = !ka || ka === BLANK, bb = !kb || kb === BLANK;
+    if (ba || bb) return ba === bb ? 0 : ba ? 1 : -1;
+    return sign * ka.localeCompare(kb, undefined, { sensitivity: 'base', numeric: true });
+  });
 }
 
 export interface ContentListQuery {

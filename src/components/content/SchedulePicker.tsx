@@ -42,7 +42,7 @@ export function SchedulePicker({
       >
         <span>Schedule</span>
         <span className="font-normal text-neutral-500">
-          {current ? `${formatWhen(current.toISOString())}, ${timeOf(current)}` : 'Not scheduled'} ▾
+          {open ? 'Pick a date' : current ? `${formatWhen(current.toISOString())}, ${timeOf(current)}` : 'Not scheduled'} ▾
         </span>
       </button>
       {open ? (

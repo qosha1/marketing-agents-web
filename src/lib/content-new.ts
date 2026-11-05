@@ -60,3 +60,19 @@ export function sharedScopePath(paths: (string | undefined)[]): string | null {
   const set = new Set(paths.map((p) => (p ?? '').trim()).filter(Boolean));
   return set.size === 1 ? [...set][0] : null;
 }
+
+/**
+ * Whether "Based on" can really be left empty. The design (V16 New) says
+ * optional, and it is when the item can still be placed in a scope: a project
+ * is active, or every visible record shares one. On All projects with several
+ * scopes a topicless item has no scope to take, so a topic is what places it,
+ * and the form says so and holds Create until one is picked (bd startsim-bj3zz.10).
+ */
+export function basedOnRule(ctx: {
+  topicId: string;
+  activeProject: string | null;
+  sharedScope: string | null;
+}): { required: boolean; satisfied: boolean } {
+  const required = !ctx.activeProject && !ctx.sharedScope;
+  return { required, satisfied: !required || !!ctx.topicId };
+}
