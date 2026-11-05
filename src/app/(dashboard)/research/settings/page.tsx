@@ -145,6 +145,8 @@ export default function ResearchSettingsPage() {
           <RecordForm
             type={sourceType}
             defaults={{ active: true }}
+            // Wireframe S-Settings: Name, Domain, Tier, Type, Active. Other stored fields stay as they are.
+            fields={['domain', 'tier', 'source_type', 'active']}
             onSuccess={() => {
               setAdding(false);
               void qc.invalidateQueries({ queryKey: ['research', 'source'] });
