@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { CONTENT_TYPES, newContentInput, sharedScopePath, validateNewContent } from '@/lib/content-new';
+import { CONTENT_TYPES, newContentInput, sharedScopePath, validateNewContent, basedOnRule } from '@/lib/content-new';
 
 describe('add content by hand', () => {
   it('offers more than one type', () => {
@@ -48,5 +48,16 @@ describe('the scope a new item takes when it has no topic or project', () => {
   it('is none when the paths differ or there are none', () => {
     expect(sharedScopePath(['/ogmc', '/other'])).toBeNull();
     expect(sharedScopePath([])).toBeNull();
+  });
+});
+
+describe('Based on is optional only when the item can still be placed (bd startsim-bj3zz.10)', () => {
+  it('is optional when a project is active or one scope is shared', () => {
+    expect(basedOnRule({ topicId: '', activeProject: '/ogmc', sharedScope: null })).toEqual({ required: false, satisfied: true });
+    expect(basedOnRule({ topicId: '', activeProject: null, sharedScope: '/ogmc' })).toEqual({ required: false, satisfied: true });
+  });
+  it('is required on All projects with no shared scope, until a topic is picked', () => {
+    expect(basedOnRule({ topicId: '', activeProject: null, sharedScope: null })).toEqual({ required: true, satisfied: false });
+    expect(basedOnRule({ topicId: 't1', activeProject: null, sharedScope: null })).toEqual({ required: true, satisfied: true });
   });
 });

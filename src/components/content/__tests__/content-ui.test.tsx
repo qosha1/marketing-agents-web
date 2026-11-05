@@ -45,6 +45,14 @@ describe('Schedule picker (bd startsim-4f989)', () => {
     expect(when.getDate()).toBe(23);
   });
 
+  it('says "Pick a date" while open and lets a scheduled date be changed', async () => {
+    const onSchedule = vi.fn();
+    render(<SchedulePicker current={new Date('2026-10-23T09:00:00')} busy={false} onSchedule={onSchedule} onUnschedule={() => {}} />);
+    await userEvent.click(screen.getByRole('button', { name: /Schedule/ }));
+    expect(screen.getByText(/Pick a date/)).toBeTruthy();
+    expect((screen.getByLabelText('Date') as HTMLInputElement).value).toBe('2026-10-23');
+  });
+
   it('offers Unschedule only when a date is set', async () => {
     const { rerender } = render(<SchedulePicker current={null} busy={false} onSchedule={() => {}} onUnschedule={() => {}} />);
     await userEvent.click(screen.getByRole('button', { name: /Schedule/ }));

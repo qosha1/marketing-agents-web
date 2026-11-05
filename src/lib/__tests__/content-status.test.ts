@@ -20,7 +20,6 @@ import {
   visibleStatusValues,
   CONTENT_STATUS_KEYS,
   schedulingAvailable,
-  schedulingDeclared,
 } from '@/lib/content-status';
 
 const DECLARED = [
@@ -155,21 +154,10 @@ describe('what the item page offers', () => {
 });
 
 describe('scheduling', () => {
-  const type = (names: string[], choices: string[]) => ({
-    attributes: names.map((name) => ({ name, config: name === 'status' ? { choices } : {} })),
-  });
-
   it('is offered on Approved and Scheduled only', () => {
     expect(schedulingAvailable('approved')).toBe(true);
     expect(schedulingAvailable('scheduled')).toBe(true);
     expect(schedulingAvailable('draft')).toBe(false);
     expect(schedulingAvailable('posted')).toBe(false);
-  });
-
-  it('is hidden when the tenant does not declare scheduled and scheduled_for', () => {
-    expect(schedulingDeclared(type(['status', 'scheduled_for'], ['approved', 'scheduled']))).toBe(true);
-    expect(schedulingDeclared(type(['status'], ['approved', 'scheduled']))).toBe(false);
-    expect(schedulingDeclared(type(['status', 'scheduled_for'], ['approved']))).toBe(false);
-    expect(schedulingDeclared(null)).toBe(false);
   });
 });

@@ -10,6 +10,9 @@ import {
   contentRow,
   formatWhen,
   serverOrder,
+  sortRowsLocally,
+  isLocalSort,
+  type ContentRow,
 } from '@/lib/content-list';
 import type { EntityRecord } from '@/lib/foundry-api';
 
@@ -106,5 +109,29 @@ describe('a row', () => {
     expect(formatWhen('2026-10-27T09:00:00Z', 'UTC')).toBe('Tue 10/27');
     expect(formatWhen('', 'UTC')).toBe('');
     expect(formatWhen('not a date', 'UTC')).toBe('');
+  });
+});
+
+describe('Title and Market sorting (bd startsim-bj3zz.13)', () => {
+  const row = (title: string, market: string): ContentRow =>
+    ({ id: title, title, market, assigned: '', status: 'draft', statusLabel: 'Draft', scheduled: '' });
+  const rows = [row('beta', 'GCC'), row('Alpha', '—'), row('gamma', 'EU')];
+
+  it('has no server order for Title or Market (nothing declared to order by), so they sort whole-result', () => {
+    expect(serverOrder('title', 'asc')).toBeNull();
+    expect(serverOrder('market', 'asc')).toBeNull();
+    expect(isLocalSort('title')).toBe(true);
+    expect(isLocalSort('market')).toBe(true);
+    expect(isLocalSort('status')).toBe(false);
+  });
+
+  it('sorts titles case-insensitively in both directions', () => {
+    expect(sortRowsLocally(rows, 'title', 'asc').map((r) => r.title)).toEqual(['Alpha', 'beta', 'gamma']);
+    expect(sortRowsLocally(rows, 'title', 'desc').map((r) => r.title)).toEqual(['gamma', 'beta', 'Alpha']);
+  });
+
+  it('keeps blank markets last in both directions', () => {
+    expect(sortRowsLocally(rows, 'market', 'asc').map((r) => r.market)).toEqual(['EU', 'GCC', '—']);
+    expect(sortRowsLocally(rows, 'market', 'desc').map((r) => r.market)).toEqual(['GCC', 'EU', '—']);
   });
 });

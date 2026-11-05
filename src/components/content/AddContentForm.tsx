@@ -5,16 +5,16 @@
  * What should it say. Creates a Draft and opens it. Lives on /content/new, as
  * in the design (V16 "New").
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, notify } from '@startsimpli/ui';
 
-import { CONTENT_TYPES, newContentInput, sharedScopePath, validateNewContent, type NewContentForm } from '@/lib/content-new';
+import { CONTENT_TYPES, basedOnRule, newContentInput, sharedScopePath, validateNewContent, type NewContentForm } from '@/lib/content-new';
 import { createEntity, listEntities } from '@/lib/foundry-api';
 import { readData } from '@/lib/board';
 import { recordScopePath } from '@/lib/scope';
-import { getActiveProjectId } from '@/lib/project-scope';
+import { CHANGE_EVENT, getActiveProjectId } from '@/lib/project-scope';
 
 const FIELD = 'w-full rounded-md border border-border bg-background px-3 py-2 text-sm';
 
@@ -37,6 +37,18 @@ export function AddContentForm() {
     queryFn: () => listEntities('draft', 1, { page_size: '25' }),
   });
   const [problem, setProblem] = useState('');
+
+  // The sidebar switcher can change while this form is open.
+  const [active, setActive] = useState<string | null>(null);
+  useEffect(() => {
+    const read = () => setActive(getActiveProjectId());
+    read();
+    window.addEventListener(CHANGE_EVENT, read);
+    return () => window.removeEventListener(CHANGE_EVENT, read);
+  }, []);
+  const sharedScope = sharedScopePath((existing.data?.results ?? []).map((r) => recordScopePath(r.data)));
+  // "Based on" is optional only while the item can still be placed (bd startsim-bj3zz.10).
+  const basedOn = basedOnRule({ topicId: form.topicId, activeProject: active, sharedScope });
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -92,9 +104,9 @@ export function AddContentForm() {
           </select>
         </label>
         <label className="block space-y-1 text-sm font-medium">
-          Based on (optional)
+          {basedOn.required ? 'Based on' : <>Based on <span className="font-normal text-neutral-500">(optional)</span></>}
           <select className={FIELD} value={form.topicId} onChange={(e) => setForm({ ...form, topicId: e.target.value })}>
-            <option value="">Pick a topic</option>
+            <option value="">{basedOn.required ? 'Pick a topic first' : 'Pick a topic'}</option>
             {(topics.data?.results ?? []).map((t) => (
               <option key={t.id} value={String(t.id)}>
                 {String(readData(t.data, 'title') ?? t.name)}
@@ -111,9 +123,12 @@ export function AddContentForm() {
             onChange={(e) => setForm({ ...form, brief: e.target.value })}
           />
         </label>
+        {basedOn.required && !basedOn.satisfied ? (
+          <p className="text-xs text-neutral-500">With All projects selected, an item needs a topic to know where it belongs. Pick a topic, or choose a project in the sidebar.</p>
+        ) : null}
         {problem ? <p role="alert" className="text-sm text-red-600">{problem}</p> : null}
         <div className="flex gap-2">
-          <Button type="submit" disabled={busy}>{busy ? 'Creating…' : 'Create'}</Button>
+          <Button type="submit" disabled={busy || !basedOn.satisfied}>{busy ? 'Creating…' : 'Create'}</Button>
           <Button type="button" variant="secondary" onClick={() => router.push('/content')} disabled={busy}>Cancel</Button>
         </div>
       </form>

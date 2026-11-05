@@ -24,15 +24,23 @@ export async function fetchTopicMarkets(drafts: EntityRecord[]): Promise<Record<
       drafts.map((d) => String(readData(d.data, 'topic_ref') ?? '')).filter((id) => UUID.test(id)),
     ),
   ];
-  if (ids.length === 0) return {};
   const out: Record<string, { market?: string }> = {};
-  try {
-    const res = await listEntities('topic', 1, { id__in: ids.join(','), page_size: String(Math.min(ids.length, 200)) });
-    for (const t of res.results ?? []) out[String(t.id)] = { market: String(readData(t.data, 'market') ?? '') };
-  } catch {
-    return {};
+  // 50 ids a read keeps the URL short; a whole-result sort can have hundreds.
+  for (let i = 0; i < ids.length; i += 50) {
+    const chunk = ids.slice(i, i + 50);
+    try {
+      const res = await listEntities('topic', 1, { id__in: chunk.join(','), page_size: String(chunk.length) });
+      for (const t of res.results ?? []) out[String(t.id)] = { market: String(readData(t.data, 'market') ?? '') };
+    } catch {
+      // A refused lookup leaves those markets blank; it never hides the drafts.
+    }
   }
   return out;
+}
+
+/** Every draft the filters match, for a Title or Market sort the server cannot do. */
+export function fetchAllContent(filters: EntityFilters) {
+  return listAllEntities(DRAFT, { filters });
 }
 
 export function fetchMonth(filters: EntityFilters) {

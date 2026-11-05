@@ -131,22 +131,3 @@ export function contentActions(status: ContentStatus | null): ContentAction[] {
 export function schedulingAvailable(status: ContentStatus | null): boolean {
   return status === 'approved' || status === 'scheduled';
 }
-
-interface TypeLike {
-  attributes?: { name: string; config?: { choices?: unknown } }[];
-}
-
-/**
- * Scheduling needs the tenant to declare the `scheduled` status and the
- * `scheduled_for` date. A tenant that does not gets no Schedule control, rather
- * than a write of a value it has not declared (same stance as `declaresTopicRef`).
- */
-export function schedulingDeclared(type: TypeLike | null | undefined): boolean {
-  const attrs = type?.attributes ?? [];
-  const choices = attrs.find((a) => a.name === 'status')?.config?.choices;
-  return (
-    attrs.some((a) => a.name === 'scheduled_for') &&
-    Array.isArray(choices) &&
-    choices.map(String).includes('scheduled')
-  );
-}
