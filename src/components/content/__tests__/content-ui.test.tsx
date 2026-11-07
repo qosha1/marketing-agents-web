@@ -31,7 +31,7 @@ describe('Reject dialog (bd startsim-656pt)', () => {
 describe('Schedule picker (bd startsim-4f989)', () => {
   it('opens a date and time picker and saving hands back the chosen moment', async () => {
     const onSchedule = vi.fn();
-    render(<SchedulePicker current={null} busy={false} onSchedule={onSchedule} onUnschedule={() => {}} />);
+    render(<SchedulePicker current={null} busy={false} onSchedule={onSchedule} onUnschedule={async () => true} />);
     expect(screen.getByText(/Not scheduled/)).toBeTruthy();
     await userEvent.click(screen.getByRole('button', { name: /Schedule/ }));
     const date = screen.getByLabelText('Date') as HTMLInputElement;
@@ -47,17 +47,17 @@ describe('Schedule picker (bd startsim-4f989)', () => {
 
   it('says "Pick a date" while open and lets a scheduled date be changed', async () => {
     const onSchedule = vi.fn();
-    render(<SchedulePicker current={new Date('2026-10-23T09:00:00')} busy={false} onSchedule={onSchedule} onUnschedule={() => {}} />);
+    render(<SchedulePicker current={new Date('2026-10-23T09:00:00')} busy={false} onSchedule={onSchedule} onUnschedule={async () => true} />);
     await userEvent.click(screen.getByRole('button', { name: /Schedule/ }));
     expect(screen.getByText(/Pick a date/)).toBeTruthy();
     expect((screen.getByLabelText('Date') as HTMLInputElement).value).toBe('2026-10-23');
   });
 
   it('offers Unschedule only when a date is set', async () => {
-    const { rerender } = render(<SchedulePicker current={null} busy={false} onSchedule={() => {}} onUnschedule={() => {}} />);
+    const { rerender } = render(<SchedulePicker current={null} busy={false} onSchedule={async () => true} onUnschedule={async () => true} />);
     await userEvent.click(screen.getByRole('button', { name: /Schedule/ }));
     expect(screen.queryByRole('button', { name: 'Unschedule' })).toBeNull();
-    rerender(<SchedulePicker current={new Date()} busy={false} onSchedule={() => {}} onUnschedule={() => {}} />);
+    rerender(<SchedulePicker current={new Date()} busy={false} onSchedule={async () => true} onUnschedule={async () => true} />);
     expect(screen.getByRole('button', { name: 'Unschedule' })).toBeTruthy();
   });
 });

@@ -63,5 +63,8 @@ export function useContentWrite(initial: EntityRecord) {
     return result;
   }
 
-  return { record, write, save };
+  /** The freshest record the server has confirmed (not the render snapshot). */
+  const latest = () => recordRef.current;
+
+  return { record, write, save, latest };
 }

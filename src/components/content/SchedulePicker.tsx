@@ -22,10 +22,11 @@ export function SchedulePicker({
 }: {
   current: Date | null;
   busy: boolean;
-  onSchedule: (when: Date) => void;
-  onUnschedule: () => void;
+  onSchedule: (when: Date) => Promise<boolean>;
+  onUnschedule: () => Promise<boolean>;
 }) {
   const [open, setOpen] = useState(false);
+  const [failed, setFailed] = useState('');
   const seed = current ?? (() => { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(9, 0, 0, 0); return d; })();
   const [day, setDay] = useState(dayOf(seed));
   const [time, setTime] = useState(timeOf(seed));
@@ -56,20 +57,26 @@ export function SchedulePicker({
           <div className="flex flex-wrap gap-2">
             <Button
               disabled={busy || !valid}
-              onClick={() => {
-                onSchedule(when);
-                setOpen(false);
+              onClick={async () => {
+                setFailed('');
+                if (await onSchedule(when)) setOpen(false);
+                else setFailed('Could not schedule. The item is unchanged.');
               }}
             >
               Schedule
             </Button>
             <Button variant="secondary" disabled={busy} onClick={() => setOpen(false)}>Cancel</Button>
             {current ? (
-              <Button variant="secondary" disabled={busy} onClick={() => { onUnschedule(); setOpen(false); }}>
+              <Button variant="secondary" disabled={busy} onClick={async () => {
+                setFailed('');
+                if (await onUnschedule()) setOpen(false);
+                else setFailed('Could not unschedule. The item is unchanged.');
+              }}>
                 Unschedule
               </Button>
             ) : null}
           </div>
+          {failed ? <p role="alert" className="text-sm text-red-600">{failed}</p> : null}
         </div>
       ) : null}
     </section>
