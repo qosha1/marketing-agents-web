@@ -51,7 +51,7 @@ const str = (data: EntityRecord['data'], name: string) => String(readData(data, 
 export function ContentItem({ draft }: { draft: EntityRecord }) {
   const router = useRouter();
   const qc = useQueryClient();
-  const { record, write, save } = useContentWrite(draft);
+  const { record, write, save, latest } = useContentWrite(draft);
   const [busy, setBusy] = useState(false);
   const [rejecting, setRejecting] = useState(false);
 
@@ -72,10 +72,21 @@ export function ContentItem({ draft }: { draft: EntityRecord }) {
     (str(record.data, 'blog') && !str(record.data, 'linkedin') ? CONTENT_TYPES.find((t) => t.key === 'blog') : undefined) ??
     CONTENT_TYPES[0]).key;
 
-  async function act(change: (d: Record<string, unknown>) => Record<string, unknown>, done: string, whatFailed: string) {
+  async function act(
+    change: (d: Record<string, unknown>) => Record<string, unknown>,
+    done: string,
+    whatFailed: string,
+    // The server's answer must show the change took; a 200 that left the item
+    // as it was is a failure the user has to see (bd startsim-bj3zz.14).
+    took?: (saved: Record<string, unknown>) => boolean,
+  ) {
     setBusy(true);
     try {
       if (await write(change, whatFailed)) {
+        if (took && !took(latest().data as Record<string, unknown>)) {
+          notify.error(`${whatFailed} The server did not keep the change.`);
+          return false;
+        }
         await qc.invalidateQueries({ queryKey: ['content-list'] });
         await qc.invalidateQueries({ queryKey: ['content-calendar'] });
         notify.success(done);
@@ -144,8 +155,10 @@ export function ContentItem({ draft }: { draft: EntityRecord }) {
             <SchedulePicker
               current={scheduledAt}
               busy={busy}
-              onSchedule={(when) => void act((d) => scheduleData(d, when), 'Scheduled.', 'Could not schedule.')}
-              onUnschedule={() => void act(unscheduleData, 'Unscheduled.', 'Could not unschedule.')}
+              onSchedule={(when) =>
+                act((d) => scheduleData(d, when), 'Scheduled.', 'Could not schedule.', (saved) => readData(saved, 'status') === 'scheduled')
+              }
+              onUnschedule={() => act(unscheduleData, 'Unscheduled.', 'Could not unschedule.')}
             />
           ) : null}
           <CommentsPanel recordId={String(draft.id)} />
