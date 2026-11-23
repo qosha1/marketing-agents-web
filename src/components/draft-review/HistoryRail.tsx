@@ -33,7 +33,8 @@ import {
   type RecordHistoryPanelProps,
   type RevisionClient,
 } from '@startsimpli/ui/history';
-import { attrLabel, isSystemAttr } from '@/components/record-columns';
+import { attrLabel } from '@/components/record-columns';
+import { isHistoryNoise } from '@/lib/history-fields';
 
 import type { EntityRecord } from '@/lib/foundry-api';
 import { CollapsiblePanel, FLATTEN_CARD } from './CollapsiblePanel';
@@ -63,6 +64,12 @@ export interface HistoryRailProps {
   beforeRestore?: RecordHistoryPanelProps['beforeRestore'];
   onRestored?: RecordHistoryPanelProps['onRestored'];
 
+  /** The page's own drawer supplies the title and the open state, so the History
+   *  body renders directly instead of inside a second collapsible card. */
+  bare?: boolean;
+  /** The topic's own trail, shown under the draft's in the SAME History. */
+  topicHistory?: React.ReactNode;
+
   // Revision history
   chain: EntityRecord[];
   currentId: string;
@@ -78,6 +85,8 @@ export interface HistoryRailProps {
 export function HistoryRail(props: HistoryRailProps) {
   const {
     revisions,
+    bare = false,
+    topicHistory,
     historyOpen,
     onHistoryOpenChange,
     historyField,
@@ -105,7 +114,7 @@ export function HistoryRail(props: HistoryRailProps) {
       {/* History — who changed which field, from what to what (bd startsim-j19hf).
           CONTROLLED so the stale-save dialog can open it; `defaultOpen` would
           leave the dialog's "See what changed" with nothing to reveal. */}
-      <CollapsiblePanel title="History" open={historyOpen} onOpenChange={onHistoryOpenChange}>
+      <HistoryShell bare={bare} open={historyOpen} onOpenChange={onHistoryOpenChange}>
         {/* Mounted only while open: the panel fetches on mount, so an
             always-mounted trail would cost a request per draft opened for a
             card nobody expanded. */}
@@ -115,7 +124,7 @@ export function HistoryRail(props: HistoryRailProps) {
             queryKey={['entity', currentId, 'revisions']}
             recordLabel="this draft"
             fieldLabel={attrLabel}
-            hideField={isSystemAttr}
+            hideField={isHistoryNoise}
             {...(historyField ? { field: historyField } : {})}
             {...(onHistoryFieldChange
               ? {
@@ -149,7 +158,9 @@ export function HistoryRail(props: HistoryRailProps) {
             }}
           />
         ) : null}
-      </CollapsiblePanel>
+      </HistoryShell>
+
+      {topicHistory}
 
       {/* Revision history — lineage chips + on-demand blog diff. */}
       {hasHistory ? (
@@ -207,5 +218,26 @@ export function HistoryRail(props: HistoryRailProps) {
         </CollapsiblePanel>
       ) : null}
     </div>
+  );
+}
+
+/** The History body, in its own card when the rail stands alone and bare when the
+ *  page's drawer already says "History". */
+function HistoryShell({
+  bare,
+  open,
+  onOpenChange,
+  children,
+}: {
+  bare: boolean;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  children: React.ReactNode;
+}) {
+  if (bare) return <div>{children}</div>;
+  return (
+    <CollapsiblePanel title="History" open={open} onOpenChange={onOpenChange}>
+      {children}
+    </CollapsiblePanel>
   );
 }
