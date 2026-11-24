@@ -14,8 +14,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { buildNav } from '@/foundry.nav';
-import type { AttributeDef, EntityTypeDef } from '@/lib/foundry-api';
+import { buildNav, isNavParent } from '@/foundry.nav';
 import { navIsActive } from '@/lib/nav-active';
 
 const TOPICS = '/t/topic';
@@ -99,35 +98,43 @@ describe('navIsActive', () => {
  * "confidently the wrong thing highlighted" is a worse bug, so the assertion
  * that matters is EXACTLY ONE, by name, on each of the four locations.
  */
-const schemaStatusAttr: AttributeDef = {
-  id: 's', name: 'status', dataType: 'enum', required: false,
-  config: { choices: ['suggested', 'ready', 'written'] },
-};
-const schemaContentTypeAttr: AttributeDef = {
-  id: 'ct', name: 'content_type', dataType: 'enum', required: false,
-  config: { choices: ['weekly_brief', 'lead_magnet', 'general'] },
-};
-
-/** The live shape: topic + draft under Content, and a board type + a table type under Data. */
-const SCHEMA: EntityTypeDef[] = [
-  { id: 'topic', key: 'topic', label: 'Topic', attributes: [schemaStatusAttr, schemaContentTypeAttr] },
-  { id: 'draft', key: 'draft', label: 'Draft', attributes: [] },
-  // Declares status, so typeRoute makes its nav href the BOARD, not the table.
-  { id: 'news_item', key: 'news_item', label: 'News Item', attributes: [schemaStatusAttr] },
-  { id: 'source', key: 'source', label: 'Source', attributes: [] },
+/**
+ * The matcher still has to tell kinds apart (the Topics table's kind filter and
+ * the old per-kind links), even though the sidebar no longer lists them. This is
+ * the item set those assertions were written against.
+ */
+const LEGACY_ITEMS = [
+  { href: '/t/topic?content_type=weekly_brief', label: 'Weekly Briefs' },
+  { href: '/t/topic?content_type=lead_magnet', label: 'Evergreen' },
+  { href: '/t/topic?content_type=general', label: 'General' },
+  { href: '/t/draft', label: 'Drafts' },
+  { href: '/board/deal', label: 'Deal' },
+  { href: '/research', label: 'Overview' },
+  { href: '/research/topics', label: 'Topics' },
+  { href: '/research/sources', label: 'Sources' },
+  { href: '/research/settings', label: 'Settings' },
 ];
 
-/** Every nav item the sidebar would highlight at `location`, by label. */
+/** Every legacy item the sidebar would highlight at `location`, by label. */
 function highlighted(location: string): string[] {
-  const lit: string[] = [];
-  for (const entry of buildNav(SCHEMA)) {
-    const links = 'items' in entry ? entry.items : [entry];
-    for (const link of links) {
-      if (navIsActive(link.href, location)) lit.push(link.label);
-    }
-  }
-  return lit;
+  return LEGACY_ITEMS.filter((l) => navIsActive(l.href, location)).map((l) => l.label);
 }
+
+describe('the real sidebar (wireframe C01)', () => {
+  const leaves = buildNav().flatMap((e) => (isNavParent(e) ? e.items : [e]));
+  const lit = (location: string) => leaves.filter((l) => navIsActive(l.href, location)).map((l) => l.label);
+
+  it('lights exactly one row on each page it lists', () => {
+    expect(lit('/')).toEqual(['Dashboard']);
+    expect(lit('/content')).toEqual(['Content']);
+    expect(lit('/content/calendar')).toEqual(['Content']);
+    expect(lit('/content/42')).toEqual(['Content']);
+    expect(lit('/projects')).toEqual(['Projects']);
+    expect(lit('/projects/7')).toEqual(['Projects']);
+    expect(lit('/research')).toEqual(['Overview']);
+    expect(lit('/research/topics/9')).toEqual(['Topics']);
+  });
+});
 
 describe('a nav item is active for BOTH presentations of the thing it names', () => {
   it('lights the kind you are in on its table', () => {
@@ -141,11 +148,11 @@ describe('a nav item is active for BOTH presentations of the thing it names', ()
   it('lights a board-href Data item on its TABLE, the mirror of the same hole', () => {
     // News Item's href is /board/news_item (typeRoute), so this is the side the
     // Data group was blank on.
-    expect(highlighted('/t/news_item')).toEqual(['News Item']);
+    expect(highlighted('/t/deal')).toEqual(['Deal']);
   });
 
   it('lights a board-href Data item on its own board', () => {
-    expect(highlighted('/board/news_item')).toEqual(['News Item']);
+    expect(highlighted('/board/deal')).toEqual(['Deal']);
   });
 
   it('THE TRAP: a board of another kind lights THAT kind, never its sibling', () => {
@@ -154,9 +161,12 @@ describe('a nav item is active for BOTH presentations of the thing it names', ()
     expect(highlighted('/board/topic?content_type=lead_magnet')).toEqual(['Evergreen']);
   });
 
-  it('lights Topics on the all-kinds board, as it already does on the all-kinds table', () => {
-    expect(highlighted('/board/topic')).toEqual(['Topics']);
-    expect(highlighted('/t/topic')).toEqual(['Topics']);
+  it('lights Research Topics on its list and on one topic, and Overview only on its own page', () => {
+    expect(highlighted('/research/topics')).toEqual(['Topics']);
+    expect(highlighted('/research/topics/abc')).toEqual(['Topics']);
+    expect(highlighted('/research')).toEqual(['Overview']);
+    expect(highlighted('/research/sources')).toEqual(['Sources']);
+    expect(highlighted('/research/settings')).toEqual(['Settings']);
   });
 
   it('yields the all-kinds item to a kind on the board too', () => {

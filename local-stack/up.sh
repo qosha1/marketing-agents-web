@@ -57,5 +57,28 @@ fi
 CMD=up
 if [ $# -gt 0 ] && [ "${1#-}" = "$1" ]; then CMD="$1"; shift; fi
 
+# THE WRITER RELAY NEEDS A WEBHOOK, and there is none offline: /actions/generate-drafts
+# refuses with 503 when N8N_WRITER_WEBHOOK_URL is unset outside production, so "Start
+# content" on a topic with no draft could never be tried locally. Unless the caller
+# has set that variable, stand up local-stack/stub-writer.mjs on loopback and point
+# the frontend at it. It writes a draft to THIS stack's tenant and nothing else; the
+# live OGMC writer is never involved.
+STUB_PIDFILE="$FORK_ROOT/.local-stack/run/stub-writer.pid"
+case "$CMD" in
+  up)
+    if [ -z "${N8N_WRITER_WEBHOOK_URL:-}" ] && command -v node >/dev/null 2>&1; then
+      mkdir -p "$(dirname "$STUB_PIDFILE")" "$FORK_ROOT/.local-stack/logs"
+      STUB_PORT="${STUB_WRITER_PORT:-4399}"
+      if [ -f "$STUB_PIDFILE" ] && kill -0 "$(cat "$STUB_PIDFILE")" 2>/dev/null; then :; else
+        STUB_WRITER_PORT="$STUB_PORT" nohup node "$HERE/stub-writer.mjs" \
+          >"$FORK_ROOT/.local-stack/logs/stub-writer.log" 2>&1 &
+        echo $! >"$STUB_PIDFILE"
+      fi
+      export N8N_WRITER_WEBHOOK_URL="http://127.0.0.1:$STUB_PORT/"
+    fi ;;
+  down)
+    if [ -f "$STUB_PIDFILE" ]; then kill "$(cat "$STUB_PIDFILE")" 2>/dev/null || true; rm -f "$STUB_PIDFILE"; fi ;;
+esac
+
 exec "$API_DIR/tenant-starter/local-stack/stack.sh" "$CMD" \
   --config "$HERE/stack.env" "$@"

@@ -47,6 +47,8 @@ import { canonicalViewPath } from '@/lib/view-toggle';
  */
 const FACET_PARAMS: readonly string[] = [CONTENT_TYPE_ATTR];
 
+const EXACT_ONLY = ['/research'];
+
 export function navIsActive(href: string, activeHref?: string): boolean {
   if (!activeHref) return false;
 
@@ -69,5 +71,8 @@ export function navIsActive(href: string, activeHref?: string): boolean {
   if (FACET_PARAMS.some((param) => current.get(param))) return false;
 
   if (hrefPath === '/') return curPath === '/';
+  // /research is a page AND the parent of its siblings: exact only, or Overview
+  // would light up on Topics, Sources and Settings too.
+  if (EXACT_ONLY.includes(hrefPath)) return curPath === hrefPath;
   return curPath === hrefPath || curPath.startsWith(`${hrefPath}/`);
 }

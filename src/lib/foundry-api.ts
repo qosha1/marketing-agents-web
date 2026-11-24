@@ -29,6 +29,7 @@ import { ApiException } from '@startsimpli/api';
 
 import { api } from './api';
 import { heldVersion, rememberVersion, rememberVersions } from './record-version';
+import { getActiveProjectId, scopeFiltersFor, stampActiveProject } from './project-scope';
 
 // DRF PageNumberPagination envelope (matches UnifiedTable's page-number model).
 //
@@ -243,7 +244,27 @@ function withFilters(path: string, filters: EntityFilters | undefined): string {
   return `${path}${path.includes('?') ? '&' : '?'}${qs}`;
 }
 
+/**
+ * The active project (lib/project-scope.ts) narrows every list and count of a
+ * scoped type through the tenant's `?scope=` read. `scope` itself is the
+ * switcher's own source and is never narrowed, and a caller that passes its own
+ * `scope` filter keeps it.
+ */
+const SCOPE_TYPE = 'scope';
+let typesPromise: Promise<EntityTypeDef[]> | null = null;
+async function declaredType(key: string): Promise<EntityTypeDef | undefined> {
+  typesPromise ??= listTypes().then((r) => r.results ?? []);
+  try {
+    return (await typesPromise).find((t) => t.key === key);
+  } catch {
+    typesPromise = null;
+    return undefined;
+  }
+}
+
 export async function listEntities(type: string, page = 1, filters?: EntityFilters) {
+  const active = type === SCOPE_TYPE || filters?.scope ? null : getActiveProjectId();
+  if (active) filters = { ...scopeFiltersFor(await declaredType(type), active), ...filters };
   const res = await api.client.get<Paginated<EntityRecord>>(
     withFilters('api/v1/entities', filters),
     { params: { type, page } },
@@ -314,6 +335,9 @@ export async function createEntity(input: {
   name: string;
   data: Record<string, unknown>;
 }) {
+  // A record made while a project is active belongs to it (never for `scope` itself).
+  const active = input.entityType === SCOPE_TYPE ? null : getActiveProjectId();
+  if (active) input = { ...input, data: stampActiveProject(await declaredType(input.entityType), input.data, active) };
   // Same re-keying as updateEntity — a record created through the app must not be
   // born with a renamed attribute. See the wire-safety section below.
   const data = await wireSafeData(input.data);
