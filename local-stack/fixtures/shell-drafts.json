@@ -1,0 +1,107 @@
+{
+  "$note": "Drafts of the shell projects. A separate file because the seeder resolves {{id:topic:...}} against rows from earlier files, so these cannot share a file with their topics.",
+  "rows": [
+    {
+      "entity_type": "draft",
+      "external_id": "draft-shell-01",
+      "name": "Doha site visit: write-up",
+      "scope": "/field-notes",
+      "data": {
+        "status": "approved",
+        "lang": "en",
+        "content_type": "general",
+        "candidate_index": 0,
+        "chosen": true,
+        "blog": "# Doha site visit: write-up\n\nSeeded body for the project switcher fixtures.\n\nSecond paragraph.",
+        "linkedin": "Doha site visit: write-up (seeded).",
+        "seo": {
+          "title": "Doha site visit: write-up",
+          "meta": "Seeded."
+        },
+        "sources": [
+          {
+            "url": "https://example.gov.local/a",
+            "title": "Primary"
+          }
+        ],
+        "auto_checks": {
+          "sources_ok": true,
+          "length_ok": true
+        },
+        "judge_verdict": {
+          "score": 7,
+          "notes": "Seeded."
+        },
+        "topic_ref": "{{id:topic:topic-shell-04}}"
+      }
+    },
+    {
+      "entity_type": "draft",
+      "external_id": "draft-shell-02",
+      "name": "Riyadh supplier call: notes",
+      "scope": "/field-notes",
+      "data": {
+        "status": "ready_for_review",
+        "lang": "en",
+        "content_type": "lead_magnet",
+        "candidate_index": 0,
+        "chosen": true,
+        "blog": "# Riyadh supplier call: notes\n\nSeeded body for the project switcher fixtures.\n\nSecond paragraph.",
+        "linkedin": "Riyadh supplier call: notes (seeded).",
+        "seo": {
+          "title": "Riyadh supplier call: notes",
+          "meta": "Seeded."
+        },
+        "sources": [
+          {
+            "url": "https://example.gov.local/a",
+            "title": "Primary"
+          }
+        ],
+        "auto_checks": {
+          "sources_ok": true,
+          "length_ok": true
+        },
+        "judge_verdict": {
+          "score": 7,
+          "notes": "Seeded."
+        },
+        "topic_ref": "{{id:topic:topic-shell-05}}"
+      }
+    },
+    {
+      "entity_type": "draft",
+      "external_id": "draft-shell-03",
+      "name": "Acme launch FAQ",
+      "scope": "/acme/launch",
+      "data": {
+        "status": "approved",
+        "lang": "en",
+        "content_type": "general",
+        "candidate_index": 0,
+        "chosen": true,
+        "blog": "# Acme launch FAQ\n\nSeeded body for the project switcher fixtures.\n\nSecond paragraph.",
+        "linkedin": "Acme launch FAQ (seeded).",
+        "seo": {
+          "title": "Acme launch FAQ",
+          "meta": "Seeded."
+        },
+        "sources": [
+          {
+            "url": "https://example.gov.local/a",
+            "title": "Primary"
+          }
+        ],
+        "auto_checks": {
+          "sources_ok": true,
+          "length_ok": true
+        },
+        "judge_verdict": {
+          "score": 7,
+          "notes": "Seeded."
+        },
+        "topic_ref": "{{id:topic:topic-shell-02}}"
+      }
+    }
+  ]
+}
