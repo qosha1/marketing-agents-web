@@ -109,14 +109,6 @@ export interface TopicContextHeaderProps {
   defaultOpen?: boolean;
   /** Hide the collapse control entirely (the story page IS the topic). */
   alwaysOpen?: boolean;
-  /**
-   * `inline` is the draft page's strip (bd startsim-m7fdm.27): no box, no TOPIC
-   * label or status chip, no second title (the host's one title is the story's),
-   * no reviewer note, no Hide topic, and no topic-history card (it lives in the
-   * page's History). Angle, market chips and Edit topic stay. `card` is the story
-   * page, where this IS the topic, and is unchanged.
-   */
-  variant?: 'card' | 'inline';
 }
 
 export function TopicContextHeader({
@@ -126,9 +118,7 @@ export function TopicContextHeader({
   actions,
   defaultOpen = true,
   alwaysOpen = false,
-  variant = 'card',
 }: TopicContextHeaderProps) {
-  const inline = variant === 'inline';
   const [open, setOpen] = useState(defaultOpen);
   const cfg = useMemo(() => resolveReviewConfig(type ?? undefined, TOPIC_REVIEW_CONFIG), [type]);
   const qc = useQueryClient();
@@ -282,15 +272,13 @@ export function TopicContextHeader({
     }
   }
 
-  const showBody = inline || alwaysOpen || open || editing;
+  const showBody = alwaysOpen || open || editing;
 
-  const Root = inline ? 'div' : 'section';
   return (
-    <Root
+    <section
       aria-label="Topic"
-      className={inline ? 'space-y-2' : 'rounded-xl border border-border bg-neutral-50/70 px-4 py-3'}
+      className="rounded-xl border border-border bg-neutral-50/70 px-4 py-3"
     >
-      {!inline ? (
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 space-y-1">
           {backLink}
@@ -344,11 +332,6 @@ export function TopicContextHeader({
           ) : null}
         </div>
       </div>
-      ) : null}
-
-      {inline && !topic ? (
-        <p className="text-sm text-neutral-400">This draft is not linked to a topic.</p>
-      ) : null}
 
       {topic && showBody && editing ? (
         <div className="mt-3 space-y-3">
@@ -417,7 +400,7 @@ export function TopicContextHeader({
               ) : null}
             </div>
           ) : null}
-          {chips.length > 0 || (inline && canEdit) ? (
+          {chips.length > 0 ? (
             <div className="flex flex-wrap items-center gap-1.5">
               {chips.map((c) => (
                 <span
@@ -427,19 +410,9 @@ export function TopicContextHeader({
                   {c.attr === 'content_type' ? contentCategoryLabel(c.value) : c.value}
                 </span>
               ))}
-              {inline && canEdit ? (
-                <button
-                  type="button"
-                  onClick={startEditing}
-                  className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900"
-                >
-                  <Pencil className="h-3 w-3" />
-                  Edit topic
-                </button>
-              ) : null}
             </div>
           ) : null}
-          {notes && !inline ? (
+          {notes ? (
             <div className="rounded-md border-l-2 border-amber-300 bg-amber-50/70 px-3 py-2">
               <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-700">
                 What the reviewer asked for
@@ -456,7 +429,7 @@ export function TopicContextHeader({
           "Topic history", not "History": on /draft the rail carries the DRAFT's
           trail under that name a few hundred pixels away. Not mounted while
           editing — the form is the thing on screen then. */}
-      {topic && showBody && !editing && !inline ? (
+      {topic && showBody && !editing ? (
         <RecordHistorySection
           record={topic}
           title="Topic history"
@@ -468,7 +441,7 @@ export function TopicContextHeader({
           onFieldChange={setHistoryField}
         />
       ) : null}
-    </Root>
+    </section>
   );
 }
 

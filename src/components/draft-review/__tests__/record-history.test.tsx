@@ -116,17 +116,15 @@ describe('the rail’s History panel', () => {
     expect(list).toHaveBeenCalled();
   });
 
-  it('names fields from the DECLARED attribute names, in words, and leaves pipeline keys out', async () => {
+  it('names fields from the DECLARED attribute names, in words, never a camelised guess', async () => {
     renderRail({ historyOpen: true });
 
     const panel = await waitFor(() => {
       const found = screen.getByTestId('record-history-panel');
-      expect(found.textContent).toContain('Candidate');
+      expect(found.textContent).toContain('AI judge');
       return found;
     });
-    // judge_verdict is the removed AI judge's output (bd startsim-m7fdm.27: the
-    // history shows what a person changed, not pipeline plumbing).
-    expect(panel.textContent).not.toContain('AI judge');
+    expect(panel.textContent).toContain('Candidate');
     expect(panel.textContent).not.toContain('judgeVerdict');
     expect(panel.textContent).not.toContain('judge_verdict');
   });

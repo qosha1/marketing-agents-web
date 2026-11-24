@@ -65,10 +65,12 @@
  * and ? (legend) went with the sections they served.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useParams, useSearchParams } from 'next/navigation';
+import { useParams, useSearchParams, useRouter } from 'next/navigation';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import Link from 'next/link';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  Absence,
   Button,
   notify,
 } from '@startsimpli/ui';
@@ -80,12 +82,16 @@ import {
 import {
   FieldAttribution,
   StaleSaveDialog,
+  unifiedTextDiff,
   useConditionalSave,
   useFieldAuthors,
   type ConditionalSaveResult,
 } from '@startsimpli/ui/history';
 
+import { useAuth } from '@startsimpli/auth';
+
 import { readData, typeRoute } from '@/lib/board';
+import { wordCount } from '@startsimpli/ui';
 import { CONTENT_TYPE_KEY } from '@/lib/content';
 import { draftStatusLabel } from '@/lib/draft-status';
 import {
@@ -95,22 +101,20 @@ import {
   DRAFT_TYPE,
 } from '@/lib/topic-drafts';
 import { DraftReviewLayout } from '@/components/draft-review/DraftReviewLayout';
-import { DraftHeader } from '@/components/draft-review/DraftHeader';
 import {
   TopicBackLink,
   TopicContextHeader,
 } from '@/components/draft-review/TopicContextHeader';
-import { FROM_PARAM, returnTarget, safeReturnPath } from '@/lib/story-nav';
+import { draftHref, FROM_PARAM, returnTarget, safeReturnPath } from '@/lib/story-nav';
 import { HistoryRail } from '@/components/draft-review/HistoryRail';
-import { RecordHistorySection } from '@/components/record-history-section';
 import { attrLabel } from '@/components/record-columns';
 import { LanguageSwitcher } from '@/components/draft-review/LanguageSwitcher';
-import { DraftChannelEditor } from '@/components/draft-review/DraftChannelEditor';
+import { TrackedSection } from '@/components/draft-review/TrackedSection';
 import { ContentChannels } from '@/components/draft-review/ContentChannels';
-import { DraftSourcesChannel } from '@/components/draft-review/DraftSourcesChannel';
+import { SourcesTool } from '@/components/draft-review/SourcesTool';
 import { approvedSourceBasis, approvedSourceGap, SOURCE_TYPE } from '@/lib/approved-sources';
 import { isChannelId, type ChannelId } from '@/lib/draft-channels';
-import { useDraftQueue } from '@/lib/use-draft-queue';
+import { draftShortcut, shouldIgnoreShortcut } from '@/lib/keyboard';
 import {
   entityWriteClient,
   getEntity,
@@ -127,22 +131,12 @@ import {
   withTrackedText,
 } from '@/lib/track-changes';
 import type { AcceptResponseWire } from '@startsimpli/ui/track-changes';
-import {
-  draftSections,
-  draftStr,
-  formatSentDate,
-  readSourceMeta,
-  sectionValue,
-  STATUS_PILL_TONE,
-  words,
-  type SourceMetaEntry,
-} from '@/lib/draft-page-helpers';
 import { entityKey, primeEntity } from '@/lib/entity-cache';
 import { fieldAuthorsClient, revisionClient } from '@/lib/revisions';
 import { createWriteGate, restoreHooks } from '@/lib/restore-guard';
 import { rememberVersion } from '@/lib/record-version';
 import { actorEditsHref, renderNextLink } from '@/lib/activity-links';
-import { useRevisionLineage } from '@/lib/use-revision-lineage';
+import { revisedFrom, revisionChain } from '@/lib/review';
 import {
   coverageReason,
   coverageSummary,
@@ -152,6 +146,91 @@ import {
   type ParsedSource,
   type SourcesContainer,
 } from '@/lib/sources';
+
+/** A source's reviewer-only metadata (kept OUT of the `sources` string). */
+interface SourceMetaEntry {
+  id: string;
+  verified: boolean;
+}
+
+/**
+ * Status-pill tone per draft status, over the team's six (bd startsim-wn2p.2):
+ * the two review states are neutral/amber, approved is green, and the three
+ * terminal dispositions share a muted red-to-grey band because they all mean
+ * "this is not going out as it stands".
+ *
+ * A status the tenant declares but this map does not name falls back to neutral
+ * rather than rendering untoned — membership is the schema's, not this file's.
+ */
+const STATUS_PILL_TONE: Record<string, string> = {
+  ready_for_review: 'bg-neutral-100 text-neutral-600',
+  under_review: 'bg-amber-100 text-amber-700',
+  approved: 'bg-emerald-100 text-emerald-700',
+  // Published is the only state that is BOTH finished and still on the tracker,
+  // so it gets its own tone rather than sharing approved's — a reviewer scanning
+  // the list needs to see at a glance which approved pieces actually went out.
+  published: 'bg-sky-100 text-sky-700',
+  rejected: 'bg-red-100 text-red-700',
+  not_for_publication: 'bg-neutral-200 text-neutral-700',
+  for_repurpose: 'bg-violet-100 text-violet-700',
+};
+
+/** camelCase-aware read of a draft data value as a string. */
+/** "Oct 18" — the sent date beside the status chip; the raw value when unparseable. */
+function formatSentDate(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function draftStr(data: EntityRecord['data'], name: string): string {
+  const v = readData(data, name);
+  return v == null ? '' : String(v);
+}
+
+/** The current value of a section by key, or undefined when absent. */
+function sectionValue(sections: DocSection[], key: string): unknown {
+  return sections.find((s) => s.key === key)?.value;
+}
+
+/**
+ * Editable document sections for a draft: blog/linkedin/seo. Sources are NOT a
+ * DocumentEditor section anymore — they're the dedicated Sources channel tool
+ * (parsed rows + format-preserving round-trip), so they're managed separately.
+ */
+function draftSections(draft: EntityRecord): DocSection[] {
+  const seo = readData(draft.data, 'seo');
+  const seoObj =
+    seo && typeof seo === 'object' && !Array.isArray(seo) ? (seo as Record<string, unknown>) : {};
+  return [
+    { key: 'blog', label: 'Blog post', kind: 'markdown', value: draftStr(draft.data, 'blog') },
+    { key: 'linkedin', label: 'LinkedIn post', kind: 'text', value: draftStr(draft.data, 'linkedin') },
+    { key: 'seo', label: 'SEO', kind: 'structured', value: seoObj },
+  ];
+}
+
+/** The reviewer's stored per-source metadata array ([] when absent). */
+function readSourceMeta(data: EntityRecord['data'] | undefined): SourceMetaEntry[] {
+  const m = readData(data, 'source_meta');
+  return Array.isArray(m)
+    ? (m as unknown[])
+        .filter((e): e is Record<string, unknown> => !!e && typeof e === 'object')
+        .map((e) => ({ id: String(e.id ?? ''), verified: !!e.verified }))
+        .filter((e) => e.id)
+    : [];
+}
+
+/**
+ * Small word count for the channel-tab badges — the SHARED counter, not a local
+ * one (bd startsim-wn2p.28).
+ *
+ * This was its own `split(/\s+/)`, so on the Chinese drafts the tab read
+ * "Brief 16w" while the validation rail beside it read 524 words. Whitespace
+ * counting sees only the Latin fragments embedded in Chinese prose.
+ */
+function words(s: string): number {
+  return wordCount(s);
+}
+
 
 export default function DraftPage() {
   const params = useParams<{ draftId: string }>();
@@ -247,11 +326,27 @@ function DraftEditorScreen({
     const q = searchParams.get('channel');
     return isChannelId(q) ? q : 'brief';
   });
-  // History is a drawer over the document (bd startsim-m7fdm.27), so opening it
-  // from elsewhere (a field's "edited by" line, the stale-save dialog) needs no
-  // scrolling: it is on screen the moment it opens.
+  // Below `lg` the History rail is stacked under the content, so opening History
+  // from elsewhere (a field's "edited by" line, the stale-save dialog) has to
+  // bring it into view or nothing visible happens. On `lg` it is already beside
+  // the content, sticky, and scrolling would only yank the page.
+  //
+  // The rail is the LAST thing on the page, so when History opens the page is not
+  // yet tall enough to bring its header to the top: the trail mounts and loads
+  // after the click. So the scroll is repeated while the rail grows, for a short
+  // window, rather than fired once against a page that cannot scroll that far.
   const railRef = useRef<HTMLDivElement | null>(null);
-  const revealHistory = () => {};
+  const revealHistory = () => {
+    if (typeof window === 'undefined' || window.matchMedia?.('(min-width: 1024px)').matches) return;
+    const el = railRef.current;
+    if (!el) return;
+    const toTop = () => el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    requestAnimationFrame(toTop);
+    if (typeof ResizeObserver === 'undefined') return;
+    const grow = new ResizeObserver(toTop);
+    grow.observe(el);
+    window.setTimeout(() => grow.disconnect(), 2500);
+  };
 
   // WHERE "BACK" GOES (bd startsim-z384k). The 2026-09-08 meeting asked for back
   // navigation to return to the TOPIC TABLE with its scope intact, so the
@@ -303,8 +398,6 @@ function DraftEditorScreen({
   /** The rail's History narrowed to one field (`?field=`), opened from a field's
    *  "edited by" line. Null shows every field. */
   const [historyField, setHistoryField] = useState<string | null>(null);
-  const [topicHistoryOpen, setTopicHistoryOpen] = useState(false);
-  const [topicHistoryField, setTopicHistoryField] = useState<string | null>(null);
 
   // Refs mirror the latest local state so any async persist merges the freshest of
   // every field (sections + sources) into the full data blob,
@@ -337,15 +430,49 @@ function DraftEditorScreen({
   });
   const allDrafts = useMemo(() => draftsQuery.data ?? [], [draftsQuery.data]);
 
-  // Review queue: [ / ] keys and the auto-advance after Mark sent (lib/use-draft-queue.ts).
-  const { router, goToDraft, nextDraft } = useDraftQueue(allDrafts, draftId);
+  // Review QUEUE (same fast-review polish as the topic board): step through every
+  // draft with prev/next + a counter, and AUTO-ADVANCE to the next after a decision,
+  // so a reviewer rips through the publish queue instead of bouncing back to a table.
+  const router = useRouter();
+  const queueIndex = useMemo(
+    () => allDrafts.findIndex((d) => String(d.id) === String(draftId)),
+    [allDrafts, draftId],
+  );
+  const prevDraft = queueIndex > 0 ? allDrafts[queueIndex - 1] : null;
+  const nextDraft =
+    queueIndex >= 0 && queueIndex + 1 < allDrafts.length ? allDrafts[queueIndex + 1] : null;
+  function goToDraft(d: EntityRecord | null) {
+    // Carry the return path along the queue (bd startsim-z384k) — stepping to
+    // the next draft must not quietly lose the table scope the reviewer came
+    // from, or "back" lands somewhere they never were.
+    if (d) router.push(draftHref(d.id, safeReturnPath(searchParams.get(FROM_PARAM))));
+  }
 
-  // Revision lineage of the removed AI rewrite and its "Compare to previous" diff.
-  const { chain, latestChild, parentId, parentQuery, blogDiff } = useRevisionLineage(
-    draft,
-    allDrafts,
-    String(sectionValue(sections, 'blog') ?? ''),
-    showDiff,
+  const chain = useMemo(() => revisionChain(draft, allDrafts), [draft, allDrafts]);
+  const children = useMemo(
+    () => allDrafts.filter((d) => revisedFrom(d) === String(draft.id)),
+    [allDrafts, draft.id],
+  );
+  const latestChild = children.length
+    ? children.reduce((a, b) => (a.id > b.id ? a : b))
+    : null;
+  const parentId = revisedFrom(draft);
+
+  // Parent draft (for the "Compare to previous" blog diff) — fetched only when the
+  // reviewer opens the diff on a revised draft.
+  const parentQuery = useQuery({
+    queryKey: entityKey(parentId),
+    queryFn: () => getEntity(parentId),
+    enabled: !!parentId && showDiff,
+  });
+  const parentBlog = parentQuery.data ? String(readData(parentQuery.data.data, 'blog') ?? '') : '';
+  const thisBlog = String(sectionValue(sections, 'blog') ?? '');
+  // `blog.md` explicitly: the shared helper is generic over any record field and
+  // defaults to `value.txt`, while the DiffViewer prints the path in its header
+  // and this diff is a blog body.
+  const blogDiff = useMemo(
+    () => unifiedTextDiff(parentBlog, thisBlog, 'blog.md'),
+    [parentBlog, thisBlog],
   );
 
   // THE APPROVED-SOURCE LIST IS TENANT DATA, not a constant (bd startsim-768w.18.14):
@@ -637,6 +764,39 @@ function DraftEditorScreen({
     }
   }
 
+  // Mirror the queue step so the key listener binds ONCE yet always calls the
+  // freshest handler — the queue churns as drafts load. Synced after each commit,
+  // like the persistence mirrors above.
+  const queueByRef = useRef<(delta: 1 | -1) => void>(() => {});
+  useEffect(() => {
+    queueByRef.current = (delta) => goToDraft(delta === 1 ? nextDraft : prevDraft);
+  });
+
+  // [ / ] step the queue. Bound to the document because the reviewer's focus is
+  // normally in the content pane — and guarded so a bracket typed into the blog
+  // editor never leaves the draft (see shouldIgnoreShortcut).
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (
+        shouldIgnoreShortcut({
+          key: e.key,
+          metaKey: e.metaKey,
+          ctrlKey: e.ctrlKey,
+          altKey: e.altKey,
+          target: e.target,
+        })
+      ) {
+        return;
+      }
+      const action = draftShortcut(e.key);
+      if (!action) return; // not ours — leave the event alone
+      queueByRef.current(action.delta);
+      e.preventDefault();
+    }
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, []);
+
   // --- Sources tool mutations (persist immediately via the full-blob merge) ---
   function persistSources(nextItems: ParsedSource[], nextMeta: SourceMetaEntry[]) {
     setSourceItems(nextItems);
@@ -727,38 +887,65 @@ function DraftEditorScreen({
   // two-pane workspace below is untouched and keeps its full width, which is the
   // whole reason design gate startsim-w4txa chose full-page over a drawer.
   const header = (
-    <DraftHeader
-      back={<TopicBackLink href={back.href} label={back.label} />}
-      title={draft.name || draftTitle(draft)}
-      titleMeta={attribution('name', { nameColumn: true })}
-      languages={<LanguageSwitcher draft={draft} canEdit={canEdit} />}
-      historyOpen={historyOpen}
-      onHistory={() => setHistoryOpen((o) => !o)}
-      status={
-        <>
-          {status ? (
-            <span
-              className={`rounded-full px-2.5 py-0.5 text-xs ${
-                STATUS_PILL_TONE[status] ?? 'bg-neutral-100 text-neutral-600'
-              }`}
+    <div className="space-y-3">
+      <TopicContextHeader
+        topic={topic}
+        type={topicType}
+        backLink={<TopicBackLink href={back.href} label={back.label} />}
+      />
+      <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="min-w-0 space-y-1">
+        <h1 className="text-xl font-semibold">{draft.name || draftTitle(draft)}</h1>
+        {attribution('name', { nameColumn: true })}
+        <LanguageSwitcher draft={draft} canEdit={canEdit} />
+      </div>
+      <div className="flex max-w-full shrink-0 flex-wrap items-center gap-2">
+        {allDrafts.length > 0 && queueIndex >= 0 ? (
+          <div className="flex items-center gap-1 rounded-md border border-border bg-neutral-50 px-1 text-xs text-neutral-500">
+            <button
+              onClick={() => goToDraft(prevDraft)}
+              disabled={!prevDraft}
+              className="rounded p-1 hover:bg-neutral-200 disabled:opacity-30"
+              aria-label="Previous draft"
+              title="Previous draft ( [ )"
             >
-              {draftStatusLabel(status)}
-              {/* Sent is not a status, it is the sent_at date (bd startsim-67qw0). */}
-              {isSent ? ` · Sent ${formatSentDate(draftStr(draft.data, 'sent_at'))}` : ''}
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <span className="tabular-nums">
+              {queueIndex + 1} / {allDrafts.length}
             </span>
-          ) : null}
-          {status ? attribution('status') : null}
-          {candidateIndex > 0 ? (
-            <span className="rounded-full border border-border bg-neutral-50 px-2.5 py-0.5 text-xs text-neutral-500">
-              candidate #{candidateIndex}
-              {siblingCount > 1 ? ` of ${siblingCount}` : ''}
-            </span>
-          ) : null}
-        </>
-      }
-    >
-      <TopicContextHeader variant="inline" topic={topic} type={topicType} />
-    </DraftHeader>
+            <button
+              onClick={() => goToDraft(nextDraft)}
+              disabled={!nextDraft}
+              className="rounded p-1 hover:bg-neutral-200 disabled:opacity-30"
+              aria-label="Next draft"
+              title="Next draft ( ] )"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
+        ) : null}
+        {status ? (
+          <span
+            className={`rounded-full px-2.5 py-0.5 text-xs ${
+              STATUS_PILL_TONE[status] ?? 'bg-neutral-100 text-neutral-600'
+            }`}
+          >
+            {draftStatusLabel(status)}
+            {/* Sent is not a status, it is the sent_at date (bd startsim-67qw0). */}
+            {isSent ? ` · Sent ${formatSentDate(draftStr(draft.data, 'sent_at'))}` : ''}
+          </span>
+        ) : null}
+        {status ? attribution('status') : null}
+        {candidateIndex > 0 ? (
+          <span className="rounded-full border border-border bg-neutral-50 px-2.5 py-0.5 text-xs text-neutral-500">
+            candidate #{candidateIndex}
+            {siblingCount > 1 ? ` of ${siblingCount}` : ''}
+          </span>
+        ) : null}
+      </div>
+      </div>
+    </div>
   );
 
   const content = (
@@ -787,23 +974,28 @@ function DraftEditorScreen({
             // Opens in the editor with the caret in the text: zero clicks to type
             // (bd startsim-whwxd.17). Only the channel on screen takes focus.
             content: (
-              <DraftChannelEditor
-                attribution={attribution('blog')}
-                actorSub={me?.sub}
-                pending={editorPending}
-                field="blog"
-                label="Blog post"
-                language="markdown"
-                value={blogValue}
-                stored={stored.blog}
-                version={save.version ?? null}
-                client={tcClient}
-                canEdit={canEdit}
-                runAccept={runAccept}
-                autoFocus={channel === 'brief'}
-                onChange={(v) => onChange('blog', v)}
-                onSave={(v) => saveSections([{ key: 'blog', label: 'Blog post', kind: 'markdown', value: v }])}
-              />
+              <div className="space-y-2">
+                {attribution('blog')}
+                {me ? (
+                  <TrackedSection
+                    field="blog"
+                    label="Blog post"
+                    language="markdown"
+                    value={blogValue}
+                    stored={stored.blog}
+                    version={save.version ?? null}
+                    client={tcClient}
+                    currentActorSub={me.sub}
+                    canEdit={canEdit}
+                    runAccept={runAccept}
+                    autoFocus={channel === 'brief'}
+                    onChange={(v) => onChange('blog', v)}
+                    onSave={(v) => saveSections([{ key: 'blog', label: 'Blog post', kind: 'markdown', value: v }])}
+                  />
+                ) : (
+                  editorPending
+                )}
+              </div>
             ),
           },
           {
@@ -811,23 +1003,28 @@ function DraftEditorScreen({
             label: 'LinkedIn',
             badge: linkedinValue ? `${words(linkedinValue)}w` : undefined,
             content: (
-              <DraftChannelEditor
-                attribution={attribution('linkedin')}
-                actorSub={me?.sub}
-                pending={editorPending}
-                field="linkedin"
-                label="LinkedIn post"
-                language="plain"
-                value={linkedinValue}
-                stored={stored.linkedin}
-                version={save.version ?? null}
-                client={tcClient}
-                canEdit={canEdit}
-                runAccept={runAccept}
-                autoFocus={channel === 'linkedin'}
-                onChange={(v) => onChange('linkedin', v)}
-                onSave={(v) => saveSections([{ key: 'linkedin', label: 'LinkedIn post', kind: 'text', value: v }])}
-              />
+              <div className="space-y-2">
+                {attribution('linkedin')}
+                {me ? (
+                  <TrackedSection
+                    field="linkedin"
+                    label="LinkedIn post"
+                    language="plain"
+                    value={linkedinValue}
+                    stored={stored.linkedin}
+                    version={save.version ?? null}
+                    client={tcClient}
+                    currentActorSub={me.sub}
+                    canEdit={canEdit}
+                    runAccept={runAccept}
+                    autoFocus={channel === 'linkedin'}
+                    onChange={(v) => onChange('linkedin', v)}
+                    onSave={(v) => saveSections([{ key: 'linkedin', label: 'LinkedIn post', kind: 'text', value: v }])}
+                  />
+                ) : (
+                  editorPending
+                )}
+              </div>
             ),
           },
           {
@@ -853,22 +1050,61 @@ function DraftEditorScreen({
             badge: `${sourceItems.length}`,
             warn: coverageReason(sourcesCoverage) ?? undefined,
             content: (
-              <DraftSourcesChannel
-                attribution={attribution('sources')}
-                basis={basis}
-                sourceGap={sourceGap}
-                onRetry={() => {
-                  sourceRecordsQuery.refetch();
-                }}
-                onOpenApproved={() => router.push(sourceTypeRoute)}
-                items={sourceItems}
-                verified={verifiedMap}
-                today={today}
-                onAdd={addSource}
-                onRemove={removeSource}
-                onToggleVerify={toggleVerify}
-                canEdit={canEdit}
-              />
+              <div className="space-y-3">
+                {attribution('sources')}
+                {/* The badges' basis, when there isn't one. Loading is a not-yet
+                    (a quiet line); a genuine empty and a failed read are absences
+                    with different fixes — so they are different cards, and neither
+                    is a 0, a green tick or a verdict about this draft. */}
+                {sourceGap ? (
+                  basis.state === 'loading' ? (
+                    <p className="text-sm text-muted-foreground">
+                      {sourceGap.title} {sourceGap.description}
+                    </p>
+                  ) : (
+                    <Absence
+                      tier="card"
+                      title={sourceGap.title}
+                      description={sourceGap.description}
+                      why="Which sources count as approved is decided by the tenant’s own Approved Source records. When that list is unavailable nothing is badged, rather than badged against a different list."
+                      // Retrying is a read, so every reader gets it; going to add
+                      // approved sources is an editor's errand (bd startsim-sa7vk).
+                      action={
+                        !sourceGap.retryable && !canEdit
+                          ? undefined
+                          : sourceGap.retryable
+                          ? {
+                              label: 'Try again',
+                              onClick: () => {
+                                sourceRecordsQuery.refetch();
+                              },
+                            }
+                          : {
+                              label: 'Open Approved Source',
+                              // typeRoute, not a literal: `source` declares an
+                              // enum, so the sidebar sends people to /board/…
+                              // and a hardcoded /t/… would land them somewhere
+                              // the nav never goes.
+                              onClick: () => router.push(sourceTypeRoute),
+                            }
+                      }
+                    />
+                  )
+                ) : null}
+                <SourcesTool
+                  items={sourceItems}
+                  verified={verifiedMap}
+                  // null — NOT [] — when there is no basis: an empty allow-list
+                  // would badge every row "unverified", which is a verdict we
+                  // have not earned. The tool renders an absence instead.
+                  approvedHosts={basis.state === 'ready' ? basis.hosts : null}
+                  today={today}
+                  onAdd={addSource}
+                  onRemove={removeSource}
+                  onToggleVerify={toggleVerify}
+                  canEdit={canEdit}
+                />
+              </div>
             ),
           },
         ]}
@@ -878,20 +1114,6 @@ function DraftEditorScreen({
 
   const rail = (
     <HistoryRail
-      bare
-      topicHistory={
-        topic ? (
-          <RecordHistorySection
-            record={topic}
-            title="Topic history"
-            recordLabel="this topic"
-            open={topicHistoryOpen}
-            onOpenChange={setTopicHistoryOpen}
-            field={topicHistoryField}
-            onFieldChange={setTopicHistoryField}
-          />
-        ) : null
-      }
       canEdit={canEdit}
       revisions={revisions}
       historyOpen={historyOpen}
@@ -945,8 +1167,6 @@ function DraftEditorScreen({
         header={header}
         content={content}
         rail={rail}
-        railOpen={historyOpen}
-        onRailClose={() => setHistoryOpen(false)}
         decisionBar={decisionBar}
         railRef={railRef}
       />
