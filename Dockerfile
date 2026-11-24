@@ -19,10 +19,10 @@
 FROM node:20-slim AS build
 WORKDIR /app
 RUN corepack enable && corepack prepare pnpm@10.33.1 --activate
-COPY package.json ./
-# --no-frozen-lockfile so a fresh fork (no committed pnpm-lock.yaml) still builds;
-# a lockfile, when present, is honored + updated in place.
-RUN pnpm install --no-frozen-lockfile
+COPY package.json pnpm-lock.yaml ./
+# Frozen: the image builds from the committed lockfile so @startsimpli/* versions
+# never float between builds. A forked app must commit its pnpm-lock.yaml.
+RUN pnpm install --frozen-lockfile
 COPY . .
 # Empty default => runtime hostname derivation (resolveAppSlug). Override only
 # for a standalone single-tenant build (--build-arg NEXT_PUBLIC_APP_SLUG=<slug>).
